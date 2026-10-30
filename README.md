@@ -6,7 +6,7 @@ Exam Forge is a SlideMage plugin for creating and managing exam questions for a 
 
 **The bank contains answer keys and rationales.** Keep its folder private and back it up securely. Choose a private bank folder before saving anything. SlideMage remembers it by the deck's absolute path; a moved deck or a missing bank folder prompts you to choose again. Folders inside deck output or an unignored project directory require confirmation because questions and answers could be shared accidentally.
 
-Create questions with answers and rationales, a learning objective, topic, difficulty and use. Phase 1 review requires at least two answers and exactly one correct answer. Source slides are selected by view and language. The sidebar's **Write a question for this slide…** uses the slide in focus when pressed.
+Create questions with answers and rationales, a learning objective, topic, difficulty and use. Revision-quiz review requires at least two answers and exactly one correct answer. ELP review requires five options with one to four correct. Use difficulty `easy` or `hard` for ELP assembly. Source slides are selected by view and language. The sidebar's **Write a question for this slide…** uses the slide in focus when pressed.
 
 Every saved edit creates a draft revision, including edits to images or their alternative text. Reviewed revisions and their media stay available in the bank. Conflicts keep your typed fields and offer to save them as a separate question.
 
@@ -14,7 +14,21 @@ Source checks run in the background on open, on **Check now**, and before status
 
 **Export Moodle XML…** exports reviewed revision-quiz questions matching the current list filters. It excludes ELP questions, drafts and retired questions. Images are read from the bank and verified against their SHA-256 hashes. Question and answer text is plain text; inline mathematics uses `\( ... \)`. In Moodle, import using the Moodle XML format with its MathJax filter enabled. **Moodle import has yet to be verified**, including media, mathematics and grading.
 
-Phase 1 covers the question bank, source review and Moodle XML export. It does not generate ELP exams or Moodle quizzes, track teaching sessions, or draft questions with AI; the exam, sessions and quiz tabs are not implemented.
+## ELP exams and sessions
+
+The window has **Bank**, **Exam** and **Sessions** tabs. In Sessions, refresh after a presentation ends, or add a named session. Presentation logging starts on first opening a bank, after plugin activation, and continues while the window is hidden. Switching bank folders or shutting down closes its subscription. Without a `presenter.events` provider the Sessions tab explains that logging is unavailable. An optional cached `course.sessions` schedule labels presentations and supplies estimated slide coverage.
+
+Attach a recording and SRT, VTT or plain-text transcript by path. Files remain at their original locations. **Open recording** uses the system player; seek to the displayed range there. Set a known presentation monotonic time and its corresponding recording seconds for manual sync. Propose passages with configurable padding, inspect the transcript and time range, then explicitly confirm each passage. Plain-text proposals need start and end times. Changing an attachment or sync point clears confirmations; new proposals require confirmation. Tick sessions to include them in taught evidence; all are included initially.
+
+On Exam, set exact topic or objective counts, easy/hard counts, minutes, scoring rules, seed and recent-exam avoidance. Slides/Talk start from this deck's saved default; **Save these ticks as deck default** persists the current ticks. Both ticks mean either source can cover an item; neither tick removes the taught-only limit. Without a log, slide coverage uses the schedule and asks you to confirm or adjust the estimated last taught slide position. Both exclusion lists show their reasons. Infeasible blueprints keep their reported constraints; they are never relaxed. Swap from the eligible pool, then approve after the source check and changed-question list.
+
+Approval opens the second issuing step. **Freeze approved exam** checks fresh sources again; changed sources stop issuing. Each issue creates a unique `*.manifest.json` in the bank folder. The frozen blueprint includes the seed, taught options, session IDs and confirmed cut-off. Open an issued manifest to inspect it or save its documents again. Later bank edits do not alter it.
+
+The document save dialogs write two self-contained HTML files: an exam entry copy and a **private key with answers, rationales and the scoring sheet**. Math remains copyable source, not typeset. The item editor's teaching-assistant note carries shared stems, exclusions or fixed option order. **This note appears in the exam file: never put answers in it.** It is frozen verbatim and ignored by Moodle XML. Nothing is inferred from the key into the note.
+
+**Corrections…** opens a separate sheet that appends item, change, reason and time to the manifest's `*.corrections.jsonl` journal. It leaves the manifest and generated documents unchanged. One sheet per journal and a file lock serialize writers; a busy journal asks you to retry. No student scoring, in-app media player, Moodle quiz generator or AI drafting is included.
+
+Real-window dark-theme and player checks, frozen-build end-to-end operation, Moodle import (J2) and teaching-assistant document approval (J4) remain manual release checks.
 
 ## Development
 

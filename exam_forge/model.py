@@ -70,6 +70,7 @@ class Item:
     source_changed: bool = False  # Current item-level check, not revision content.
     origin: Origin = field(default_factory=Origin)
     media: tuple[Media, ...] = ()
+    assistant_note: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", tuple(self.options))

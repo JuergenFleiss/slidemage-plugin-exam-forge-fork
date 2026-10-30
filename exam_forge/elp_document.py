@@ -13,8 +13,8 @@ software? If typesetting is required, choose a renderer only after reviewing its
 bundled size, licence and copy/paste behaviour; none is silently included here.
 
 Item, option and media order is preserved; the exam software handles shuffling.
-Item/Manifest currently have no shared-stem, question-exclusion or fixed-option-
-order fields: no such marks are inferred from prose or the arbitrary blueprint.
+Author-written assistant notes mark shared stems, exclusions and fixed option
+order. Notes are public exam content; no marks are inferred from the key.
 Images are appended to stems, as in Moodle XML. Only PNG, JPEG, GIF and WebP are
 embedded, with verified snapshot hashes; SVG is refused rather than carrying
 potential scripts or external references into an allegedly self-contained file.
@@ -97,6 +97,9 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
          f'{_text(item["difficulty"])}</p>'),
         f'<div class="text stem">{_text(item["stem"])}</div>', *images, '<ol type="A">',
     ]
+    if item.get('assistant_note'):
+        parts.insert(-1, '<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
+                     + _text(item['assistant_note']) + '</aside>')
     for option in item['options']:
         parts.append(f'<li><div class="text option">{_text(option["text"])}</div>')
         if key:

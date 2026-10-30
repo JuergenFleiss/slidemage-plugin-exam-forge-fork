@@ -4,14 +4,28 @@
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
-from PySide6.QtCore import Qt
+
 from PySide6.QtGui import QImageReader, QPalette
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QScrollArea, QTableWidget)
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMessageBox,
+    QPlainTextEdit,
+    QScrollArea,
+    QTableWidget,
+)
+
 from ..bank import BankError
 from ..elp import check_elp
 from ..model import Item, Option, check_phase1
 from .source_picker import SourcePicker
+
 
 def accent_color(widget, amber=False):
     dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
@@ -57,13 +71,17 @@ class ItemEditor:
         self.stem.setPlaceholderText(r"Plain text; inline math: \( ... \)")
         self.stem.setMaximumHeight(135)
         body.addWidget(host.Field("Question text", self.stem))
+        self.assistant_note = QPlainTextEdit()
+        self.assistant_note.setMaximumHeight(85)
+        self.assistant_note.setPlaceholderText("Shared stem, exclusions or fixed option order. This appears in the exam file; do not put answers here.")
+        body.addWidget(host.Field("Teaching assistant note · appears in the exam file", self.assistant_note))
         self.options = QTableWidget(0, 3)
         self.options.setHorizontalHeaderLabels(["Correct", "Answer", "Rationale"])
         self.options.horizontalHeader().setStretchLastSection(True)
         self.options.setColumnWidth(0, 65)
         self.options.setColumnWidth(1, 230)
         self.options.setMinimumHeight(195)
-        body.addWidget(host.Field("Answer options · phase 1: exactly one correct", self.options))
+        body.addWidget(host.Field("Answer options · revision: one correct; ELP: five options, one to four correct", self.options))
         row = QHBoxLayout()
         add = host.Button("Add option", compact=True)
         add.clicked.connect(lambda: self.add_option())
@@ -121,7 +139,8 @@ class ItemEditor:
                                   correct.isChecked(), self.options.cellWidget(row, 2).toPlainText()))
         return replace(self.current, stem=self.stem.toPlainText(), options=tuple(options),
                        objective=self.objective.text(), topic=self.topic.text(), difficulty=self.difficulty.text(),
-                       use=self.use.currentData(), sources=self.links, media=self.attachments)
+                       use=self.use.currentData(), sources=self.links, media=self.attachments,
+                       assistant_note=self.assistant_note.toPlainText())
 
     def dirty(self):
         return self.current is not None and (self.new_item or self.candidate() != self.baseline)
@@ -143,6 +162,7 @@ class ItemEditor:
         self.current, self.new_item = item, new
         self.links, self.attachments = item.sources, item.media
         self.stem.setPlainText(item.stem)
+        self.assistant_note.setPlainText(item.assistant_note)
         self.options.setRowCount(0)
         for option in item.options:
             self.add_option(option)
@@ -258,7 +278,7 @@ class ItemEditor:
         self.source_list.addItems([f"{s.slide_id} · {s.version or 'current'} · {s.view} · {s.language}" for s in self.links])
 
     def pick_source(self):
-        from .window import fresh_deck
+        from .work import fresh_deck
         deck = self.deck
         self.set_busy(True)
 
@@ -282,7 +302,7 @@ class ItemEditor:
         row = self.source_list.currentRow()
         if not 0 <= row < len(self.links):
             return
-        from .window import fresh_deck
+        from .work import fresh_deck
         link, deck = self.links[row], self.deck
 
         def work():

@@ -9,7 +9,8 @@ from ..bank import Bank, BankError
 from ..folder import remembered_folder
 from ..sources import link_slide
 from .first_use import choose_bank
-from .window import BankWindow, fresh_deck
+from .window import BankWindow
+from .work import fresh_deck
 
 SIDEBAR_KEY = "bank"
 
@@ -48,11 +49,12 @@ class Controller:
         else:
             if not window.bank.folder.is_dir() or not (window.bank.folder / "bank.json").is_file():
                 try:
-                    bank = choose_bank(self.host, deck)
-                    if bank is None:
+                    if window.busy:
                         return None
-                    window.bank = bank
-                    window.folder_label.setText(str(bank.folder))
+                    bank = choose_bank(self.host, deck)
+                    if bank is None or not window.may_leave():
+                        return None
+                    window.switch_bank(bank)
                 except (OSError, BankError, ValueError) as exc:
                     self.host.show_message(str(exc), error=True)
                     return None

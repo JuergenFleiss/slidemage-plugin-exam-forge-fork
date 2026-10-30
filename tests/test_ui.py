@@ -239,7 +239,7 @@ def test_export_includes_bank_media_and_excludes_elp_draft_and_retired(env, tmp_
     window.reload()
     path = tmp_path / "export.xml"
     path.write_text("old content")
-    monkeypatch.setattr("exam_forge.ui.window.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    monkeypatch.setattr("exam_forge.ui.bank_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     window.export_button.click()
     host.drain()
     xml = path.read_bytes()
@@ -409,7 +409,7 @@ def test_export_rechecks_stale_list(env, tmp_path, monkeypatch):
     reviewed = bank.get(item.id)
     bank.save(replace(reviewed, stem="Changed elsewhere", status="draft", use="elp"))
     path = tmp_path / "out.xml"
-    monkeypatch.setattr("exam_forge.ui.window.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    monkeypatch.setattr("exam_forge.ui.bank_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     window.export()
     host.drain()
     assert not path.exists()
@@ -441,7 +441,7 @@ def test_export_warns_about_newly_changed_source(env, tmp_path, monkeypatch):
     notices = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: notices.append(a[2]) or QMessageBox.StandardButton.No)
     path = tmp_path / "out.xml"
-    monkeypatch.setattr("exam_forge.ui.window.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    monkeypatch.setattr("exam_forge.ui.bank_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     window.export()
     host.drain()
     assert notices and item.stem in notices[0] and "s1" in notices[0]
