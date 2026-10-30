@@ -48,3 +48,9 @@ v0.4.0 (2026-10-30, focused exam assembly): Assemble exams from all reviewed ELP
 
 NEW: The window has Bank and Exam tabs.
 - Remove presentation logging and the taught-only filter; retain blueprint exclusions and source checks.
+
+
+v0.4.1 (2026-10-30, AI host contract): Use the direct host AI chat call.
+
+NEW: AI drafting uses the host AI chat interface.
+- Request AI chat through the host and handle AiChatError.

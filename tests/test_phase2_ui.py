@@ -29,9 +29,9 @@ class PhaseHost(GuiHost):
         self.last_deck_text = deck.text
         return super().deck_slides(deck, view, language)
 
-    def service(self, *args):
+    def ai_chat(self):
         assert get_ident() == self.ui_thread
-        return super().service(*args)
+        return super().ai_chat()
 
     def slide_source(self, ref):
         assert get_ident() != self.ui_thread
@@ -60,7 +60,6 @@ def phase(app, tmp_path, monkeypatch):
         folder.mkdir()
         bank = open_chosen_folder(host, deck, folder)
         exam_forge.activate(host)
-        # FakeHost refuses service resolution during activation (D4).
         host.finish_activation()
         controller = host.commands["exam-forge.open"].run.__self__
         window = controller.open(deck)

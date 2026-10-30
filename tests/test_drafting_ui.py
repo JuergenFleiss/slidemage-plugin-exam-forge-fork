@@ -8,7 +8,7 @@ from threading import get_ident
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QPlainTextEdit, QPushButton
-from slidemage.plugin_api import MediaDescription, ServiceError, SlideSource
+from slidemage.plugin_api import AiChatError, MediaDescription, SlideSource
 
 from exam_forge.model import Item, Option
 from exam_forge.drafting import DEFAULT_GUIDANCE
@@ -36,7 +36,7 @@ class Chat:
 
 def enable(host):
     chat = Chat(host)
-    host.offer("ai.chat", 1, chat)
+    host.chat = chat
     page = host.settings_tabs["Exam Forge"]()
     page.findChild(QCheckBox).setChecked(True)
     return chat, page
@@ -76,7 +76,7 @@ def test_settings_guidance_reaches_request_and_reset(env):
 def test_off_hides_entry_and_gates_programmatic_action(env, monkeypatch):
     host, _, bank, _, window = env
     assert window.draft_button.isHidden()
-    monkeypatch.setattr(host, "service", lambda *args: pytest.fail("AI off fetched service"))
+    monkeypatch.setattr(host, "ai_chat", lambda: pytest.fail("AI off fetched chat"))
     window.draft_with_ai()
     assert not hasattr(window, "drafting_dialog") and bank.load() == ([], [])
 
@@ -226,7 +226,7 @@ def test_bad_replies_and_provider_errors_add_nothing_and_allow_retry(env, case):
     dialog.send.click()
     host.drain()
     if case == "provider":
-        chat.done(None, ServiceError("Provider failed"))
+        chat.done(None, AiChatError("Provider failed"))
     else:
         reply = result(truncated=True) if case == "truncated" else replace(result(), text='{"items":[')
         chat.done(reply, None)

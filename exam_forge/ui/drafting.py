@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPlainTextEdit, QVBoxLayout,
 )
-from slidemage.plugin_api import ServiceError
+from slidemage.plugin_api import AiChatError
 
 from ..ai_support import ai_service
 from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
@@ -126,7 +126,7 @@ class DraftDialog(QDialog):
             if service is None or not service.available():
                 self.message.setText("Enable AI support and an AI plugin such as Claude or Ollama in Settings.")
                 return
-        except ServiceError as exc:
+        except AiChatError as exc:
             self.message.setText(str(exc))
             return
         indices = [i for i in range(self.choices.count())
@@ -164,7 +164,7 @@ class DraftDialog(QDialog):
                 self.message.setText("Drafting… Cancel discards the reply.")
                 self.state["cancel"] = service.request(
                     request, lambda result, error: self.completed(result, error, sources=sources, use=use))
-            except ServiceError as exc:
+            except AiChatError as exc:
                 self.completed(None, exc)
 
         self.host.run_in_background(work, ready)

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from slidemage.plugin_api import Deck, ServiceInfo, SlideRef, SlideSource
+from slidemage.plugin_api import Deck, SlideRef, SlideSource
 
 
 @dataclass
@@ -23,12 +23,20 @@ class Command:
     enabled: Callable[[Deck | None], bool]
 
 
+class FakeAiChat:
+    def available(self):
+        return False
+
+    def request(self, request, done):
+        raise AssertionError("No AI chat route configured")
+
+
 class FakeHost:
     def __init__(self, root=None):
         self.commands: dict[str, Command] = {}
         self.menus: dict[str, list[str]] = {}
         self.messages: list[tuple[str, bool]] = []
-        self.services: dict[tuple[str, int], tuple[object, str]] = {}
+        self.chat = FakeAiChat()
         self._active = True
         self.root = Path(root) if root is not None else Path.cwd()
         self.output_folders: dict[tuple[Path, str], Path] = {}
@@ -53,31 +61,8 @@ class FakeHost:
             raise ValueError(f"unknown menu {menu!r} or command {command_id!r}")
         self.menus.setdefault(menu, []).append(command_id)
 
-    def add_service(self, name, version, implementation, label=""):
-        if not self._active:
-            raise RuntimeError("registrations are only allowed in activate()")
-        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
-            raise ValueError(f"service version {version!r} must be an integer from 1")
-        if (name, version) in self.services:
-            raise ValueError(f"service {name!r} version {version} is already registered")
-        self.services[(name, version)] = (implementation, label)
-
-    def offer(self, name, version, implementation, label=""):
-        """Stand in for another plugin's service, so a test can give the plugin something to find."""
-        self.services[(name, version)] = (implementation, label)
-
-    def service(self, name, version=1):
-        """The implementation itself where the real host gives a proxy: a ServiceError raised by it passes as it is."""
-        if self._active:
-            raise RuntimeError("service() is for after activate() has returned")
-        found = self.services.get((name, version))
-        return None if found is None else found[0]
-
-    def service_providers(self, name):
-        if self._active:
-            raise RuntimeError("service_providers() is for after activate() has returned")
-        return [ServiceInfo(name, version, "fake", label) for (n, version), (_, label) in sorted(self.services.items())
-                if n == name]
+    def ai_chat(self):
+        return self.chat
 
     def show_message(self, text, error=False):
         self.messages.append((text, error))

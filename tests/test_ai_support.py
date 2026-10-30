@@ -19,7 +19,7 @@ def app():
 @pytest.fixture
 def host(app):
     fake = FakeHost()
-    fake.service = Mock(return_value=Mock(available=Mock(return_value=False)))
+    fake.ai_chat = Mock(return_value=Mock(available=Mock(return_value=False)))
     exam_forge.activate(fake)
     fake.finish_activation()
     return fake
@@ -34,14 +34,14 @@ def test_off_by_default_and_after_disabling(host):
     page, checkbox, notice = widgets(host)
     assert not checkbox.isChecked()
     assert ai_service(host) is None
-    host.service.assert_not_called()
+    host.ai_chat.assert_not_called()
     checkbox.setChecked(True)
     checkbox.setChecked(False)
-    host.service.reset_mock()
+    host.ai_chat.reset_mock()
     assert not host.settings().get("ai_support")
     assert ai_service(host) is None
     assert not notice.text()
-    host.service.assert_not_called()
+    host.ai_chat.assert_not_called()
 
 
 def test_on_without_route_explains_what_is_needed(host):
@@ -49,14 +49,14 @@ def test_on_without_route_explains_what_is_needed(host):
     checkbox.setChecked(True)
     assert host.settings().get("ai_support") is True
     assert "AI plugin" in notice.text()
-    host.service.assert_called_with("ai.chat", 1)
+    host.ai_chat.assert_called_with()
     assert host.settings_tabs["Exam Forge"]().findChild(QCheckBox).isChecked()
 
 
 def test_on_with_route_returns_service(host):
-    host.service.return_value.available.return_value = True
+    host.ai_chat.return_value.available.return_value = True
     page, checkbox, notice = widgets(host)
     checkbox.setChecked(True)
     assert not notice.text()
-    assert ai_service(host) is host.service.return_value
-    host.service.assert_called_with("ai.chat", 1)
+    assert ai_service(host) is host.ai_chat.return_value
+    host.ai_chat.assert_called_with()

@@ -25,3 +25,11 @@ def test_slide_calls(tmp_path):
     assert host.slide_source(ref) == source
     host.open_slide(ref)
     assert fake.opened_slides == [ref]
+
+
+def test_ai_chat_contract():
+    fake = FakeHost()
+    host = create_autospec(Host, instance=True, spec_set=True)
+    host.ai_chat.side_effect = fake.ai_chat
+    assert host.ai_chat() is fake.chat
+    assert not host.ai_chat().available()
