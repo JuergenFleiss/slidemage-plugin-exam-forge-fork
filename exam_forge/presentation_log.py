@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -82,3 +83,47 @@ def read_log(path: str | Path) -> list[dict]:
                 break
             records.append(json.loads(line))
     return records
+
+
+@dataclass(frozen=True)
+class Session:
+    name: str
+    id: str
+    presentation: str
+
+
+class Sessions:
+    """Discover presentation logs for a bank."""
+
+    def __init__(self, bank):
+        self.folder = bank.folder.resolve()
+
+    def path(self, stored: str) -> Path:
+        return (self.folder / stored).resolve()
+
+    def load(self, *, deck=None, schedule=()) -> list[Session]:
+        """Discover logs and label them using cached course data.
+
+        Schedule labels require an unambiguous date/time match;
+        a missing provider, link or cached session leaves the timestamp label.
+        """
+        schedule = schedule or ()  # course.sessions returns None for an unlinked deck.
+        sessions = []
+        for path in sorted((self.folder / "presentations").glob("*.jsonl")):
+            rows = read_log(path)
+            if not rows or rows[0]["type"] != "PresentationStarted":
+                continue
+            first = rows[0]
+            if deck is not None and (not first.get("deck_path") or
+                                     Path(first["deck_path"]).resolve() != deck.path.resolve()):
+                continue
+            when = datetime.fromisoformat(first["wall_time"])
+            clock = when.strftime("%H:%M")
+            matches = [s for s in schedule if s.date == when.date().isoformat()
+                       and (not s.start or s.start <= clock) and (not s.end or clock <= s.end)]
+            label = when.isoformat(sep=" ", timespec="minutes")
+            if len(matches) == 1:
+                s = matches[0]
+                label = f"{s.date} {s.start}–{s.end} {s.location}".strip()
+            sessions.append(Session(label, path.stem, str(path.relative_to(self.folder))))
+        return sessions

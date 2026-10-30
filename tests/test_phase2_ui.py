@@ -30,7 +30,7 @@ from test_ui import GuiHost, source
 import exam_forge
 from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
-from exam_forge.sessions import Session, Sessions
+from exam_forge.presentation_log import Session, Sessions
 from exam_forge.ui.corrections import _SHEETS
 
 
@@ -166,17 +166,6 @@ def test_bank_sessions_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     window.tabs.setCurrentWidget(tab)
     host.drain()
     assert "Room" in tab.current().name  # Cached schedule supplied to Sessions.load.
-    recording, transcript = tmp_path / "lecture.mp4", tmp_path / "lecture.srt"
-    recording.write_bytes(b"recording")
-    transcript.write_text("1\n00:00:08,000 --> 00:00:33,000\nTwo plus two makes four.\n")
-    for kind, path in (("recording", recording), ("transcript", transcript)):
-        monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, p=path: (str(p), ""))
-        tab.attach(kind)
-        host.drain()
-    tab.open_recording()
-    assert host.opened_files == [recording]
-    assert "Two plus two makes four." in tab.text.toPlainText()
-    assert Sessions(bank).load(deck=deck)[0].transcript == str(transcript)
     # A swap is offered from the module's eligible candidates.
     current = window.current
     other = bank.create(replace(current, id="replacement", revision=1, status="draft"))

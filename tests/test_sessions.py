@@ -4,12 +4,11 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-import pytest
 from fake_host import FakeDeck, FakeHost
 from slidemage.plugin_api import CourseSessionInfo
 
-from exam_forge.bank import Bank, SchemaError
-from exam_forge.sessions import Session, Sessions
+from exam_forge.bank import Bank
+from exam_forge.presentation_log import Sessions
 
 
 def event(kind, time, **fields):
@@ -41,15 +40,13 @@ def write_log(folder, name="logged", rows=None):
     return path
 
 
-def test_sessions_from_logs_and_author_names_with_optional_cached_course_labels(tmp_path):
+def test_sessions_from_logs_with_optional_cached_course_labels(tmp_path):
     store = Sessions(Bank(tmp_path, create=True))
     write_log(tmp_path)
-    named = Session("Guest lecture")
-    store.save(named)
     sessions = store.load()
     assert store.load(schedule=None) == sessions
     logged = next(s for s in sessions if s.presentation)
-    assert logged.name == "2026-10-30 12:00+01:00" and named in sessions
+    assert logged.name == "2026-10-30 12:00+01:00"
     host = FakeHost(tmp_path)
     deck = FakeDeck("course", Path("/deck.tex"))
     course = CourseSessionInfo("2026-10-30", "11:00", "13:00", "Lecture hall")
@@ -64,44 +61,8 @@ def test_sessions_from_logs_and_author_names_with_optional_cached_course_labels(
     schedule = host.service("course.sessions", 1).sessions(deck)
     labeled = store.load(deck=deck, schedule=schedule)
     assert next(s for s in labeled if s.presentation).name == "2026-10-30 11:00–13:00 Lecture hall"
-    assert named in labeled
     assert store.load(schedule=[course, course]) == sessions  # ambiguous: timestamp label
     assert store.load(schedule=[replace(course, date="2026-10-29")]) == sessions
-    store.save(replace(logged, name="Author's title"))
-    assert next(s for s in store.load(schedule=schedule) if s.presentation).name == "Author's title"
-    assert len(store.load()) == 2
-
-
-def test_attachments_paths_copy_open_player_and_persist(tmp_path):
-    folder = tmp_path / "bank"
-    store = Sessions(Bank(folder, create=True))
-    recording = tmp_path / "talk.wav"
-    recording.write_bytes(b"audio")
-    transcript = tmp_path / "talk.srt"
-    transcript.write_text("1\n00:00:00,000 --> 00:00:20,000\nA thought", encoding="utf-8")
-    session = store.attach(Session("Named session"), "recording", recording)
-    assert session.recording == str(recording)
-    session = store.attach(session, "transcript", transcript, copy=True)
-    assert not Path(session.transcript).is_absolute()
-    assert store.path(session.transcript).read_bytes() == transcript.read_bytes()
-    parsed = store.read_transcript(session)
-    assert parsed.segments[0].text == "A thought"
-    store.save(session)
-    assert Sessions(Bank(folder)).load() == [session]
-    host = FakeHost(tmp_path)
-    store.open_recording(host, session)
-    assert host.opened_files == [recording]
-    assert store.attach(session, "transcript", transcript).transcript == str(transcript)
-    with pytest.raises(FileNotFoundError):
-        store.attach(session, "recording", tmp_path / "missing")
-    with pytest.raises(ValueError, match="kind"):
-        store.attach(session, "other", recording)
-    with pytest.raises(ValueError, match="No attachment"):
-        store.open_recording(host, Session("No recording"))
-    saved = folder / "sessions" / f"{session.id}.json"
-    saved.write_text('{"schema_version": 999}', encoding="utf-8")
-    with pytest.raises(SchemaError):
-        store.load()
 
 
 def test_other_deck_logs_are_not_attached_to_this_deck_and_unfinished_tail_loads(tmp_path):
@@ -111,7 +72,3 @@ def test_other_deck_logs_are_not_attached_to_this_deck_and_unfinished_tail_loads
         stream.write(b'{"type":')
     assert len(store.load(deck=FakeDeck("course", Path("/deck.tex")))) == 1
     assert store.load(deck=FakeDeck("other", Path("/other.tex"))) == []
-    with pytest.raises(ValueError):
-        Session("", id="valid")
-    with pytest.raises(ValueError):
-        Session("Title", id="../escape")

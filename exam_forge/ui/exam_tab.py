@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from ..assembly import Blueprint, assemble, check_approval, swap
 from ..elp import DifficultyRules, ElpRules
 from ..manifest import Manifest
-from ..sessions import Sessions
+from ..presentation_log import Sessions
 from ..presentation_log import read_log
 from ..taught import TaughtOptions, build_evidence, filter_items
 from .issue import IssueView

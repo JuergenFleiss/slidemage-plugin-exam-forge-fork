@@ -14,7 +14,7 @@ from exam_forge.assembly import Blueprint, assemble, check_approval, swap
 from exam_forge.bank import Bank, ConflictError
 from exam_forge.elp import DifficultyRules, ElpRules
 from exam_forge.model import Item, Option, SourceLink
-from exam_forge.sessions import Session
+from exam_forge.presentation_log import Session
 from exam_forge.sources import link_slide
 from exam_forge.taught import TaughtOptions, build_evidence, filter_items
 
@@ -119,7 +119,7 @@ def test_audience_state_jump_back_and_unknown_slide_ids():
                  {"type": "PageShown", "monotonic": 103, "page": 2, "slide_id": "c-de", "version": None},
                  {"type": "ScreenState", "monotonic": 104, "state": "black", "audience_page": 2},
                  {"type": "ScreenState", "monotonic": 105, "state": "shown", "audience_page": 1}]
-    session = Session("Log", "l", presentation="l", recording="r.mp4")
+    session = Session("Log", "l", presentation="l")
     result = build_evidence(decks(), [session], {"l": rows})
     assert result.slides == {"a-de", "a-en"}
     result = build_evidence(decks(), [session], {"l": log(None)}, schedule=schedule(),

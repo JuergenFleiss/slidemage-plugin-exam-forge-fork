@@ -65,7 +65,7 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         try:
             available = self.presentation_log.start()
             self.sessions_tab.logging.setText("Presentation logging is active for this bank." if available else
-                "Presentation logging unavailable: no presenter.events provider. Add sessions manually.")
+                "Presentation logging unavailable: no presenter.events provider.")
         except (ServiceError, OSError, RuntimeError) as exc:
             self.sessions_tab.logging.setText(f"Presentation logging unavailable: {exc}")
             self.error(exc)

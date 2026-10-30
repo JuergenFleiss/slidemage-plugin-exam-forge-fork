@@ -16,7 +16,7 @@ from datetime import date, datetime, time
 from slidemage.plugin_api import CourseSessionInfo, SlideRef
 
 from .model import Item
-from .sessions import Session
+from .presentation_log import Session
 import math
 
 

@@ -1,21 +1,17 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Session attachments and transcripts."""
+"""Select presentation logs for taught evidence."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog,
-    QHBoxLayout,
-    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from ..sessions import Session, Sessions
+from ..presentation_log import Sessions
 from .work import schedule_for
 
 
@@ -25,32 +21,16 @@ class SessionsTab(QWidget):
         self.window, self.host = window, window.host
         self.loaded = False
         self.sessions = []
-        self.transcript = None
         layout = QVBoxLayout(self)
         self.logging = QLabel()
         self.logging.setWordWrap(True)
         layout.addWidget(self.logging)
         layout.addWidget(QLabel("Tick sessions to use as taught evidence. Refresh after a presentation ends."))
-        row = QHBoxLayout()
-        for label, action in (("Refresh", self.load), ("Add session…", self.add),
-                              ("Attach recording…", lambda: self.attach("recording")),
-                              ("Attach transcript…", lambda: self.attach("transcript")),
-                              ("Open recording", self.open_recording)):
-            button = self.host.Button(label)
-            button.clicked.connect(action)
-            row.addWidget(button)
-        layout.addLayout(row)
+        button = self.host.Button("Refresh")
+        button.clicked.connect(self.load)
+        layout.addWidget(button)
         self.session_list = QListWidget()
         layout.addWidget(self.session_list, 1)
-        self.details = QLabel("Choose a session.")
-        self.details.setWordWrap(True)
-        layout.addWidget(self.details)
-        self.text = QPlainTextEdit()
-        self.text.setReadOnly(True)
-        self.text.setMaximumHeight(140)
-        layout.addWidget(self.text)
-        self.session_list.currentRowChanged.connect(self.select)
-
     @property
     def store(self):
         return Sessions(self.window.bank)
@@ -59,7 +39,6 @@ class SessionsTab(QWidget):
         self.loaded = False
         self.sessions = []
         self.session_list.clear()
-        self.text.clear()
 
     def selected_ids(self):
         if not self.loaded:
@@ -94,44 +73,3 @@ class SessionsTab(QWidget):
             row = next((i for i, s in enumerate(sessions) if current and s.id == current.id), 0)
             self.session_list.setCurrentRow(row if sessions else -1)
         self.window.work(lambda: store.load(deck=deck, schedule=schedule), done)
-
-    def add(self):
-        name, ok = QInputDialog.getText(self, "Add session", "Session name")
-        if ok and name.strip():
-            store = self.store
-            self.window.work(lambda: store.save(Session(name.strip())), lambda _: self.load())
-
-    def attach(self, kind):
-        session = self.current()
-        if session is None:
-            return
-        path, _ = QFileDialog.getOpenFileName(self, f"Attach {kind}", "",
-            "Transcripts (*.srt *.vtt *.txt)" if kind == "transcript" else "Recordings (*)")
-        if path:
-            store = self.store
-            self.window.work(lambda: store.attach(session, kind, path), lambda _: self.load())
-
-    def open_recording(self):
-        session = self.current()
-        if session:
-            try:
-                self.store.open_recording(self.host, session)
-            except (OSError, ValueError, RuntimeError) as exc:
-                self.window.error(exc)
-
-    def select(self, row):
-        session = self.current()
-        self.transcript = None
-        self.text.clear()
-        if session is None:
-            return
-        self.details.setText(f"{session.name}\nRecording: {session.recording or 'none'}\nTranscript: {session.transcript or 'none'}")
-        if session.transcript:
-            store = self.store
-
-            def done(transcript):
-                self.transcript = transcript
-                self.text.setPlainText("\n".join(s.text for s in transcript.segments))
-                if transcript.errors:
-                    self.window.error("\n".join(map(str, transcript.errors)))
-            self.window.work(lambda: store.read_transcript(session), done)

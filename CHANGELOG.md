@@ -30,3 +30,8 @@ v0.3.1 (2026-10-30, drafting guidance): Customize AI drafting guidance in Settin
 
 NEW: Customize AI drafting guidance.
 - Edit or reset question drafting guidance while retaining the required answer format and source evidence rule.
+
+v0.3.2 (2026-10-30, presentation logs): Simplify Sessions to logged presentations.
+
+NEW: Sessions lists logged presentations.
+- Remove manual sessions and recording and transcript attachments. Presentation logs continue to support the Slides filter and cached schedules provide labels and fallback coverage.

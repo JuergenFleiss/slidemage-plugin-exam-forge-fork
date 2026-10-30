@@ -16,9 +16,9 @@ Source checks run in the background on open, on **Check now**, and before status
 
 ## ELP exams and sessions
 
-The window has **Bank**, **Exam** and **Sessions** tabs. In Sessions, refresh after a presentation ends, or add a named session. Presentation logging starts on first opening a bank, after plugin activation, and continues while the window is hidden. Switching bank folders or shutting down closes its subscription. Without a `presenter.events` provider the Sessions tab explains that logging is unavailable. An optional cached `course.sessions` schedule labels presentations and supplies estimated slide coverage.
+The window has **Bank**, **Exam** and **Sessions** tabs. In Sessions, refresh after a presentation ends. Presentation logging starts on first opening a bank, after plugin activation, and continues while the window is hidden. Switching bank folders or shutting down closes its subscription. Without a `presenter.events` provider the Sessions tab explains that logging is unavailable. An optional cached `course.sessions` schedule labels presentations and supplies estimated slide coverage.
 
-Attach a recording and SRT, VTT or plain-text transcript by path. Files remain at their original locations. Read the transcript in Sessions; parsing reports bad lines while retaining usable text. **Open recording** uses the system player. Tick sessions to include their presentation logs in taught evidence; all are included initially.
+Tick sessions to include their presentation logs in taught evidence; all are included initially.
 
 On Exam, set exact topic or objective counts, easy/hard counts, minutes, scoring rules, seed and recent-exam avoidance. The Slides taught-only filter starts from this deck's saved default; **Save as deck default** persists the setting. Turn it off to remove the taught-only limit. Without a log, slide coverage uses the schedule and asks you to confirm or adjust the estimated last taught slide position. Both exclusion lists show their reasons. Infeasible blueprints keep their reported constraints; they are never relaxed. Swap from the eligible pool, then approve after the source check and changed-question list.
 
@@ -32,9 +32,9 @@ Real-window dark-theme and player checks, frozen-build end-to-end operation, Moo
 
 ## AI drafting
 
-AI support is off by default in Exam Forge Settings. Enable it with an available chat route (for example Claude or Ollama) to show **Draft with AI…** in the Bank tab. Choose the slide view, language and question use, then explicitly tick slides. Nothing is selected initially. Select a row to inspect its text. Transcripts are never sent for drafting.
+AI support is off by default in Exam Forge Settings. Enable it with an available chat route (for example Claude or Ollama) to show **Draft with AI…** in the Bank tab. Choose the slide view, language and question use, then explicitly tick slides. Nothing is selected initially. Select a row to inspect its text.
 
-Image descriptions are excluded until you inspect them and tick **I reviewed the selected slides' image descriptions for exam use; include them**. This tick starts off on every new drafting choice and resets when sources change. Image files, recordings, other bank questions and their keys or rationales, session names, attachment paths and student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
+Image descriptions are excluded until you inspect them and tick **I reviewed the selected slides' image descriptions for exam use; include them**. This tick starts off on every new drafting choice and resets when sources change. Image files, other bank questions and their keys or rationales, session names and student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
 
 The host handles the current chat route and model, confirms the full text before each cloud request, and never silently switches routes. Cancel or decline adds nothing. A malformed or truncated JSON reply is refused in full with a message. Valid replies enter the bank only as **Draft**, with the captured route/model and an amber **AI draft** label. Edit and **Mark reviewed** through the normal source check before using them. The permanent **AI-assisted** provenance survives acceptance and later edits; those edits start another draft revision. Chosen slide links are retained.
 
