@@ -25,3 +25,8 @@ NEW: Enable AI support in Settings to show Draft with AI in the Bank tab.
 - Build one text-only request without bank keys, rationales, recordings, student records or attachment metadata. The host handles route selection and cloud confirmation; decline and cancel quietly add nothing.
 - Refuse malformed or truncated replies in full. Save valid replies as drafts with permanent route/model provenance, retain the amber AI draft label until review, and use the existing source-check and review lifecycle.
 - Preserve an empty model name when the host reports a provider's default model.
+
+v0.3.1 (2026-10-30, drafting guidance): Customize AI drafting guidance in Settings.
+
+NEW: Customize AI drafting guidance.
+- Edit or reset question drafting guidance while retaining the required answer format and source evidence rule.

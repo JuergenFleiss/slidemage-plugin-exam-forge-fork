@@ -139,6 +139,7 @@ class DraftDialog(QDialog):
         refs = [self.refs[i] for i in indices if i < len(self.refs)]
         view, language, use = self.view.currentText(), self.language.currentText(), self.use.currentData()
         reviewed = self.review.isChecked()
+        guidance = self.host.settings().get("drafting_guidance")
         self.controls.setEnabled(False)
         self.send.setEnabled(False)
         self.message.setText("Preparing selected sources…")
@@ -149,7 +150,7 @@ class DraftDialog(QDialog):
                 source = self.host.slide_source(ref)
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source))
                 slides.append(DraftSlide(link, source, reviewed))
-            return build_request(tuple(slides), use=use), tuple(s.link for s in slides)
+            return build_request(tuple(slides), use=use, guidance=guidance), tuple(s.link for s in slides)
 
         def ready(prepared, error):
             if not self.state["active"]:

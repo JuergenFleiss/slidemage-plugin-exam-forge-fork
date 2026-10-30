@@ -7,10 +7,11 @@ from threading import get_ident
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox
+from PySide6.QtWidgets import QCheckBox, QPlainTextEdit, QPushButton
 from slidemage.plugin_api import MediaDescription, ServiceError, SlideSource
 
 from exam_forge.model import Item, Option
+from exam_forge.drafting import DEFAULT_GUIDANCE
 from exam_forge.sessions import Session, Sessions
 from test_drafting import result
 from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
@@ -47,6 +48,30 @@ def choose(host, window):
     dialog = window.drafting_dialog
     host.drain()
     return dialog
+
+
+def test_settings_guidance_reaches_request_and_reset(env):
+    host, deck, _, _, window = env
+    source(host, deck)
+    chat, page = enable(host)
+    field = page.findChild(QPlainTextEdit)
+    reset = next(button for button in page.findChildren(QPushButton) if button.text() == "Reset to default")
+    assert field.toPlainText() == DEFAULT_GUIDANCE
+    field.setPlainText("Ask a practical question.")
+    assert host.settings().get("drafting_guidance") == "Ask a practical question."
+    dialog = choose(host, window)
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.send.click()
+    host.drain()
+    assert chat.requests[0].instructions.startswith("Ask a practical question.")
+    dialog.reject()
+    reset.click()
+    assert field.toPlainText() == DEFAULT_GUIDANCE
+    assert host.settings().get("drafting_guidance") is None
+    field.clear()
+    assert host.settings().get("drafting_guidance") is None
+    page.findChild(QCheckBox).setChecked(False)
+    assert field.parentWidget().isHidden() and reset.isHidden()
 
 
 def test_off_hides_entry_and_gates_programmatic_action(env, monkeypatch):
