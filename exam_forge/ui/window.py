@@ -100,6 +100,7 @@ class BankWindow(BankTab, ItemEditor, QWidget):
 
     def set_busy(self, busy):
         self.busy = busy
+        self.draft_button.setEnabled(not busy)
         self.editor.setEnabled(not busy and self.current is not None)
         for widget in (self.check_button, self.export_button, self.exam_tab, self.sessions_tab):
             widget.setEnabled(not busy)

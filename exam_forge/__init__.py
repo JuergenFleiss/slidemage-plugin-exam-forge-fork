@@ -17,4 +17,4 @@ def activate(host: Host) -> None:
     host.add_command("exam-forge.open", "Exam Forge…", controller.open, enabled=lambda deck: deck is not None)
     host.add_menu_entry("deck", "exam-forge.open")
     host.add_sidebar_box(SIDEBAR_KEY, "Exam Forge", controller.sidebar, size="compact")
-    host.add_settings_tab("Exam Forge", lambda: build_settings(host))
+    host.add_settings_tab("Exam Forge", lambda: build_settings(host, controller.refresh_ai_support))

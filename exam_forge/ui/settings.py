@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QCheckBox, QLabel
 from ..ai_support import ai_service
 
 
-def build_settings(host):
+def build_settings(host, on_change=lambda: None):
     page = host.Page()
     checkbox = QCheckBox("Enable AI support")
     checkbox.setChecked(bool(host.settings().get("ai_support", False)))
@@ -24,6 +24,7 @@ def build_settings(host):
             notice.setText("AI support needs an AI plugin, such as Claude or Ollama. Install and enable one in Settings.")
         else:
             notice.clear()
+        on_change()
 
     checkbox.toggled.connect(update)
     if checkbox.isChecked():

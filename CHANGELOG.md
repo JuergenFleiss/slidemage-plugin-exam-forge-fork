@@ -17,3 +17,11 @@ NEW: Bank, Exam and Sessions tabs connect the phase 2 modules in the existing wi
 - Save deck-default Slides/Talk ticks, confirm estimated cut-offs, inspect exclusions and infeasible blueprints, swap questions and approve after fresh source checks.
 - Issue immutable manifests in the bank folder, reopen them, save exam and private key HTML through dialogs, and record corrections in a separate sheet with one journal writer at a time.
 - Edit a teaching-assistant note for shared stems, exclusions and fixed option order. Freeze it with the question and mark it in the exam entry copy; Moodle XML ignores it.
+
+v0.3.0 (2026-10-30, AI drafting): Draft questions from explicitly chosen teaching sources through the host's optional AI chat service.
+
+NEW: Enable AI support in Settings to show Draft with AI in the Bank tab.
+- Choose slides and confirmed, unchanged transcript passages. Preview source text and explicitly review image descriptions for exam use before including them; the review tick starts off.
+- Build one text-only request without bank keys, rationales, recordings, student records or attachment metadata. The host handles route selection and cloud confirmation; decline and cancel quietly add nothing.
+- Refuse malformed or truncated replies in full. Save valid replies as drafts with permanent route/model provenance, retain the amber AI draft label until review, and use the existing source-check and review lifecycle.
+- Preserve an empty model name when the host reports a provider's default model.

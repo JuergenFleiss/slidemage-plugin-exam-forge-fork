@@ -1,6 +1,6 @@
 # Exam Forge
 
-Exam Forge is a SlideMage plugin for creating and managing exam questions for a deck. The **Exam Forge…** command in the Deck menu opens a non-modal question-bank window that stays available when you switch decks. It requires SlideMage 9.5 or later.
+Exam Forge is a SlideMage plugin for creating and managing exam questions for a deck. The **Exam Forge…** command in the Deck menu opens a non-modal question-bank window that stays available when you switch decks. It requires SlideMage 9.6 or later.
 
 ## Question bank
 
@@ -26,9 +26,17 @@ Approval opens the second issuing step. **Freeze approved exam** checks fresh so
 
 The document save dialogs write two self-contained HTML files: an exam entry copy and a **private key with answers, rationales and the scoring sheet**. Math remains copyable source, not typeset. The item editor's teaching-assistant note carries shared stems, exclusions or fixed option order. **This note appears in the exam file: never put answers in it.** It is frozen verbatim and ignored by Moodle XML. Nothing is inferred from the key into the note.
 
-**Corrections…** opens a separate sheet that appends item, change, reason and time to the manifest's `*.corrections.jsonl` journal. It leaves the manifest and generated documents unchanged. One sheet per journal and a file lock serialize writers; a busy journal asks you to retry. No student scoring, in-app media player, Moodle quiz generator or AI drafting is included.
+**Corrections…** opens a separate sheet that appends item, change, reason and time to the manifest's `*.corrections.jsonl` journal. It leaves the manifest and generated documents unchanged. One sheet per journal and a file lock serialize writers; a busy journal asks you to retry. No student scoring, in-app media player or Moodle quiz generator is included.
 
 Real-window dark-theme and player checks, frozen-build end-to-end operation, Moodle import (J2) and teaching-assistant document approval (J4) remain manual release checks.
+
+## AI drafting
+
+AI support is off by default in Exam Forge Settings. Enable it with an available chat route (for example Claude or Ollama) to show **Draft with AI…** in the Bank tab. Choose the slide view, language and question use, then explicitly tick slides and/or confirmed transcript passages. Nothing is selected initially. Select a row to inspect its text. Passage confirmations must still match the transcript; only their referenced cues are sent. Recording-only passages cannot supply text for drafting.
+
+Image descriptions are excluded until you inspect them and tick **I reviewed the selected slides' image descriptions for exam use; include them**. This tick starts off on every new drafting choice and resets when sources change. Image files, recordings, other bank questions and their keys or rationales, session names, attachment paths and student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
+
+The host handles the current chat route and model, confirms the full text before each cloud request, and never silently switches routes. Cancel or decline adds nothing. A malformed or truncated JSON reply is refused in full with a message. Valid replies enter the bank only as **Draft**, with the captured route/model and an amber **AI draft** label. Edit and **Mark reviewed** through the normal source check before using them. The permanent **AI-assisted** provenance survives acceptance and later edits; those edits start another draft revision. Chosen slide links are retained; passage-only drafts have no slide links until you add them in the editor.
 
 ## Development
 

@@ -26,6 +26,7 @@ from ..bank import BankError
 from ..moodle_xml import export_moodle_xml
 from ..sources import check_bank
 from .editor import accent, accent_color
+from .drafting import DraftDialog
 from .work import fresh_deck
 
 
@@ -45,6 +46,10 @@ class BankTab:
         new = host.Button("New question", "primary")
         new.clicked.connect(self.new_question)
         left.body.addWidget(new)
+        self.draft_button = host.Button("Draft with AI…")
+        self.draft_button.clicked.connect(self.draft_with_ai)
+        left.body.addWidget(self.draft_button)
+        self.refresh_ai_support()
         self.status_filter = QComboBox()
         for text, value in (("All statuses", ""), ("Draft", "draft"), ("Reviewed", "reviewed"), ("Retired", "retired")):
             self.status_filter.addItem(text, value)
@@ -80,6 +85,32 @@ class BankTab:
         self.draft_tag.hide()
         self.source_banner.hide()
         return page
+
+    def refresh_ai_support(self):
+        self.draft_button.setVisible(bool(self.host.settings().get("ai_support", False)))
+
+    def draft_with_ai(self):
+        if not self.host.settings().get("ai_support", False) or not self.may_leave():
+            return
+        dialog = DraftDialog(self.host, self.deck, self.bank, self)
+        self.drafting_dialog = dialog
+        self.set_busy(True)
+
+        def finished(code):
+            self.set_busy(False)
+            if code != DraftDialog.DialogCode.Accepted:
+                return
+            bank, items = self.bank, dialog.items
+
+            def saved(drafts):
+                self.reload()
+                self.populate(drafts[0])
+                self.notice.setText(f"Added {len(drafts)} AI draft(s). Edit and mark reviewed before use.")
+
+            self.work(lambda: [bank.create(item) for item in items], saved)
+
+        dialog.finished.connect(finished)
+        dialog.open()
 
     def reload(self):
         try:

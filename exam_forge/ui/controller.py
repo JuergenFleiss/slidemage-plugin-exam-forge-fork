@@ -33,6 +33,10 @@ class Controller:
                                        sum(i.source_changed for i in items))
         self.host.refresh_sidebar_box(SIDEBAR_KEY)
 
+    def refresh_ai_support(self):
+        for window in self.windows.values():
+            window.refresh_ai_support()
+
     def open(self, deck):
         key = self.key(deck)
         window = self.windows.get(key)

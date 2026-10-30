@@ -34,8 +34,8 @@ class Origin:
     def __post_init__(self) -> None:
         if self.kind not in ("author", "ai"):
             raise ValueError("invalid origin")
-        if self.kind == "ai" and (not self.route or not self.model):
-            raise ValueError("AI origin requires a route and model")
+        if self.kind == "ai" and not self.route:
+            raise ValueError("AI origin requires a route")
         if self.kind == "author" and (self.route or self.model):
             raise ValueError("author origin cannot have a route or model")
 
