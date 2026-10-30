@@ -156,6 +156,65 @@ def test_review_tick_preview_and_request_payload(env):
     again.reject()
 
 
+def test_preview_and_request_share_source_snapshot(env, monkeypatch):
+    host, deck, _, _, window = env
+    ref = source(host, deck)
+    host.sources[ref] = SlideSource("Original", descriptions=(MediaDescription("image", short="Reviewed"),))
+    read = host.slide_source
+    calls = []
+
+    def counted(ref):
+        calls.append(ref)
+        return read(ref)
+
+    monkeypatch.setattr(host, "slide_source", counted)
+    chat, page = enable(host)
+    dialog = choose(host, window)
+    dialog.choices.setCurrentRow(0)
+    assert "Reviewed" in dialog.preview.toPlainText()
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.review.setChecked(True)
+    host.sources[ref] = SlideSource("Changed", descriptions=(MediaDescription("image", short="Not reviewed"),))
+    dialog.send.click()
+    host.drain()
+    payload = json.loads(chat.requests[0].text)["slides"][0]
+    assert payload["text"] == "Original"
+    assert payload["image_descriptions"][0]["short"] == "Reviewed"
+    assert calls == [ref]
+    dialog.reject()
+
+
+def test_disable_during_request_discards_reply(env):
+    host, deck, bank, _, window = env
+    source(host, deck)
+    chat, page = enable(host)
+    dialog = choose(host, window)
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.send.click()
+    host.drain()
+    page.findChild(QCheckBox).setChecked(False)
+    chat.done(result(), None)
+    host.drain()
+    assert bank.load() == ([], [])
+    assert "discarded" in dialog.message.text()
+    dialog.close()
+
+
+def test_closing_dialog_cancels_request(env):
+    host, deck, bank, _, window = env
+    source(host, deck)
+    chat, page = enable(host)
+    dialog = choose(host, window)
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.send.click()
+    host.drain()
+    dialog.close()
+    assert chat.cancelled == 1
+    chat.done(result(), None)
+    host.drain()
+    assert bank.load() == ([], [])
+
+
 @pytest.mark.parametrize("case", ["decline", "cancel", "before_ready", "destroyed"])
 def test_decline_cancel_and_late_completions_are_quiet(env, case):
     host, deck, bank, _, window = env

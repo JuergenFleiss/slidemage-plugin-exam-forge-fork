@@ -21,6 +21,7 @@ class DraftDialog(QDialog):
         self.host, self.deck = host, deck
         self.items = ()
         self.refs = []
+        self.sources = []
         self.generation = 0
         self.state = state = {"active": True, "cancel": None}
 
@@ -85,7 +86,14 @@ class DraftDialog(QDialog):
         self.message.setText("Loading sources…")
 
         def work():
-            return self.host.deck_slides(fresh_deck(self.deck), view, language)
+            refs = self.host.deck_slides(fresh_deck(self.deck), view, language)
+            sources = []
+            for ref in refs:
+                try:
+                    sources.append(self.host.slide_source(ref))
+                except Exception as exc:
+                    sources.append(exc)
+            return refs, sources
 
         def done(result, error):
             if not self.state["active"] or generation != self.generation:
@@ -93,7 +101,7 @@ class DraftDialog(QDialog):
             if error:
                 self.message.setText(str(error))
                 return
-            self.refs = result
+            self.refs, self.sources = result
             labels = [f"Slide {r.position}: {r.title or r.id_slug} · {r.version or 'current'}"
                       + (" · hidden" if r.hidden else "") for r in self.refs]
             for label in labels:
@@ -109,20 +117,13 @@ class DraftDialog(QDialog):
         self.preview.clear()
         if index < 0:
             return
-        ref, generation = self.refs[index], self.generation
-
-        def done(source, error):
-            if (not self.state["active"] or generation != self.generation
-                    or self.choices.currentRow() != index):
-                return
-            if error:
-                self.message.setText(str(error))
-                return
-            descriptions = "\n\n".join("\n".join((d.short, d.long, d.takeaway))
-                                         for d in source.descriptions if not d.decorative)
-            self.preview.setPlainText(source.text + "\n\nImage descriptions (require review tick):\n" + descriptions)
-
-        self.host.run_in_background(lambda: self.host.slide_source(ref), done)
+        source = self.sources[index]
+        if isinstance(source, Exception):
+            self.message.setText(str(source))
+            return
+        descriptions = "\n\n".join("\n".join((d.short, d.long, d.takeaway))
+                                     for d in source.descriptions if not d.decorative)
+        self.preview.setPlainText(source.text + "\n\nImage descriptions (require review tick):\n" + descriptions)
 
     def generate(self):
         # Check again after source selection: disabling AI closes the gate immediately.
@@ -137,6 +138,7 @@ class DraftDialog(QDialog):
         indices = [i for i in range(self.choices.count())
                    if self.choices.item(i).checkState() == Qt.CheckState.Checked]
         refs = [self.refs[i] for i in indices if i < len(self.refs)]
+        sources = [self.sources[i] for i in indices if i < len(self.sources)]
         view, language, use = self.view.currentText(), self.language.currentText(), self.use.currentData()
         reviewed = self.review.isChecked()
         guidance = self.host.settings().get("drafting_guidance")
@@ -146,8 +148,9 @@ class DraftDialog(QDialog):
 
         def work():
             slides = []
-            for ref in refs:
-                source = self.host.slide_source(ref)
+            for ref, source in zip(refs, sources):
+                if isinstance(source, Exception):
+                    raise source
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source))
                 slides.append(DraftSlide(link, source, reviewed))
             return build_request(tuple(slides), use=use, guidance=guidance), tuple(s.link for s in slides)
@@ -177,6 +180,11 @@ class DraftDialog(QDialog):
         if not self.state["active"]:
             return
         self.state["cancel"] = None
+        if not self.host.settings().get("ai_support", False):
+            self.controls.setEnabled(True)
+            self.send.setEnabled(True)
+            self.message.setText("AI support is off. Reply discarded.")
+            return
         if error is None and result is None:
             self.reject()  # The host's decline/cancel is deliberately quiet.
             return
