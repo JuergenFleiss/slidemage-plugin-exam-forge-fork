@@ -247,8 +247,12 @@ class Bank:
             self._write_item(item_id, data, revisions, current.source_changed)
             return updated
 
-    def set_source_changed(self, item_id: str, revision: int, changed: bool) -> Item:
-        """Record an item-level source check; revision is kept for API compatibility."""
+    def set_source_changed(self, item_id: str, revision: int, changed: bool, *,
+                           expected_sources: tuple[SourceLink, ...] | None = None) -> Item:
+        """Record a source check; optionally reject results for links edited during a check.
+
+        revision is kept for API compatibility; edits retaining the same sources are safe.
+        """
         if type(changed) is not bool:
             raise ValueError("source_changed must be a boolean")
         with _lock(self.folder):
@@ -257,6 +261,8 @@ class Bank:
                 raise ConflictError(f"item is missing or deleted: {item_id}")
             data, revisions = self._document(item_id)
             current = revisions[-1]
+            if expected_sources is not None and current.sources != expected_sources:
+                raise ConflictError(f"source links changed during check for {item_id}")
             if current.source_changed == changed:
                 return current
             updated = replace(current, source_changed=changed)
