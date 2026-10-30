@@ -11,8 +11,6 @@ from slidemage.plugin_api import AiChatRequest, AiChatResult, SlideSource
 
 from .elp import check_elp
 from .model import Item, Option, Origin, SourceLink, check_phase1
-from .passages import Passage
-from .transcripts import Transcript
 
 
 @dataclass(frozen=True)
@@ -22,33 +20,12 @@ class DraftSlide:
     descriptions_reviewed: bool = False
 
 
-@dataclass(frozen=True)
-class DraftPassage:
-    passage: Passage
-    transcript: Transcript
-
-    def text(self) -> str:
-        p, transcript = self.passage, self.transcript
-        if (not p.confirmed or not p.transcript_sha256
-                or p.transcript_sha256 != transcript.sha256):
-            raise ValueError("Choose only confirmed passages whose transcript is unchanged.")
-        if not p.segments or any(type(i) is not int or not 0 <= i < len(transcript.segments)
-                                 for i in p.segments):
-            raise ValueError("The confirmed passage has no valid transcript cues.")
-        return "\n".join(transcript.segments[i].text for i in p.segments)
-
-
-def build_request(slides: tuple[DraftSlide, ...] = (), passages: tuple[DraftPassage, ...] = (),
-                  *, use: str = "revision") -> AiChatRequest:
-    """Only selected teaching text crosses this boundary; no host, bank or files.
-
-    Image descriptions require a fresh explicit review tick for this request.
-    Transcript objects are reduced to confirmed cues, never serialized wholesale.
-    """
+def build_request(slides: tuple[DraftSlide, ...] = (), *, use: str = "revision") -> AiChatRequest:
+    """Send only selected slide text and explicitly reviewed descriptions."""
     if use not in ("revision", "elp"):
         raise ValueError("Choose revision or ELP use.")
-    if not slides and not passages:
-        raise ValueError("Choose at least one slide or confirmed passage.")
+    if not slides:
+        raise ValueError("Choose at least one slide.")
     content = []
     for slide in slides:
         row = {"text": slide.source.text}
@@ -58,7 +35,7 @@ def build_request(slides: tuple[DraftSlide, ...] = (), passages: tuple[DraftPass
                 for d in slide.source.descriptions if not d.decorative
             ]
         content.append(row)
-    text = json.dumps({"slides": content, "passages": [p.text() for p in passages]},
+    text = json.dumps({"slides": content},
                       ensure_ascii=False)
     rules = ("exactly five options and one to four correct options" if use == "elp"
              else "at least two options and exactly one correct option")

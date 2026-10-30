@@ -3,7 +3,6 @@
 """Blueprint, taught evidence and selection; all selection rules live in modules."""
 from dataclasses import asdict
 from datetime import datetime
-from hashlib import sha256
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -25,7 +24,7 @@ from PySide6.QtWidgets import (
 from ..assembly import Blueprint, assemble, check_approval, swap
 from ..elp import DifficultyRules, ElpRules
 from ..manifest import Manifest
-from ..passages import Sessions
+from ..sessions import Sessions
 from ..presentation_log import read_log
 from ..taught import TaughtOptions, build_evidence, filter_items
 from .issue import IssueView
@@ -51,14 +50,12 @@ class ExamTab(QWidget):
         heading.addWidget(issued)
         body.addLayout(heading)
         row = QHBoxLayout()
-        self.slides, self.talk = QCheckBox("Slides"), QCheckBox("Talk")
+        self.slides = QCheckBox("Slides")
         defaults = self.host.settings().get("taught_defaults", {}).get(str(window.deck.path.resolve()), {})
         self.slides.setChecked(defaults.get("slides", True))
-        self.talk.setChecked(defaults.get("talk", False))
-        row.addWidget(QLabel("Taught only · either tick can supply evidence"))
+        row.addWidget(QLabel("Taught only"))
         row.addWidget(self.slides)
-        row.addWidget(self.talk)
-        save = self.host.Button("Save these ticks as deck default")
+        save = self.host.Button("Save as deck default")
         save.clicked.connect(self.save_default)
         row.addWidget(save)
         body.addLayout(row)
@@ -124,7 +121,7 @@ class ExamTab(QWidget):
         self.counts.itemChanged.connect(self.invalidate)
         self.counts.model().rowsRemoved.connect(self.invalidate)
         self.by.currentTextChanged.connect(self.invalidate)
-        for field in (self.slides, self.talk):
+        for field in (self.slides,):
             field.toggled.connect(self.invalidate)
         for field in (self.easy, self.hard, self.minutes, self.avoid, self.seed,
                       *(f for pair in self.rules_fields for f in pair)):
@@ -152,10 +149,10 @@ class ExamTab(QWidget):
     def save_default(self):
         settings = self.host.settings()
         defaults = dict(settings.get("taught_defaults", {}))
-        defaults[str(self.window.deck.path.resolve())] = asdict(TaughtOptions(self.slides.isChecked(), self.talk.isChecked()))
+        defaults[str(self.window.deck.path.resolve())] = asdict(TaughtOptions(self.slides.isChecked()))
         settings.set("taught_defaults", defaults)
         settings.save()
-        self.window.notice.setText("Saved Slides/Talk ticks as this deck's default.")
+        self.window.notice.setText("Saved Slides setting as this deck's default.")
 
     def blueprint(self):
         counts = {}
@@ -188,7 +185,7 @@ class ExamTab(QWidget):
         schedule = schedule_for(self.host, deck)
         chosen = self.window.sessions_tab.selected_ids()
         language = self.host.deck_language(deck)
-        options = TaughtOptions(self.slides.isChecked(), self.talk.isChecked())
+        options = TaughtOptions(self.slides.isChecked())
         seed, as_of = self.seed.value(), datetime.now().astimezone()
 
         def work():
@@ -198,15 +195,8 @@ class ExamTab(QWidget):
             store = Sessions(bank)
             sessions = [s for s in store.load(deck=snapshot, schedule=schedule) if chosen is None or s.id in chosen]
             logs = {s.id: read_log(store.path(s.presentation)) for s in sessions if s.presentation}
-            transcript_hashes = {}
-            for session in sessions:
-                if session.transcript:
-                    try:
-                        transcript_hashes[session.id] = sha256(store.path(session.transcript).read_bytes()).hexdigest()
-                    except OSError:
-                        pass  # An unreadable transcript cannot confirm talk.
             evidence = build_evidence(refs, sessions, logs, schedule=schedule, as_of=as_of,
-                                      language=language, transcript_hashes=transcript_hashes)
+                                      language=language)
             items, errors = bank.load()
             if errors:
                 raise ValueError("\n".join(map(str, errors)))
@@ -219,10 +209,10 @@ class ExamTab(QWidget):
                             previous.append([i['id'] for i in manifest['items']])
                     except (OSError, ValueError, KeyError, TypeError) as exc:
                         history_errors.append(f"Could not read exam history {path.name}: {exc}")
-            return refs, sessions, logs, evidence, items, previous, history_errors, transcript_hashes
+            return refs, sessions, logs, evidence, items, previous, history_errors
 
         def prepared(data):
-            refs, sessions, logs, evidence, items, previous, history_errors, transcript_hashes = data
+            refs, sessions, logs, evidence, items, previous, history_errors = data
             cutoff = None
             if options.slides and evidence.slide_method == "schedule":
                 cutoff, ok = QInputDialog.getInt(self, "Confirm estimated cut-off", evidence.slide_reason +
@@ -233,8 +223,7 @@ class ExamTab(QWidget):
 
             def select():
                 confirmed = build_evidence(refs, sessions, logs, schedule=schedule, as_of=as_of,
-                                           language=language, cutoff_position=cutoff,
-                                           transcript_hashes=transcript_hashes)
+                                           language=language, cutoff_position=cutoff)
                 filtered = filter_items(items, confirmed, options=options)
                 selection = assemble(filtered.included, blueprint, seed=seed, rules=rules, previous_exams=previous)
                 return confirmed, filtered, selection
@@ -245,7 +234,7 @@ class ExamTab(QWidget):
                                         "method": evidence.slide_method, "sessions": [s.id for s in sessions],
                                         "as_of": as_of.isoformat()}
                 exclusions = lambda rows: "\n".join(f"{r.item.id}: {' '.join(r.reasons)}" for r in rows) or "None"
-                self.report.setPlainText("\n".join(filter(None, (*history_errors, evidence.slide_reason, evidence.talk_reason))) +
+                self.report.setPlainText("\n".join(filter(None, (*history_errors, evidence.slide_reason))) +
                     f"\nCut-off position: {evidence.cutoff_position}\n\nTaught-only exclusions\n" + exclusions(filtered.excluded) +
                     "\n\nBlueprint exclusions\n" + exclusions(self.selection.excluded) +
                     "\n\n" + ("\n".join(self.selection.problems) if not self.selection.feasible else

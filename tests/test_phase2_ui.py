@@ -30,7 +30,7 @@ from test_ui import GuiHost, source
 import exam_forge
 from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
-from exam_forge.passages import Passage, Session, Sessions
+from exam_forge.sessions import Session, Sessions
 from exam_forge.ui.corrections import _SHEETS
 
 
@@ -160,7 +160,7 @@ def issue(host, window):
     return view
 
 
-def test_bank_sessions_passages_swap_and_elp_documents(phase, tmp_path, monkeypatch):
+def test_bank_sessions_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     host, deck, bank, window, _ref, presenter, warnings = phase()
     tab = window.sessions_tab
     window.tabs.setCurrentWidget(tab)
@@ -175,26 +175,16 @@ def test_bank_sessions_passages_swap_and_elp_documents(phase, tmp_path, monkeypa
         host.drain()
     tab.open_recording()
     assert host.opened_files == [recording]
-    tab.sync_monotonic.setValue(100)
-    tab.sync_recording.setValue(10)
-    tab.save_sync()
-    host.drain()
-    tab.propose()
-    host.drain()
-    assert tab.proposals[0].start == 8  # G7 passed session.sync to the proposer.
-    assert not tab.proposals[0].confirmed
-    tab.confirm()
-    host.drain()
-    assert Sessions(bank).load(deck=deck)[0].passages[0].confirmed
+    assert "Two plus two makes four." in tab.text.toPlainText()
+    assert Sessions(bank).load(deck=deck)[0].transcript == str(transcript)
     # A swap is offered from the module's eligible candidates.
     current = window.current
     other = bank.create(replace(current, id="replacement", revision=1, status="draft"))
     bank.set_status(other.id, other.revision, "reviewed")
     exam = window.exam_tab
     exam.slides.setChecked(False)
-    exam.talk.setChecked(True)
     exam.save_default()
-    assert host.settings().get("taught_defaults")[str(deck.path.resolve())] == {"slides": False, "talk": True}
+    assert host.settings().get("taught_defaults")[str(deck.path.resolve())] == {"slides": False}
     exam.propose()
     host.drain()
     outgoing = exam.selection.items[0].id
@@ -360,26 +350,6 @@ def test_zero_avoid_last_does_not_read_manifest_history(phase, monkeypatch):
     host.drain()
     assert exam.selection and exam.selection.feasible
     assert "corrupt.manifest.json" not in exam.report.toPlainText()
-
-
-def test_proposal_rechecks_transcript_replaced_in_place(phase):
-    host, _, bank, window, ref, _, _ = phase()
-    path = bank.folder / "talk.txt"
-    path.write_text("Original transcript")
-    store = Sessions(bank)
-    session = Session("Talk", "talk", transcript="talk.txt")
-    store.save(replace(session, passages=(Passage(ref.id, ref.version, 0, 10).confirm(store.read_transcript(session)),)))
-    exam = window.exam_tab
-    exam.slides.setChecked(False)
-    exam.talk.setChecked(True)
-    exam.propose()
-    host.drain()
-    assert exam.selection and exam.selection.feasible
-    path.write_text("Replacement transcript")
-    exam.propose()
-    host.drain()
-    assert exam.selection and not exam.selection.feasible
-    assert window.current.id in exam.report.toPlainText()
 
 
 def test_no_presenter_provider_uses_confirmed_schedule_cutoff(phase, monkeypatch):

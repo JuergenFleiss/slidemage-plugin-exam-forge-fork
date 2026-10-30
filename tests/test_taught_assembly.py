@@ -3,7 +3,6 @@
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
-from hashlib import sha256
 from itertools import combinations, product
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from exam_forge.assembly import Blueprint, assemble, check_approval, swap
 from exam_forge.bank import Bank, ConflictError
 from exam_forge.elp import DifficultyRules, ElpRules
 from exam_forge.model import Item, Option, SourceLink
-from exam_forge.passages import Passage, Session, Sessions
+from exam_forge.sessions import Session
 from exam_forge.sources import link_slide
 from exam_forge.taught import TaughtOptions, build_evidence, filter_items
 
@@ -52,35 +51,32 @@ def schedule():
 def evidence():
     return build_evidence(decks(), [
         Session("Presented", "logged", presentation="presentations/logged.jsonl"),
-        Session("Talk", "talk", recording="talk.mp4", passages=(Passage("c-en", None, 0, 10, confirmed=True),)),
     ], {"logged": log()})
 
 
-@pytest.mark.parametrize("slides,talk,expected", [
-    (False, False, {"slide", "talk", "both", "untaught", "unlinked"}),
-    (True, False, {"slide"}),
-    (False, True, {"talk"}),
-    (True, True, {"slide", "talk", "both"}),
+@pytest.mark.parametrize("slides,expected", [
+    (False, {"slide", "other", "both", "untaught", "unlinked"}),
+    (True, {"slide"}),
 ])
-def test_all_checkbox_states_and_all_sources_must_be_covered(slides, talk, expected):
+def test_filter_states_and_all_sources_must_be_covered(slides, expected):
     questions = [item("slide", sources=(SourceLink("a-en"),)),
-                 item("talk", sources=(SourceLink("c-de"),)),
+                 item("other", sources=(SourceLink("c-de"),)),
                  item("both", sources=(SourceLink("a-en"), SourceLink("c-en"))),
                  item("untaught", sources=(SourceLink("a-en"), SourceLink("d-en"))),
                  item("unlinked")]
-    result = filter_items(questions, evidence(), options=TaughtOptions(slides, talk))
+    result = filter_items(questions, evidence(), options=TaughtOptions(slides))
     assert {q.id for q in result.included} == expected
     assert {row.item.id for row in result.excluded} == {q.id for q in questions} - expected
     assert all(row.reasons for row in result.excluded)
 
 
-def test_ticks_use_deck_default_and_per_exam_override():
-    questions = [item("talk", sources=(SourceLink("c-en"),))]
-    default = TaughtOptions(False, True)
+def test_tick_uses_deck_default_and_per_exam_override():
+    questions = [item("other", sources=(SourceLink("c-en"),))]
+    default = TaughtOptions(False)
     assert filter_items(questions, evidence(), deck_default=default).included == tuple(questions)
-    override = filter_items(questions, evidence(), deck_default=default, options=TaughtOptions(True, False))
-    assert not override.included and override.options == TaughtOptions(True, False)
-    assert default == TaughtOptions(False, True)
+    override = filter_items(questions, evidence(), deck_default=default, options=TaughtOptions(True))
+    assert not override.included and override.options == TaughtOptions(True)
+    assert default == TaughtOptions(False)
 
 
 def test_logs_win_over_schedule_translation_by_position_and_skips():
@@ -109,80 +105,32 @@ def test_logged_pinned_versions_must_match_but_unpinned_versions_cannot_be_compa
         assert all(value in result.excluded[0].reasons[0] for value in (slide_id, logged, linked, "version"))
 
 
-def test_any_shown_version_can_supply_slide_evidence_and_talk_can_still_cover_a_mismatch():
+def test_any_shown_version_can_supply_slide_evidence():
     sessions = [Session("Old", "old", presentation="old"), Session("New", "new", presentation="new")]
     logs = {"old": log(version="1-0-0"), "new": log(version="2-0-0")}
     questions = [item(v, sources=(SourceLink("a-en", v),)) for v in ("1-0-0", "2-0-0")]
     data = build_evidence(decks(), sessions, logs)
     assert data.slide_versions["a-en"] == {"1-0-0", "2-0-0"}
     assert filter_items(questions, data).included == tuple(questions)
-    talk = Session("Talk", "talk", recording="r.mp4", passages=(Passage("a-en", None, 0, 10).confirm(),))
-    data = build_evidence(decks(), [sessions[0], talk], logs)
-    assert filter_items(questions, data, options=TaughtOptions(True, True)).included == tuple(questions)
 
-
-def test_audience_state_jump_back_and_no_passage_can_rescue_none_slide_ids():
+def test_audience_state_jump_back_and_unknown_slide_ids():
     rows = log()
     rows[2:2] = [{"type": "ScreenState", "monotonic": 102, "state": "black", "audience_page": 1},
                  {"type": "PageShown", "monotonic": 103, "page": 2, "slide_id": "c-de", "version": None},
                  {"type": "ScreenState", "monotonic": 104, "state": "black", "audience_page": 2},
                  {"type": "ScreenState", "monotonic": 105, "state": "shown", "audience_page": 1}]
-    session = Session("Log", "l", presentation="l", recording="r.mp4",
-                      passages=(Passage("c-de", None, 0, 10, confirmed=True),))
+    session = Session("Log", "l", presentation="l", recording="r.mp4")
     result = build_evidence(decks(), [session], {"l": rows})
-    assert result.slides == {"a-de", "a-en"} and not result.talk
-    session = replace(session, passages=(Passage("a-de", None, 0, 10, confirmed=True),))
+    assert result.slides == {"a-de", "a-en"}
     result = build_evidence(decks(), [session], {"l": log(None)}, schedule=schedule(),
                             as_of=datetime(2026, 11, 1, tzinfo=UTC))
     assert result.slide_method == "log" and result.slides == frozenset()
-    assert result.talk == frozenset() and result.slide_reason
+    assert result.slide_reason
     assert not filter_items([item("q", sources=(SourceLink("a-de"),))], result,
-                            options=TaughtOptions(True, True)).included
+                            options=TaughtOptions(True)).included
     assert build_evidence(decks(), [session], {"l": []}).slides == frozenset()
     with pytest.raises(ValueError, match="Read the presentation log"):
         build_evidence(decks(), [session])
-
-
-def test_talk_requires_attachment_and_confirmation_but_can_be_manual():
-    proposal = Passage("c-de", None, 0, 10)
-    session = Session("Talk", "t", recording="r.mp4", passages=(proposal,))
-    assert build_evidence(decks(), [session]).talk == frozenset()
-    confirmed = replace(session, passages=(proposal.confirm(),))
-    assert build_evidence(decks(), [confirmed]).talk == {"c-de", "c-en"}
-    assert build_evidence(decks(), [replace(confirmed, recording="")]).talk is None
-    logged = replace(confirmed, presentation="t")
-    assert build_evidence(decks(), [logged], {"t": log("c-de")}).talk == {"c-de", "c-en"}
-    # Confirmed talk never becomes evidence that the slide was shown.
-    assert build_evidence(decks(), [confirmed]).slides is None
-
-
-@pytest.mark.parametrize("logged", [False, True])
-def test_replaced_transcript_invalidates_persisted_confirmation_at_build_evidence(tmp_path, logged):
-    store = Sessions(Bank(tmp_path, create=True))
-    path = tmp_path / "talk.vtt"
-    raw = b"\xef\xbb\xbfWEBVTT\r\n\r\n00:00.000 --> 00:10.000\r\nOriginal words\r\n"
-    path.write_bytes(raw)
-    session = Session("Talk", "t", transcript="talk.vtt", recording="r.mp4",
-                      presentation="t" if logged else "")
-    passage = Passage("c-de", None, 0, 10).confirm(store.read_transcript(session))
-    assert passage.transcript_sha256 == sha256(raw).hexdigest()
-    store.save(replace(session, passages=(passage,)))
-    session = store.load()[0]
-    logs = {"t": log("c-de")} if logged else {}
-
-    def evidence():
-        return build_evidence(decks(), [session], logs,
-                              transcript_hashes={"t": sha256(path.read_bytes()).hexdigest()})
-
-    assert evidence().talk == {"c-de", "c-en"}
-    path.write_bytes(raw.replace(b"Original words", b"Replacement text"))
-    assert evidence().talk == frozenset()
-    assert store.load()[0].passages[0].confirmed  # Invalidation is evaluated, not rewritten on disk.
-    path.write_bytes(raw)
-    assert evidence().talk == {"c-de", "c-en"}
-    assert build_evidence(decks(), [session], logs).talk == frozenset()
-    session = replace(session, passages=(replace(passage, transcript_sha256=""),))
-    assert evidence().talk == frozenset()  # Legacy confirmations have no trusted transcript hash.
 
 
 def test_schedule_fallback_completed_sessions_visible_order_and_explicit_cutoff():
@@ -205,14 +153,9 @@ def test_schedule_fallback_completed_sessions_visible_order_and_explicit_cutoff(
 @pytest.mark.parametrize("schedule_value", [None, []])
 def test_unavailable_evidence_reports_reason_without_disabling_requested_filter(schedule_value):
     result = build_evidence(decks(), schedule=schedule_value)
-    assert result.slides is result.talk is None
+    assert result.slides is None
     filtered = filter_items([item("q", sources=(SourceLink("a-en"),))], result)
     assert not filtered.included and any("unavailable" in r for r in filtered.excluded[0].reasons)
-    # One unavailable tick does not block the other tick's evidence.
-    talk = build_evidence(decks(), [Session("T", "t", recording="r.mp4", passages=(
-        Passage("a-en", None, 0, 10, confirmed=True),))])
-    assert filter_items([item("q", sources=(SourceLink("a-en"),))], talk,
-                        options=TaughtOptions(True, True)).included
 
 
 def pool():
@@ -341,3 +284,28 @@ def test_approval_always_rechecks_fingerprints_and_requires_acknowledgement(tmp_
     (bank.folder / "q.json").write_text("broken", encoding="utf-8")
     failed, error = check()
     assert failed is None and error is not None
+
+
+def test_logged_audience_visibility_freeze_black_unknown_and_unfinished():
+    def page(t, number, slide):
+        return {"type": "PageShown", "monotonic": t, "page": number,
+                "slide_id": slide, "version": "1-0-0"}
+
+    def screen(t, state, number):
+        return {"type": "ScreenState", "monotonic": t, "state": state, "audience_page": number}
+
+    rows = [log()[0], page(100, 1, "a-de"), screen(110, "frozen", 1),
+            page(115, 2, "b-de"), screen(120, "shown", 1), page(125, 3, "c-de"),
+            screen(130, "shown", 2), screen(135, "black", 2), page(138, 4, "d-de"),
+            screen(140, "black", 4), screen(145, "shown", 3), screen(148, "shown", 99),
+            {"type": "PresentationEnded", "monotonic": 150}]
+    session = Session("Log", "l", presentation="l")
+    assert build_evidence(decks(), [session], {"l": rows}).slides == {
+        "a-de", "a-en", "b-de", "b-en", "c-de", "c-en"}
+    assert build_evidence(decks(), [session], {"l": rows[:2]}).slides == frozenset()
+    assert build_evidence(decks(), [session], {"l": rows[:3]}).slides == {"a-de", "a-en"}
+    with pytest.raises(ValueError, match="begin"):
+        build_evidence(decks(), [session], {"l": rows[1:]})
+    for bad in (99, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="monotonic"):
+            build_evidence(decks(), [session], {"l": [rows[0], page(bad, 1, "a-de")]})

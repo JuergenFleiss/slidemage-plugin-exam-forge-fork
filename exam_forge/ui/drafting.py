@@ -9,9 +9,8 @@ from PySide6.QtWidgets import (
 from slidemage.plugin_api import ServiceError
 
 from ..ai_support import ai_service
-from ..drafting import DraftPassage, DraftReplyError, DraftSlide, build_request, parse_reply
+from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
 from ..model import SourceLink
-from ..passages import Sessions
 from ..sources import fingerprint
 from .work import fresh_deck
 
@@ -19,9 +18,9 @@ from .work import fresh_deck
 class DraftDialog(QDialog):
     def __init__(self, host, deck, bank, parent):
         super().__init__(parent)
-        self.host, self.deck, self.store = host, deck, Sessions(bank)
+        self.host, self.deck = host, deck
         self.items = ()
-        self.refs, self.passages = [], []
+        self.refs = []
         self.generation = 0
         self.state = state = {"active": True, "cancel": None}
 
@@ -86,22 +85,7 @@ class DraftDialog(QDialog):
         self.message.setText("Loading sources…")
 
         def work():
-            refs = self.host.deck_slides(fresh_deck(self.deck), view, language)
-            passages, skipped = [], 0
-            for session in self.store.load(deck=self.deck):
-                confirmed = [p for p in session.passages if p.confirmed]
-                if not confirmed or not session.transcript:
-                    continue
-                transcript = self.store.read_transcript(session)
-                for p in confirmed:
-                    choice = DraftPassage(p, transcript)
-                    try:
-                        choice.text()
-                    except ValueError:
-                        skipped += 1
-                    else:
-                        passages.append((session, choice))
-            return refs, passages, skipped
+            return self.host.deck_slides(fresh_deck(self.deck), view, language)
 
         def done(result, error):
             if not self.state["active"] or generation != self.generation:
@@ -109,27 +93,21 @@ class DraftDialog(QDialog):
             if error:
                 self.message.setText(str(error))
                 return
-            self.refs, self.passages, skipped = result
+            self.refs = result
             labels = [f"Slide {r.position}: {r.title or r.id_slug} · {r.version or 'current'}"
                       + (" · hidden" if r.hidden else "") for r in self.refs]
-            labels += [f"Talk: {s.name} · {p.passage.start:g}–{p.passage.end:g}s · "
-                       + p.text() for s, p in self.passages]
             for label in labels:
                 row = QListWidgetItem(label)
                 row.setCheckState(Qt.CheckState.Unchecked)
                 self.choices.addItem(row)
             self.send.setEnabled(True)
-            self.message.setText("Choose slides and/or confirmed passages. "
-                                 + (f"{skipped} stale confirmations omitted." if skipped else ""))
+            self.message.setText("Choose slides.")
 
         self.host.run_in_background(work, done)
 
     def show_source(self, index):
         self.preview.clear()
         if index < 0:
-            return
-        if index >= len(self.refs):
-            self.preview.setPlainText(self.passages[index - len(self.refs)][1].text())
             return
         ref, generation = self.refs[index], self.generation
 
@@ -159,7 +137,6 @@ class DraftDialog(QDialog):
         indices = [i for i in range(self.choices.count())
                    if self.choices.item(i).checkState() == Qt.CheckState.Checked]
         refs = [self.refs[i] for i in indices if i < len(self.refs)]
-        passages = [self.passages[i - len(self.refs)] for i in indices if i >= len(self.refs)]
         view, language, use = self.view.currentText(), self.language.currentText(), self.use.currentData()
         reviewed = self.review.isChecked()
         self.controls.setEnabled(False)
@@ -172,8 +149,7 @@ class DraftDialog(QDialog):
                 source = self.host.slide_source(ref)
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source))
                 slides.append(DraftSlide(link, source, reviewed))
-            selected = tuple(DraftPassage(p.passage, self.store.read_transcript(s)) for s, p in passages)
-            return build_request(tuple(slides), selected, use=use), tuple(s.link for s in slides)
+            return build_request(tuple(slides), use=use), tuple(s.link for s in slides)
 
         def ready(prepared, error):
             if not self.state["active"]:

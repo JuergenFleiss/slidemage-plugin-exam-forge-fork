@@ -11,8 +11,7 @@ from PySide6.QtWidgets import QCheckBox
 from slidemage.plugin_api import MediaDescription, ServiceError, SlideSource
 
 from exam_forge.model import Item, Option
-from exam_forge.passages import Passage, Session, Sessions
-from exam_forge.transcripts import read_transcript
+from exam_forge.sessions import Session, Sessions
 from test_drafting import result
 from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
 
@@ -73,28 +72,22 @@ def test_outgoing_request_excludes_bank_keys_rationales_recordings_and_student_d
     path.write_text("CONFIRMED_TEACHING_CUE\n\nUNCONFIRMED_STUDENT_CUE")
     recording = host.root / "PRIVATE_RECORDING.mp4"
     recording.write_bytes(b"PRIVATE_RECORDING_BYTES")
-    transcript = read_transcript(path)
-    confirmed = Passage(ref.id, ref.version, None, None, (0,)).confirm(transcript, start=0, end=10)
-    proposal = Passage(ref.id, ref.version, 10, 20, (1,))
-    Sessions(bank).save(Session("STUDENT_SESSION_NAME", recording=str(recording), transcript=str(path),
-                                passages=(confirmed, proposal)))
+    Sessions(bank).save(Session("STUDENT_SESSION_NAME", recording=str(recording), transcript=str(path)))
     chat, page = enable(host)
     assert not window.draft_button.isHidden()
     dialog = choose(host, window)
-    assert len(dialog.refs) == 2 and len(dialog.passages) == 1
+    assert len(dialog.refs) == 2 and dialog.choices.count() == 2
     assert not dialog.review.isChecked()
     assert all(dialog.choices.item(i).checkState() == Qt.CheckState.Unchecked
                for i in range(dialog.choices.count()))
     dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
-    dialog.choices.item(2).setCheckState(Qt.CheckState.Checked)
     dialog.send.click()
     host.drain()
     request, = chat.requests
-    assert json.loads(request.text) == {"slides": [{"text": "SELECTED_TEACHING_TEXT"}],
-                                        "passages": ["CONFIRMED_TEACHING_CUE"]}
+    assert json.loads(request.text) == {"slides": [{"text": "SELECTED_TEACHING_TEXT"}]}
     for excluded in ("BANK_STEM", "BANK_KEY", "BANK_ANSWER", "BANK_RATIONALE", "PRIVATE_RECORDING",
                      "PRIVATE_RECORDING_BYTES", "STUDENT_NAME", "STUDENT_GRADE", "STUDENT_SESSION_NAME",
-                     "STUDENT_TRANSCRIPT_PATH", "UNCONFIRMED_STUDENT_CUE", "UNCHOSEN_SLIDE",
+                     "STUDENT_TRANSCRIPT_PATH", "CONFIRMED_TEACHING_CUE", "UNCONFIRMED_STUDENT_CUE", "UNCHOSEN_SLIDE",
                      "IMAGE_PATH", "UNREVIEWED_IMAGE_DESCRIPTION"):
         assert excluded not in request.instructions + request.text
     chat.done(result(), None)

@@ -8,10 +8,8 @@ import pytest
 from slidemage.plugin_api import AiChatResult, MediaDescription, Route, SlideSource
 
 from exam_forge.bank import Bank
-from exam_forge.drafting import DraftPassage, DraftReplyError, DraftSlide, build_request, parse_reply
+from exam_forge.drafting import DraftReplyError, DraftSlide, build_request, parse_reply
 from exam_forge.model import SourceLink
-from exam_forge.passages import Passage
-from exam_forge.transcripts import parse_transcript
 
 
 def reply_row():
@@ -31,11 +29,9 @@ def test_request_is_only_selected_teaching_text(tmp_path):
     slide = DraftSlide(SourceLink("PRIVATE_LINK", "1", "en", "instructor", "PRIVATE_HASH"),
                        SlideSource("SELECTED_SLIDE", (tmp_path / "PRIVATE_IMAGE_PATH",),
                                    (MediaDescription("PRIVATE_IMAGE_KEY", short="UNREVIEWED_DESCRIPTION"),)))
-    transcript = parse_transcript("SELECTED_CUE\n\nOTHER_CUE_STUDENT_DATA", "txt")
-    passage = Passage("PRIVATE_SLIDE", None, None, None, (0,)).confirm(transcript, start=0, end=10)
-    request = build_request((slide,), (DraftPassage(passage, transcript),))
-    assert json.loads(request.text) == {"slides": [{"text": "SELECTED_SLIDE"}], "passages": ["SELECTED_CUE"]}
-    assert "SELECTED_SLIDE" in request.text and "SELECTED_CUE" in request.text
+    request = build_request((slide,))
+    assert json.loads(request.text) == {"slides": [{"text": "SELECTED_SLIDE"}]}
+    assert "SELECTED_SLIDE" in request.text
     for excluded in ("PRIVATE_LINK", "PRIVATE_HASH", "PRIVATE_IMAGE_PATH", "PRIVATE_IMAGE_KEY",
                      "UNREVIEWED_DESCRIPTION", "PRIVATE_SLIDE", "OTHER_CUE_STUDENT_DATA"):
         assert excluded not in request.text + request.instructions
@@ -53,14 +49,7 @@ def test_image_description_review_is_explicit_and_only_for_selected_slides():
     assert "PRIVATE_PATH" not in str(data) and "Decorative" not in str(data)
 
 
-@pytest.mark.parametrize("mode", ["proposal", "stale", "no_hash", "bad_cue", "no_cues"])
-def test_passages_must_be_confirmed_current_and_have_valid_cues(mode):
-    transcript = parse_transcript("teaching text", "txt")
-    p = Passage("slide", None, None, None, (0,)).confirm(transcript, start=0, end=10)
-    changes = {"proposal": {"confirmed": False}, "stale": {"transcript_sha256": "old"},
-               "no_hash": {"transcript_sha256": ""}, "bad_cue": {"segments": (9,)}, "no_cues": {"segments": ()}}
-    with pytest.raises(ValueError, match="confirmed|cues"):
-        build_request(passages=(DraftPassage(replace(p, **changes[mode]), transcript),))
+def test_request_requires_slides():
     with pytest.raises(ValueError, match="Choose at least"):
         build_request()
 
