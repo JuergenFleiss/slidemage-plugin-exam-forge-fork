@@ -9,6 +9,7 @@ from PySide6.QtGui import QImageReader, QPalette
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QScrollArea, QTableWidget)
 from ..bank import BankError
+from ..elp import check_elp
 from ..model import Item, Option, check_phase1
 from .source_picker import SourcePicker
 
@@ -214,7 +215,7 @@ class ItemEditor:
         if target == "draft" and self.current.status == "draft":
             return
         if target == "reviewed":
-            errors = check_phase1(self.current)
+            errors = check_elp(self.current) if self.current.use == "elp" else check_phase1(self.current)
             if not self.current.stem.strip() or len(self.current.options) < 2 or any(not o.text.strip() for o in self.current.options):
                 errors.append("A question needs text and at least two nonempty answers.")
             if errors:
