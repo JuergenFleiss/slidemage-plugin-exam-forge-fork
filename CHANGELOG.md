@@ -54,3 +54,8 @@ v0.4.1 (2026-10-30, AI host contract): Use the direct host AI chat call.
 
 NEW: AI drafting uses the host AI chat interface.
 - Request AI chat through the host and handle AiChatError.
+
+v0.5.0 (2026-10-30, bulk AI drafting): Generate multiple drafts in one request.
+
+NEW: Bulk AI drafting.
+- Generate 1–30 drafts from selected slides, each linked to its identified source; invalid, truncated or incorrectly sized replies are refused in full.

@@ -102,7 +102,7 @@ def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env):
     dialog.send.click()
     host.drain()
     request, = chat.requests
-    assert json.loads(request.text) == {"slides": [{"text": "SELECTED_TEACHING_TEXT"}]}
+    assert json.loads(request.text) == {"slides": [{"slide": 1, "text": "SELECTED_TEACHING_TEXT"}]}
     for excluded in ("BANK_STEM", "BANK_KEY", "BANK_ANSWER", "BANK_RATIONALE", "STUDENT_NAME", "STUDENT_GRADE", "UNCHOSEN_SLIDE",
                      "IMAGE_PATH", "UNREVIEWED_IMAGE_DESCRIPTION"):
         assert excluded not in request.instructions + request.text
@@ -223,6 +223,8 @@ def test_bad_replies_and_provider_errors_add_nothing_and_allow_retry(env, case):
     chat, page = enable(host)
     dialog = choose(host, window)
     dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    if case == "truncated":
+        dialog.count.setValue(2)
     dialog.send.click()
     host.drain()
     if case == "provider":
@@ -247,3 +249,50 @@ def test_disable_while_preparing_cannot_request_and_updates_existing_window(env)
     assert window.draft_button.isHidden()
     host.drain()
     assert not chat.requests and bank.load() == ([], [])
+
+
+def test_bulk_drafts_link_to_selected_slides(env):
+    host, deck, bank, _, window = env
+    first = source(host, deck)
+    second = replace(first, id="second", id_slug="second", position=2)
+    host.slides[(deck.path, "instructor", "en")].append(second)
+    host.sources[second] = SlideSource("Second slide")
+    chat, _ = enable(host)
+    dialog = choose(host, window)
+    assert (dialog.count.minimum(), dialog.count.maximum(), dialog.count.value()) == (1, 30, 1)
+    for i in range(2):
+        dialog.choices.item(i).setCheckState(Qt.CheckState.Checked)
+    dialog.count.setValue(2)
+    dialog.send.click()
+    host.drain()
+    assert len(chat.requests) == 1 and chat.requests[0].max_tokens == 8192
+    from test_drafting import reply_row
+    chat.done(result([reply_row(), {**reply_row(), "slide": 2}]), None)
+    host.drain()
+    drafts, errors = bank.load()
+    assert not errors and len(drafts) == 2
+    assert [item.sources[0].slide_id for item in drafts] == [first.id, second.id]
+    assert all(item.status == "draft" and item.origin.kind == "ai" and
+               (item.origin.route, item.origin.model) == ("captured-route", "captured-model")
+               for item in drafts)
+    assert window.item_list.count() == 2 and "2 AI draft" in window.notice.text()
+
+
+@pytest.mark.parametrize("rows", [[], [1], [1, 1, 1], [2, 1]])
+def test_bulk_wrong_count_or_slide_refused(env, rows):
+    from test_drafting import reply_row
+    host, deck, bank, _, window = env
+    source(host, deck)
+    chat, _ = enable(host)
+    dialog = choose(host, window)
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.count.setValue(2)
+    dialog.send.click()
+    host.drain()
+    chat.done(result([{**reply_row(), "slide": n} for n in rows]), None)
+    host.drain()
+    assert bank.load() == ([], [])
+    assert "No drafts were added" in dialog.message.text()
+    if len(rows) != 2:
+        assert f"requested 2 questions but received {len(rows)}" in dialog.message.text()
+    dialog.reject()

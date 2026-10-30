@@ -28,11 +28,11 @@ Real-window dark-theme and player checks, frozen-build end-to-end operation, Moo
 
 ## AI drafting
 
-AI support is off by default in Exam Forge Settings. Enable it with an available chat route (for example Claude or Ollama) to show **Draft with AI…** in the Bank tab. Choose the slide view, language and question use, then explicitly tick slides. Nothing is selected initially. Select a row to inspect its text.
+AI support is off by default in Exam Forge Settings. Enable it with an available chat route (for example Claude or Ollama) to show **Draft with AI…** in the Bank tab. Choose the slide view, language and question use, set the number of questions (1–30), then explicitly tick one or more slides. Nothing is selected initially. Select a row to inspect its text.
 
 Image descriptions are never included in drafting requests. Image files, other bank questions and their keys or rationales, student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
 
-The host handles the current chat route and model, confirms the full text before each cloud request, and never silently switches routes. Cancel or decline adds nothing. A malformed or truncated JSON reply is refused in full with a message. Valid replies enter the bank only as **Draft**, with the captured route/model and an amber **AI draft** label. Edit and **Mark reviewed** through the normal source check before using them. The permanent **AI-assisted** provenance survives acceptance and later edits; those edits start another draft revision. Chosen slide links are retained.
+The host handles the current chat route and model, confirms the full text before each cloud request, and never silently switches routes. Cancel or decline adds nothing. A malformed or truncated JSON reply, a wrong question count, or a question without a supplied slide is refused in full with a message. Valid replies enter the bank only as **Draft**, with the captured route/model and an amber **AI draft** label. Edit and **Mark reviewed** through the normal source check before using them. The permanent **AI-assisted** provenance survives acceptance and later edits; those edits start another draft revision. Each draft links to the supplied slide identified in the reply.
 
 ## Development
 

@@ -4,7 +4,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPlainTextEdit, QVBoxLayout,
+    QListWidgetItem, QPlainTextEdit, QSpinBox, QVBoxLayout,
 )
 from slidemage.plugin_api import AiChatError
 
@@ -48,6 +48,10 @@ class DraftDialog(QDialog):
         self.use.addItem("ELP exam", "elp")
         for label, field in (("View", self.view), ("Language", self.language), ("Use", self.use)):
             row.addWidget(host.Field(label, field))
+        self.count = QSpinBox()
+        self.count.setRange(1, 30)
+        self.count.setValue(1)
+        row.addWidget(host.Field("Number of questions", self.count))
         self.controls.body.addLayout(row)
         self.choices = QListWidget()
         self.controls.body.addWidget(self.choices)
@@ -135,6 +139,7 @@ class DraftDialog(QDialog):
         sources = [self.sources[i] for i in indices if i < len(self.sources)]
         view, language, use = self.view.currentText(), self.language.currentText(), self.use.currentData()
         guidance = self.host.settings().get("drafting_guidance")
+        count = self.count.value()
         self.controls.setEnabled(False)
         self.send.setEnabled(False)
         self.message.setText("Preparing selected sources…")
@@ -146,7 +151,7 @@ class DraftDialog(QDialog):
                     raise source
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source))
                 slides.append(DraftSlide(link, source))
-            return build_request(tuple(slides), use=use, guidance=guidance), tuple(s.link for s in slides)
+            return build_request(tuple(slides), use=use, guidance=guidance, count=count), tuple(s.link for s in slides)
 
         def ready(prepared, error):
             if not self.state["active"]:
@@ -163,13 +168,13 @@ class DraftDialog(QDialog):
                     return
                 self.message.setText("Drafting… Cancel discards the reply.")
                 self.state["cancel"] = service.request(
-                    request, lambda result, error: self.completed(result, error, sources=sources, use=use))
+                    request, lambda result, error: self.completed(result, error, sources=sources, use=use, count=count))
             except AiChatError as exc:
                 self.completed(None, exc)
 
         self.host.run_in_background(work, ready)
 
-    def completed(self, result, error, *, sources=(), use="revision"):
+    def completed(self, result, error, *, sources=(), use="revision", count=1):
         if not self.state["active"]:
             return
         self.state["cancel"] = None
@@ -183,7 +188,7 @@ class DraftDialog(QDialog):
             return
         if error is None:
             try:
-                self.items = parse_reply(result, sources=sources, use=use)
+                self.items = parse_reply(result, sources=sources, use=use, count=count)
             except DraftReplyError as exc:
                 error = exc
         if error is not None:
