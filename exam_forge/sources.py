@@ -4,7 +4,7 @@
 
 Call check_bank on bank open and on Check now. Approve and freeze use the same
 call with item_ids and wait for done before proceeding. Inspect both the report's
-errors and each source's status: missing, unresolved and error are distinct from
+errors and each source's status: missing and error are distinct from
 changed content, and all conservatively set source_changed.
 
 link_slide and check_item do disk I/O; a UI caller runs them in a worker too.
@@ -29,7 +29,7 @@ from .model import Item, SourceLink
 @dataclass(frozen=True)
 class SourceCheck:
     source: SourceLink
-    status: Literal["unchanged", "changed", "missing", "unresolved", "error"]
+    status: Literal["unchanged", "changed", "missing", "error"]
     fingerprint: str | None = None
     message: str = ""
 
@@ -117,8 +117,7 @@ class _Checker:
                 self.decks[context] = exc
         refs = self.decks[context]
         if isinstance(refs, Exception):
-            status = "unresolved" if isinstance(refs, ValueError) else "error"
-            return SourceCheck(link, status, message=str(refs))
+            return SourceCheck(link, "error", message=str(refs))
 
         candidates = [ref for ref in refs if ref.id == link.slide_id]
         if not candidates:

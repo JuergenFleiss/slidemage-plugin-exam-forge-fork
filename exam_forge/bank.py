@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Revision-preserving JSON bank. All writers cooperate using the bank lock."""
+"""Revision-preserving JSON bank."""
 from __future__ import annotations
 
 import hashlib
@@ -8,10 +8,10 @@ import json
 import os
 import re
 import tempfile
-from contextlib import contextmanager
-from dataclasses import asdict, replace
+from dataclasses import asdict, fields, replace
 from pathlib import Path
 from uuid import uuid4
+from typing import Literal, get_type_hints
 
 from .model import Item, Media, Option, Origin, SourceLink
 
@@ -67,13 +67,29 @@ def _read(path: Path) -> dict:
         raise CorruptFileError(f"{path}: {exc}") from exc
 
 
+def _typed(cls, data):
+    hints = get_type_hints(cls)
+    for field in fields(cls):
+        if field.name not in data:
+            continue
+        expected = hints[field.name]
+        if expected in (str, int, bool) and type(data[field.name]) is not expected:
+            raise ValueError(f"invalid {field.name} type")
+        if getattr(expected, "__origin__", None) is Literal and type(data[field.name]) is not str:
+            raise ValueError(f"invalid {field.name} type")
+    return cls(**data)
+
+
 def _item(data: dict) -> Item:
     data = dict(data)
-    data["options"] = tuple(Option(**option) for option in data["options"])
-    data["sources"] = tuple(SourceLink(**source) for source in data["sources"])
-    data["origin"] = Origin(**data["origin"])
-    data["media"] = tuple(Media(**entry) for entry in data.get("media", ()))
-    return Item(**data)
+    for name in ("options", "sources", "media"):
+        if name in data and type(data[name]) is not list:
+            raise ValueError(f"invalid {name} type")
+    data["options"] = tuple(_typed(Option, option) for option in data["options"])
+    data["sources"] = tuple(_typed(SourceLink, source) for source in data["sources"])
+    data["origin"] = _typed(Origin, data["origin"])
+    data["media"] = tuple(_typed(Media, entry) for entry in data.get("media", ()))
+    return _typed(Item, data)
 
 
 def _revision_data(item: Item) -> dict:
@@ -83,33 +99,6 @@ def _revision_data(item: Item) -> dict:
     return data
 
 
-@contextmanager
-def _lock(folder: Path):
-    # A persistent lock file avoids stale locks after a crash. Locking the bank
-    # rather than a replaced JSON inode also serializes independent processes.
-    with (folder / ".bank.lock").open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-            stream.seek(0)
-            if not stream.read(1):
-                stream.write(b"\0")
-                stream.flush()
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(stream, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(stream, fcntl.LOCK_UN)
-
-
 class Bank:
     """Open an existing bank, or create one in the explicitly selected folder."""
 
@@ -117,11 +106,12 @@ class Bank:
         self.folder = Path(folder)
         if create:
             self.folder.mkdir(parents=True, exist_ok=True)
-        with _lock(self.folder):
-            if create and not self._index_path.exists():
-                _atomic_write(self._index_path, {"schema_version": SCHEMA_VERSION,
-                                                "id": str(uuid4()), "items": {}})
-            self._index()
+        if create and not self._index_path.exists():
+            if any(p.name != "bank.json" for p in self.folder.glob("*.json")):
+                raise BankError("bank.json is missing but question files exist in this folder")
+            _atomic_write(self._index_path, {"schema_version": SCHEMA_VERSION,
+                                            "id": str(uuid4()), "items": []})
+        self._index()
 
     @property
     def _index_path(self) -> Path:
@@ -129,11 +119,12 @@ class Bank:
 
     def _index(self) -> dict:
         data = _read(self._index_path)
-        if (not isinstance(data.get("id"), str) or not data["id"]
-                or not isinstance(data.get("items"), dict)
-                or any(not isinstance(k, str) or not _ID.fullmatch(k) or type(v) is not bool
-                       for k, v in data["items"].items())):
+        if not isinstance(data.get("id"), str) or not data["id"]:
             raise CorruptFileError(f"{self._index_path}: invalid bank index")
+        items = data.get("items")
+        if not isinstance(items, list) or any(not isinstance(k, str) or not _ID.fullmatch(k) for k in items):
+            raise CorruptFileError(f"{self._index_path}: invalid bank index")
+        data["items"] = items
         return data
 
     @property
@@ -171,27 +162,24 @@ class Bank:
         _atomic_write(self._path(item_id), data)
 
     def get(self, item_id: str, revision: int | None = None) -> Item:
-        """Historical revisions remain readable after deletion, with the current source flag."""
-        with _lock(self.folder):
-            if item_id not in self._index()["items"]:
-                raise KeyError(item_id)
-            revisions = self._revisions(item_id)
-            if revision is None:
-                return revisions[-1]
-            if type(revision) is not int or not 1 <= revision <= len(revisions):
-                raise KeyError((item_id, revision))
-            return revisions[revision - 1]
+        """Read a revision with the current source flag."""
+        if item_id not in self._index()["items"]:
+            raise KeyError(item_id)
+        revisions = self._revisions(item_id)
+        if revision is None:
+            return revisions[-1]
+        if type(revision) is not int or not 1 <= revision <= len(revisions):
+            raise KeyError((item_id, revision))
+        return revisions[revision - 1]
 
     def load(self) -> tuple[list[Item], list[CorruptFileError]]:
-        """Return current, non-deleted items and per-file errors; refuse newer schemas."""
+        """Return current items and per-file errors; refuse newer schemas."""
         items, errors = [], []
-        with _lock(self.folder):
-            for item_id, deleted in self._index()["items"].items():
-                if not deleted:
-                    try:
-                        items.append(self._revisions(item_id)[-1])
-                    except CorruptFileError as exc:
-                        errors.append(exc)
+        for item_id in self._index()["items"]:
+            try:
+                items.append(self._revisions(item_id)[-1])
+            except CorruptFileError as exc:
+                errors.append(exc)
         return items, errors
 
     def create(self, item: Item) -> Item:
@@ -199,72 +187,68 @@ class Bank:
         path = self._path(item.id)
         if item.revision != 1 or item.status != "draft":
             raise ValueError("a new item must be revision 1 and draft")
-        with _lock(self.folder):
-            index = self._index()
-            if item.id in index["items"] or path.exists():
-                raise ConflictError(f"item ID already used: {item.id}")
-            # A failed item write leaves a reported missing file and reserves the ID.
-            index["items"][item.id] = False
-            _atomic_write(self._index_path, index)
-            self._write_item(item.id, {"schema_version": SCHEMA_VERSION}, [item], item.source_changed)
+        index = self._index()
+        if item.id in index["items"] or path.exists():
+            raise ConflictError(f"item ID already used: {item.id}")
+        # A failed item write leaves a reported missing file and reserves the ID.
+        index["items"].append(item.id)
+        _atomic_write(self._index_path, index)
+        self._write_item(item.id, {"schema_version": SCHEMA_VERSION}, [item], item.source_changed)
         return item
 
     def save(self, item: Item) -> Item:
         """Save an edit based on item.revision, returning the new revision."""
         if item.status != "draft":
             raise ValueError("edits must have draft status")
-        with _lock(self.folder):
-            index = self._index()
-            if item.id not in index["items"] or index["items"][item.id]:
-                raise ConflictError(f"item is missing or deleted: {item.id}")
-            data, revisions = self._document(item.id)
-            current = revisions[-1]
-            if item.revision != current.revision:
-                raise ConflictError(f"stale revision for {item.id}")
-            if item.origin != current.origin:
-                raise ValueError("origin is permanent")
-            item = replace(item, revision=current.revision + 1, status="draft",
-                           source_changed=current.source_changed)
-            revisions.append(item)
-            self._write_item(item.id, data, revisions, current.source_changed)
-            return item
+        index = self._index()
+        if item.id not in index["items"]:
+            raise ConflictError(f"item is missing: {item.id}")
+        data, revisions = self._document(item.id)
+        current = revisions[-1]
+        if item.revision != current.revision:
+            raise ConflictError(f"stale revision for {item.id}")
+        if item.origin != current.origin:
+            raise ValueError("origin is permanent")
+        item = replace(item, revision=current.revision + 1, status="draft",
+                       source_changed=current.source_changed)
+        revisions.append(item)
+        self._write_item(item.id, data, revisions, current.source_changed)
+        return item
 
     def set_status(self, item_id: str, revision: int, status: str) -> Item:
         """Move through the review lifecycle, preserving the previous revision."""
         transitions = {"draft": "reviewed", "reviewed": "retired", "retired": "draft"}
-        with _lock(self.folder):
-            index = self._index()
-            if item_id not in index["items"] or index["items"][item_id]:
-                raise ConflictError(f"item is missing or deleted: {item_id}")
-            data, revisions = self._document(item_id)
-            current = revisions[-1]
-            if type(revision) is not int or current.revision != revision:
-                raise ConflictError(f"stale revision for {item_id}")
-            if status != transitions[current.status]:
-                raise ValueError(f"invalid status transition: {current.status} to {status}")
-            updated = replace(current, revision=current.revision + 1, status=status)
-            revisions.append(updated)
-            self._write_item(item_id, data, revisions, current.source_changed)
-            return updated
+        index = self._index()
+        if item_id not in index["items"]:
+            raise ConflictError(f"item is missing: {item_id}")
+        data, revisions = self._document(item_id)
+        current = revisions[-1]
+        if type(revision) is not int or current.revision != revision:
+            raise ConflictError(f"stale revision for {item_id}")
+        if status != transitions[current.status]:
+            raise ValueError(f"invalid status transition: {current.status} to {status}")
+        updated = replace(current, revision=current.revision + 1, status=status)
+        revisions.append(updated)
+        self._write_item(item_id, data, revisions, current.source_changed)
+        return updated
 
     def set_source_changed(self, item_id: str, changed: bool, *,
                            expected_sources: tuple[SourceLink, ...] | None = None) -> Item:
         """Record a source check; optionally reject results for links edited during a check."""
         if type(changed) is not bool:
             raise ValueError("source_changed must be a boolean")
-        with _lock(self.folder):
-            index = self._index()
-            if item_id not in index["items"] or index["items"][item_id]:
-                raise ConflictError(f"item is missing or deleted: {item_id}")
-            data, revisions = self._document(item_id)
-            current = revisions[-1]
-            if expected_sources is not None and current.sources != expected_sources:
-                raise ConflictError(f"source links changed during check for {item_id}")
-            if current.source_changed == changed:
-                return current
-            updated = replace(current, source_changed=changed)
-            self._write_item(item_id, data, revisions, changed)
-            return updated
+        index = self._index()
+        if item_id not in index["items"]:
+            raise ConflictError(f"item is missing: {item_id}")
+        data, revisions = self._document(item_id)
+        current = revisions[-1]
+        if expected_sources is not None and current.sources != expected_sources:
+            raise ConflictError(f"source links changed during check for {item_id}")
+        if current.source_changed == changed:
+            return current
+        updated = replace(current, source_changed=changed)
+        self._write_item(item_id, data, revisions, changed)
+        return updated
 
     def store_media(self, name: str, data: bytes, alt: str = "") -> Media:
         """Atomically store content by hash; replacing an image never changes old revisions."""
@@ -274,24 +258,23 @@ class Bank:
         # Validate the supplied filename before using its suffix.
         Media(name, digest, alt)
         media = Media(digest + Path(name).suffix.lower(), digest, alt)
-        with _lock(self.folder):
-            folder = self.folder / "media"
-            folder.mkdir(exist_ok=True)
-            path = folder / media.name
-            if path.exists():
-                self.read_media(media)
-                return media
-            temporary = None
-            try:
-                with tempfile.NamedTemporaryFile(dir=folder, prefix=".media-", delete=False) as stream:
-                    temporary = stream.name
-                    stream.write(data)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, path)
-            finally:
-                if temporary is not None and os.path.exists(temporary):
-                    os.unlink(temporary)
+        folder = self.folder / "media"
+        folder.mkdir(exist_ok=True)
+        path = folder / media.name
+        if path.exists():
+            self.read_media(media)
+            return media
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=folder, prefix=".media-", delete=False) as stream:
+                temporary = stream.name
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None and os.path.exists(temporary):
+                os.unlink(temporary)
         return media
 
     def read_media(self, media: Media) -> bytes:
@@ -305,13 +288,3 @@ class Bank:
             raise BankError(f"Media hash mismatch: {media.name}")
         return data
 
-    def delete(self, item_id: str, revision: int) -> None:
-        """Hide an item without removing its history or releasing its ID."""
-        with _lock(self.folder):
-            index = self._index()
-            if item_id not in index["items"] or index["items"][item_id]:
-                raise ConflictError(f"item is missing or deleted: {item_id}")
-            if self._revisions(item_id)[-1].revision != revision:
-                raise ConflictError(f"stale revision for {item_id}")
-            index["items"][item_id] = True
-            _atomic_write(self._index_path, index)

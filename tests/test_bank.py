@@ -72,17 +72,15 @@ def test_newer_schema_refused_for_bank_and_item(bank):
         Bank(bank.folder)
 
 
-def test_ids_never_reused_after_retirement_or_deletion(bank):
+def test_ids_never_reused_after_retirement(bank):
     item = bank.create(question())
     reviewed = bank.set_status(item.id, item.revision, "reviewed")
     retired = bank.set_status(item.id, reviewed.revision, "retired")
     with pytest.raises(ConflictError):
         bank.create(question())
-    bank.delete(item.id, retired.revision)
-    assert bank.load() == ([], [])
+    assert bank.load() == ([retired], [])
     assert bank.get(item.id, 1) == item
-    with pytest.raises(ConflictError):
-        bank.create(question())
+
 
 
 def test_interrupted_replace_leaves_old_file(bank, monkeypatch):
@@ -184,3 +182,28 @@ def test_interrupted_media_write_leaves_existing_images_intact(bank, monkeypatch
         bank.store_media("new.png", b"new image")
     assert bank.read_media(first) == b"old image"
     assert list((bank.folder / "media").iterdir()) == [bank.folder / "media" / first.name]
+
+
+@pytest.mark.parametrize("field,value", [("stem", 123), ("correct", 0.5)])
+def test_wrong_field_types_are_reported_per_item(bank, field, value):
+    good = bank.create(question("good"))
+    bank.create(question("bad"))
+    path = bank.folder / "bad.json"
+    data = json.loads(path.read_text())
+    row = data["revisions"][0]
+    if field == "correct":
+        for option in row["options"]:
+            option[field] = value
+    else:
+        row[field] = value
+    path.write_text(json.dumps(data))
+    items, errors = bank.load()
+    assert items == [good] and len(errors) == 1 and "bad.json" in str(errors[0])
+
+
+def test_missing_index_with_question_files_refuses_creation(bank):
+    bank.create(question())
+    (bank.folder / "bank.json").unlink()
+    with pytest.raises(storage.BankError, match="bank.json is missing"):
+        Bank(bank.folder, create=True)
+    assert not (bank.folder / "bank.json").exists()

@@ -99,7 +99,6 @@ def test_moved_deck_and_missing_folder_ask_again(setup, monkeypatch, tmp_path):
     assert choose_bank(host, deck).id == bank.id
     (folder / "bank.json").unlink()
     assert choose_bank(host, deck) is None
-    (folder / ".bank.lock").unlink()
     folder.rmdir()
     assert choose_bank(host, deck) is None
     assert settings.saves == 1
@@ -130,3 +129,14 @@ def test_symlink_to_output_is_detected(setup, tmp_path):
     alias = tmp_path / "alias"
     alias.symlink_to(output, target_is_directory=True)
     assert any("output" in warning for warning in folder_warnings(host, deck, alias))
+
+
+def test_remembered_risky_folder_requires_confirmation_again(setup, monkeypatch):
+    host, _, deck, project = setup
+    folder = project / "bank"
+    folder.mkdir()
+    select(monkeypatch, folder)
+    assert choose_bank(host, deck)
+    calls = select(monkeypatch, "", QMessageBox.StandardButton.No)
+    assert choose_bank(host, deck) is None
+    assert len(calls) == 1

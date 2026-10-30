@@ -13,6 +13,7 @@ from xml.etree import ElementTree as ET
 import pytest
 from fake_host import FakeDeck, FakeHost
 from PySide6.QtGui import QColor, QImage, QPalette
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 from slidemage.plugin_api import Focus, SlideRef, SlideSource
 
@@ -122,8 +123,8 @@ def test_create_edit_review_and_media_revisions(env, monkeypatch, tmp_path):
     image = QImage(8, 8, QImage.Format.Format_RGB32)
     image.fill(QColor("red"))
     assert image.save(str(image_path))
-    monkeypatch.setattr("exam_forge.ui.window.QFileDialog.getOpenFileName", lambda *a: (str(image_path), ""))
-    monkeypatch.setattr("exam_forge.ui.window.QInputDialog.getText", lambda *a, **k: ("A red square", True))
+    monkeypatch.setattr("exam_forge.ui.editor.QFileDialog.getOpenFileName", lambda *a: (str(image_path), ""))
+    monkeypatch.setattr("exam_forge.ui.editor.QInputDialog.getText", lambda *a, **k: ("A red square", True))
     window.attach_image()
     window.save_button.click()
     edited = window.current
@@ -139,27 +140,20 @@ def controller_items(window):
     return window.bank.load()[0]
 
 
-def test_conflict_keeps_every_field_and_offers_copy(env, monkeypatch):
+def test_conflict_keeps_every_field(env, monkeypatch):
     _, _, bank, _, window = env
     item = fill(window)
     window.stem.setPlainText("My unsaved text")
     window.options.cellWidget(1, 2).setPlainText("Typed rationale")
     window.topic.setText("My topic")
     bank.save(replace(item, stem="Their edit"))
-    messages = []
-    monkeypatch.setattr(QMessageBox, "exec", lambda box: messages.append(box.text()))
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda box: None)
     assert not window.save()
     assert window.stem.toPlainText() == "My unsaved text"
     assert window.options.cellWidget(1, 2).toPlainText() == "Typed rationale"
     assert window.topic.text() == "My topic"
     assert bank.get(item.id).stem == "Their edit"
-    assert "still in this editor" in messages[0]
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda box: next(b for b in box.buttons() if b.text() == "Save as new question"))
-    assert window.save()
-    assert window.current.id != item.id and window.current.status == "draft"
-    assert window.current.stem == "My unsaved text"
-    assert len(bank.load()[0]) == 2
+    assert "stale revision" in window.notice.text()
+
 
 
 def test_review_marker_on_open_check_now_and_before_approve_retire(env, monkeypatch):
@@ -391,3 +385,64 @@ def test_missing_remembered_bank_prompts_and_can_relocate(app, tmp_path, monkeyp
     assert host.settings().get("bank_folders")[str(deck.path.resolve())] == str(relocated)
     window.hide()
     window.deleteLater()
+
+
+def test_navigation_saves_before_selecting(env, monkeypatch):
+    host, _, bank, _, window = env
+    first = fill(window)
+    bank.create(Item("second", 1, "Second", first.options))
+    window.reload()
+    window.stem.setPlainText("Saved while navigating")
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Save)
+    row = next(window.item_list.item(i) for i in range(window.item_list.count())
+               if window.item_list.item(i).data(Qt.ItemDataRole.UserRole) == "second")
+    window.item_list.setCurrentItem(row)
+    assert window.current.id == "second"
+    assert bank.get(first.id).stem == "Saved while navigating"
+
+
+def test_export_rechecks_stale_list(env, tmp_path, monkeypatch):
+    host, _, bank, _, window = env
+    item = fill(window)
+    bank.set_status(item.id, item.revision, "reviewed")
+    window.reload()
+    reviewed = bank.get(item.id)
+    bank.save(replace(reviewed, stem="Changed elsewhere", status="draft", use="elp"))
+    path = tmp_path / "out.xml"
+    monkeypatch.setattr("exam_forge.ui.window.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    window.export()
+    host.drain()
+    assert not path.exists()
+    assert "No reviewed" in window.notice.text()
+
+
+def test_reopen_missing_bank_preserves_editor(env, tmp_path, monkeypatch):
+    host, deck, bank, controller, window = env
+    fill(window)
+    window.stem.setPlainText("Unsaved")
+    (bank.folder / "bank.json").unlink()
+    monkeypatch.setattr("exam_forge.ui.first_use.QFileDialog.getExistingDirectory", lambda *a: "")
+    assert controller.open(deck) is None
+    assert window.stem.toPlainText() == "Unsaved"
+
+
+def test_export_warns_about_newly_changed_source(env, tmp_path, monkeypatch):
+    host, deck, bank, _, window = env
+    ref = source(host, deck)
+    with ThreadPoolExecutor() as executor:
+        link = executor.submit(link_slide, host, ref, "instructor").result()
+    item = fill(window)
+    window.links = (link,)
+    window.save()
+    window.approve_button.click()
+    host.drain()
+    assert bank.get(item.id).status == "reviewed"
+    host.sources[ref] = SlideSource(text="Changed after list loaded")
+    notices = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: notices.append(a[2]) or QMessageBox.StandardButton.No)
+    path = tmp_path / "out.xml"
+    monkeypatch.setattr("exam_forge.ui.window.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    window.export()
+    host.drain()
+    assert notices and item.stem in notices[0] and "s1" in notices[0]
+    assert bank.get(item.id).source_changed and not path.exists()

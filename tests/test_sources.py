@@ -175,7 +175,7 @@ def test_removed_slide_is_distinct_and_not_read_from_old_ref(env, tmp_path):
     assert not env.host.source_reads
 
 
-def test_unresolved_deck_is_distinct_from_missing_slide(env, tmp_path, monkeypatch):
+def test_deck_error_is_reported(env, tmp_path, monkeypatch):
     item = question(env)
     bank = make_bank(tmp_path, item)
 
@@ -186,7 +186,7 @@ def test_unresolved_deck_is_distinct_from_missing_slide(env, tmp_path, monkeypat
     report, error = run_bank(env, bank)
     assert error is None
     source = report.items[0].sources[0]
-    assert source.status == "unresolved" and "custom command" in source.message
+    assert source.status == "error" and "custom command" in source.message
     assert source.fingerprint is None and bank.get(item.id).source_changed
 
 

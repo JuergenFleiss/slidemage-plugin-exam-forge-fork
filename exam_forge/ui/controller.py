@@ -46,6 +46,16 @@ class Controller:
                 self.host.show_message(str(exc), error=True)
                 return None
         else:
+            if not window.bank.folder.is_dir() or not (window.bank.folder / "bank.json").is_file():
+                try:
+                    bank = choose_bank(self.host, deck)
+                    if bank is None:
+                        return None
+                    window.bank = bank
+                    window.folder_label.setText(str(bank.folder))
+                except (OSError, BankError, ValueError) as exc:
+                    self.host.show_message(str(exc), error=True)
+                    return None
             window.deck = deck
             # Reopening also rechecks the bank without replacing unsaved editor content.
             window.check_sources()

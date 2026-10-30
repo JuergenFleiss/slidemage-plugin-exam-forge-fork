@@ -16,9 +16,7 @@ def choose_bank(host, deck, parent=None):
     Errors opening a bank or saving settings are allowed to reach the caller.
     """
     folder = remembered_folder(host, deck)
-    if folder is not None and (folder / "bank.json").is_file():
-        return Bank(folder)
-    selected = QFileDialog.getExistingDirectory(parent, "Choose a folder for the question bank")
+    selected = folder if folder is not None and (folder / "bank.json").is_file() else QFileDialog.getExistingDirectory(parent, "Choose a folder for the question bank")
     if not selected:
         return None
     warnings = folder_warnings(host, deck, selected)
@@ -31,5 +29,6 @@ def choose_bank(host, deck, parent=None):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return None
-    folder = selected
-    return open_chosen_folder(host, deck, folder)
+    if folder is not None and selected == folder:
+        return Bank(folder)
+    return open_chosen_folder(host, deck, selected)
