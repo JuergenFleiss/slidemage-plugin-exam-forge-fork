@@ -1,0 +1,32 @@
+name: Release
+
+# Pushing a tag v<MAJOR.MINOR.PATCH> checks the plugin, builds the .smplugin and its .sha256 and publishes them as
+# the tag's GitHub release, with the version's CHANGELOG entry as its notes.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # find the previous release tag
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python build.py --tag "$GITHUB_REF_NAME"
+      - name: Release notes
+        run: python release_notes.py "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          id=$(python -c 'import tomllib; print(tomllib.load(open("plugin.toml", "rb"))["id"])')
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md \
+            "dist/$id-$version.smplugin" "dist/$id-$version.smplugin.sha256"
