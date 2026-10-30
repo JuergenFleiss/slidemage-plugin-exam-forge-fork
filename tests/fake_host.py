@@ -35,7 +35,6 @@ class FakeHost:
         self.slides: dict[tuple[Path, str, str], list[SlideRef]] = {}
         self.sources: dict[SlideRef, SlideSource] = {}
         self.opened_slides: list[SlideRef] = []
-        self.opened_files: list[Path] = []
 
     def finish_activation(self):
         self._active = False
@@ -107,13 +106,6 @@ class FakeHost:
 
     def open_slide(self, ref: SlideRef) -> None:
         self.opened_slides.append(ref)
-
-    def open_file(self, path: Path) -> None:
-        path = Path(path)
-        path = path if path.is_absolute() else self.root / path
-        if not path.exists():
-            raise FileNotFoundError(path)
-        self.opened_files.append(path)
 
     def settings(self):
         if not hasattr(self, "_settings"):

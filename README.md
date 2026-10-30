@@ -14,15 +14,11 @@ Source checks run in the background on open, on **Check now**, and before status
 
 **Export Moodle XML…** exports reviewed revision-quiz questions matching the current list filters. It excludes ELP questions, drafts and retired questions. Images are read from the bank and verified against their SHA-256 hashes. Question and answer text is plain text; inline mathematics uses `\( ... \)`. In Moodle, import using the Moodle XML format with its MathJax filter enabled. **Moodle import has yet to be verified**, including media, mathematics and grading.
 
-## ELP exams and sessions
+## ELP exams
 
-The window has **Bank**, **Exam** and **Sessions** tabs. In Sessions, refresh after a presentation ends. Presentation logging starts on first opening a bank, after plugin activation, and continues while the window is hidden. Switching bank folders or shutting down closes its subscription. Without a `presenter.events` provider the Sessions tab explains that logging is unavailable. An optional cached `course.sessions` schedule labels presentations and supplies estimated slide coverage.
+The window has **Bank** and **Exam** tabs. On Exam, set exact topic counts, easy/hard counts, minutes and recent-exam avoidance. Proposals use all reviewed ELP questions and report eligibility exclusions with reasons. Easy questions use 12 points and 2.5 minutes; hard questions use 24 points and 5 minutes. Each proposal gets an automatic seed. Infeasible blueprints keep their reported constraints; they are never relaxed. Swap from the eligible pool, then approve after the source check and changed-question list.
 
-Tick sessions to include their presentation logs in taught evidence; all are included initially.
-
-On Exam, set exact topic counts, easy/hard counts, minutes and recent-exam avoidance. The Slides taught-only filter starts on. Easy questions use 12 points and 2.5 minutes; hard questions use 24 points and 5 minutes. Each proposal gets an automatic seed. Turn it off to remove the taught-only limit. Without a log, slide coverage uses the schedule and asks you to confirm or adjust the estimated last taught slide position. Both exclusion lists show their reasons. Infeasible blueprints keep their reported constraints; they are never relaxed. Swap from the eligible pool, then approve after the source check and changed-question list.
-
-Approval opens the second issuing step. **Freeze approved exam** checks fresh sources again; changed sources stop issuing. Each issue creates a unique `*.manifest.json` in the bank folder. The frozen blueprint includes the seed, taught options, session IDs and confirmed cut-off. Open an issued manifest to inspect it or save its documents again. Later bank edits do not alter it.
+Approval opens the second issuing step. **Freeze approved exam** checks fresh sources again; changed sources stop issuing. Each issue creates a unique `*.manifest.json` in the bank folder. The frozen blueprint includes the seed and selection constraints. Open an issued manifest to inspect it or save its documents again. Later bank edits do not alter it.
 
 The document save dialogs write two self-contained HTML files: an exam entry copy and a **private key with answers, rationales and the scoring sheet**. Math remains copyable source, not typeset. The item editor's teaching-assistant note carries shared stems, exclusions or fixed option order. **This note appears in the exam file: never put answers in it.** It is frozen verbatim and ignored by Moodle XML. Nothing is inferred from the key into the note.
 
@@ -34,7 +30,7 @@ Real-window dark-theme and player checks, frozen-build end-to-end operation, Moo
 
 AI support is off by default in Exam Forge Settings. Enable it with an available chat route (for example Claude or Ollama) to show **Draft with AI…** in the Bank tab. Choose the slide view, language and question use, then explicitly tick slides. Nothing is selected initially. Select a row to inspect its text.
 
-Image descriptions are never included in drafting requests. Image files, other bank questions and their keys or rationales, session names and student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
+Image descriptions are never included in drafting requests. Image files, other bank questions and their keys or rationales, student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
 
 The host handles the current chat route and model, confirms the full text before each cloud request, and never silently switches routes. Cancel or decline adds nothing. A malformed or truncated JSON reply is refused in full with a message. Valid replies enter the bank only as **Draft**, with the captured route/model and an amber **AI draft** label. Edit and **Mark reviewed** through the normal source check before using them. The permanent **AI-assisted** provenance survives acceptance and later edits; those edits start another draft revision. Chosen slide links are retained.
 

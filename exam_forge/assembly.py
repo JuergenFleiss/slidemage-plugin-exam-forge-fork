@@ -2,9 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exact ELP blueprint selection, swaps and the pre-approval source check.
 
-G7 filters with taught.filter_items first, shows both exclusion lists, and asks
-the lecturer to approve. check_approval always reruns D10; its result requires
-explicit acknowledgement of changed sources. G5 separately checks on freeze.
+Approval and freeze each recheck sources.
 """
 from __future__ import annotations
 
@@ -19,9 +17,14 @@ from .bank import Bank, ConflictError
 from .elp import ElpRules, check_elp
 from .model import Item
 from .sources import BankCheck, ItemCheck, check_bank
-from .taught import ExcludedItem
 
 _DEFAULT_RULES = ElpRules()
+
+
+@dataclass(frozen=True)
+class ExcludedItem:
+    item: Item
+    reasons: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -92,7 +95,7 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
              previous_exams: Sequence[Sequence[str]] = ()) -> Assembly:
     """Select reviewed ELP items, with no relaxed constraints or partial result.
 
-    Pass current revisions after the taught filter. History is oldest first and
+    Pass current revisions. History is oldest first and
     contains stable item IDs: reuse avoidance covers all revisions. Input order
     does not affect a seeded selection. source_changed remains a separate flag.
     """

@@ -3,20 +3,15 @@
 """Non-modal window shell; worker completions alone update phase 2 widgets."""
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QLabel,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
-from slidemage.plugin_api import ServiceError
-
-from ..presentation_log import PresentationLog
 from .bank_tab import BankTab
 from .editor import ItemEditor, accent
 from .exam_tab import ExamTab
-from .sessions_tab import SessionsTab
 
 
 class BankWindow(BankTab, ItemEditor, QWidget):
@@ -49,44 +44,20 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
         self.tabs.addTab(self.build_bank_tab(), "Bank")
-        self.sessions_tab = SessionsTab(self)
         self.exam_tab = ExamTab(self)
         self.tabs.addTab(self.exam_tab, "Exam")
-        self.tabs.addTab(self.sessions_tab, "Sessions")
-        self.tabs.currentChanged.connect(self.tab_changed)
-        self.presentation_log = PresentationLog(host, bank.folder)
-        self.start_logging()
-        QApplication.instance().aboutToQuit.connect(self.presentation_log.close)
-        self.destroyed.connect(self.presentation_log.close)
         self.reload()
         self.check_sources()
 
-    def start_logging(self):
-        try:
-            available = self.presentation_log.start()
-            self.sessions_tab.logging.setText("Presentation logging is active for this bank." if available else
-                "Presentation logging unavailable: no presenter.events provider.")
-        except (ServiceError, OSError, RuntimeError) as exc:
-            self.sessions_tab.logging.setText(f"Presentation logging unavailable: {exc}")
-            self.error(exc)
-
     def switch_bank(self, bank):
-        self.presentation_log.close()
         # Replace the window's bank only when there is no worker using it.
         self.bank = bank
         self.folder_label.setText(str(bank.folder))
         self.current = self.baseline = None
         self.new_item = False
         self.editor.setEnabled(False)
-        self.sessions_tab.reset()
         self.exam_tab.reset()
-        self.presentation_log.folder = bank.folder
-        self.start_logging()
         self.reload()
-
-    def tab_changed(self, index):
-        if self.tabs.widget(index) is self.sessions_tab and not self.sessions_tab.loaded:
-            self.when_idle(self.sessions_tab.load)
 
     def error(self, error):
         self.notice.setText(str(error))
@@ -102,7 +73,7 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         self.busy = busy
         self.draft_button.setEnabled(not busy)
         self.editor.setEnabled(not busy and self.current is not None)
-        for widget in (self.check_button, self.export_button, self.exam_tab, self.sessions_tab):
+        for widget in (self.check_button, self.export_button, self.exam_tab):
             widget.setEnabled(not busy)
         if not busy:
             callbacks, self.idle_callbacks = self.idle_callbacks, []
@@ -133,6 +104,6 @@ class BankWindow(BankTab, ItemEditor, QWidget):
 
     def closeEvent(self, event):
         if self.may_leave():
-            event.accept()  # Keep logging while hidden; the controller retains the window.
+            event.accept()
         else:
             event.ignore()

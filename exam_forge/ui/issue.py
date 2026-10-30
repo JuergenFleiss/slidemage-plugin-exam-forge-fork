@@ -76,8 +76,7 @@ class IssueView(QWidget):
         stem = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ-") + uuid4().hex[:8]
         path = bank.folder / (stem + ".manifest.json")
         self.window.set_busy(True)
-        blueprint = {**asdict(selection.blueprint), "seed": selection.seed,
-                     "taught": self.exam.taught_blueprint}
+        blueprint = {**asdict(selection.blueprint), "seed": selection.seed}
 
         def work():
             manifest = freeze(self.host, fresh_deck(deck), bank,

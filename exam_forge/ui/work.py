@@ -4,8 +4,6 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from slidemage.plugin_api import ServiceError
-
 
 @dataclass(frozen=True)
 class DeckSnapshot:
@@ -17,16 +15,6 @@ class DeckSnapshot:
 
 def fresh_deck(deck):
     return DeckSnapshot(deck.name, deck.path, deck.path.read_text(encoding="utf-8"), deck.groups)
-
-
-def schedule_for(host, deck):
-    """Service discovery and calls belong on the UI thread, after activation."""
-    try:
-        service = host.service("course.sessions", 1)
-        return service.sessions(deck) if service else None
-    except ServiceError as exc:
-        host.show_message(str(exc), error=True)
-        return None
 
 
 def changed_details(checks):

@@ -1,12 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Blueprint, taught evidence and selection; all selection rules live in modules."""
-from dataclasses import asdict
-from datetime import datetime
+"""Blueprint and selection; all selection rules live in modules."""
 from secrets import randbits
 
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QInputDialog,
@@ -24,11 +21,8 @@ from PySide6.QtWidgets import (
 from ..assembly import Blueprint, assemble, check_approval, swap
 from ..elp import ElpRules
 from ..manifest import Manifest
-from ..presentation_log import Sessions
-from ..presentation_log import read_log
-from ..taught import TaughtOptions, build_evidence, filter_items
 from .issue import IssueView
-from .work import changed_details, fresh_deck, schedule_for
+from .work import changed_details, fresh_deck
 
 
 class ExamTab(QWidget):
@@ -36,7 +30,6 @@ class ExamTab(QWidget):
         super().__init__()
         self.window, self.host = window, window.host
         self.selection = self.approved = None
-        self.taught_blueprint = {}
         layout = QVBoxLayout(self)
         self.stack = QStackedWidget()
         layout.addWidget(self.stack)
@@ -49,12 +42,6 @@ class ExamTab(QWidget):
         issued.clicked.connect(self.open_issued)
         heading.addWidget(issued)
         body.addLayout(heading)
-        row = QHBoxLayout()
-        self.slides = QCheckBox("Slides")
-        self.slides.setChecked(True)
-        row.addWidget(QLabel("Taught only"))
-        row.addWidget(self.slides)
-        body.addLayout(row)
         self.counts = QTableWidget(1, 2)
         self.counts.setHorizontalHeaderLabels(["Topic", "Exact count"])
         self.counts.horizontalHeader().setStretchLastSection(True)
@@ -100,11 +87,8 @@ class ExamTab(QWidget):
         self.stack.addWidget(self.issue)
         self.counts.itemChanged.connect(self.invalidate)
         self.counts.model().rowsRemoved.connect(self.invalidate)
-        for field in (self.slides,):
-            field.toggled.connect(self.invalidate)
         for field in (self.easy, self.hard, self.minutes, self.avoid):
             field.valueChanged.connect(self.invalidate)
-        window.sessions_tab.session_list.itemChanged.connect(self.invalidate)
 
     def open_issued(self):
         self.stack.setCurrentWidget(self.issue)
@@ -150,23 +134,11 @@ class ExamTab(QWidget):
             return
         self.invalidate()
         self.results.clear()
-        self.report.setPlainText("Reading taught evidence…")
-        bank, deck = self.window.bank, self.window.deck
-        schedule = schedule_for(self.host, deck)
-        chosen = self.window.sessions_tab.selected_ids()
-        language = self.host.deck_language(deck)
-        options = TaughtOptions(self.slides.isChecked())
-        seed, as_of = randbits(64), datetime.now().astimezone()
+        self.report.setPlainText("Preparing selection…")
+        bank = self.window.bank
+        seed = randbits(64)
 
         def work():
-            snapshot = fresh_deck(deck)
-            refs = {(view, lang): self.host.deck_slides(snapshot, view, lang)
-                    for view in ("instructor", "during-course", "after-course") for lang in ("en", "de")}
-            store = Sessions(bank)
-            sessions = [s for s in store.load(deck=snapshot, schedule=schedule) if chosen is None or s.id in chosen]
-            logs = {s.id: read_log(store.path(s.presentation)) for s in sessions if s.presentation}
-            evidence = build_evidence(refs, sessions, logs, schedule=schedule, as_of=as_of,
-                                      language=language)
             items, errors = bank.load()
             if errors:
                 raise ValueError("\n".join(map(str, errors)))
@@ -179,39 +151,16 @@ class ExamTab(QWidget):
                             previous.append([i['id'] for i in manifest['items']])
                     except (OSError, ValueError, KeyError, TypeError) as exc:
                         history_errors.append(f"Could not read exam history {path.name}: {exc}")
-            return refs, sessions, logs, evidence, items, previous, history_errors
+            return assemble(items, blueprint, seed=seed, rules=rules, previous_exams=previous), history_errors
 
-        def prepared(data):
-            refs, sessions, logs, evidence, items, previous, history_errors = data
-            cutoff = None
-            if options.slides and evidence.slide_method == "schedule":
-                cutoff, ok = QInputDialog.getInt(self, "Confirm estimated cut-off", evidence.slide_reason +
-                    "\nLast taught slide position (0 means none):", evidence.cutoff_position, 0, 1000000)
-                if not ok:
-                    self.report.setPlainText("Estimated cut-off not confirmed. No selection proposed.")
-                    return
-
-            def select():
-                confirmed = build_evidence(refs, sessions, logs, schedule=schedule, as_of=as_of,
-                                           language=language, cutoff_position=cutoff)
-                filtered = filter_items(items, confirmed, options=options)
-                selection = assemble(filtered.included, blueprint, seed=seed, rules=rules, previous_exams=previous)
-                return confirmed, filtered, selection
-
-            def done(result):
-                evidence, filtered, self.selection = result
-                self.taught_blueprint = {"options": asdict(options), "cutoff_position": evidence.cutoff_position,
-                                        "method": evidence.slide_method, "sessions": [s.id for s in sessions],
-                                        "as_of": as_of.isoformat()}
-                exclusions = lambda rows: "\n".join(f"{r.item.id}: {' '.join(r.reasons)}" for r in rows) or "None"
-                self.report.setPlainText("\n".join(filter(None, (*history_errors, evidence.slide_reason))) +
-                    f"\nCut-off position: {evidence.cutoff_position}\n\nTaught-only exclusions\n" + exclusions(filtered.excluded) +
-                    "\n\nBlueprint exclusions\n" + exclusions(self.selection.excluded) +
-                    "\n\n" + ("\n".join(self.selection.problems) if not self.selection.feasible else
-                    f"{self.selection.total_points} points · {self.selection.total_minutes} minutes · seed {seed}"))
-                self.render_selection()
-            self.window.work(select, done)
-        self.window.work(work, prepared)
+        def done(data):
+            self.selection, history_errors = data
+            exclusions = "\n".join(f"{r.item.id}: {' '.join(r.reasons)}" for r in self.selection.excluded) or "None"
+            self.report.setPlainText("\n".join(history_errors) + "\n\nBlueprint exclusions\n" + exclusions +
+                "\n\n" + ("\n".join(self.selection.problems) if not self.selection.feasible else
+                f"{self.selection.total_points} points · {self.selection.total_minutes} minutes · seed {seed}"))
+            self.render_selection()
+        self.window.work(work, done)
 
     def render_selection(self):
         self.results.clear()

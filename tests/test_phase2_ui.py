@@ -3,12 +3,10 @@
 """G7 integration proofs through real widgets and the fake host's worker queue."""
 import json
 from dataclasses import replace
-from datetime import datetime, timezone
 from threading import get_ident
 
 import pytest
 from fake_host import FakeDeck
-from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,20 +15,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QTableWidgetItem,
 )
-from slidemage.plugin_api import (
-    CourseSessionInfo,
-    PageShown,
-    PresentationEnded,
-    PresentationStarted,
-    SlideSource,
-)
-from test_presentation_log import Events
+from slidemage.plugin_api import SlideSource
 from test_ui import GuiHost, source
 
 import exam_forge
 from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
-from exam_forge.presentation_log import Session, Sessions
 from exam_forge.ui.corrections import _SHEETS
 
 
@@ -60,24 +50,15 @@ def phase(app, tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: warnings.append(a[2]) or QMessageBox.StandardButton.Yes)
     windows = []
 
-    def make(*, events=True):
-        root = tmp_path / ("logged" if events else "unlogged")
+    def make():
+        root = tmp_path / "course"
         root.mkdir()
         host = PhaseHost(root)
         deck = FakeDeck("Course", root / "course.tex")
         deck.path.write_text("Fresh deck text")
-        folder = tmp_path / ("bank" if events else "manual-bank")
+        folder = tmp_path / "bank"
         folder.mkdir()
         bank = open_chosen_folder(host, deck, folder)
-        presenter = Events()
-        if events:
-            host.offer("presenter.events", 1, presenter)
-
-        class Schedule:
-            def sessions(self, snapshot):
-                assert get_ident() == host.ui_thread
-                return [CourseSessionInfo("2020-01-01", "09:00", "10:00", "Room")]
-        host.offer("course.sessions", 1, Schedule())
         exam_forge.activate(host)
         # FakeHost refuses service resolution during activation (D4).
         host.finish_activation()
@@ -87,11 +68,6 @@ def phase(app, tmp_path, monkeypatch):
         host.drain()
         ref = source(host, deck)
         host.slides[(deck.path, "during-course", "en")] = [ref]
-        if events:
-            now = datetime(2020, 1, 1, 9, 30, tzinfo=timezone.utc)
-            presenter.emit(PresentationStarted(deck.path, "during-course", "en", now, 100))
-            presenter.emit(PageShown(now, 101, 1, ref.id, ref.version, 1, 1))
-            presenter.emit(PresentationEnded(now, 120))
         # Authoring, linking and review all use the actual bank editor.
         window.new_question()
         window.stem.setPlainText("Two plus two")
@@ -123,7 +99,7 @@ def phase(app, tmp_path, monkeypatch):
         exam.minutes.setValue(2.5)
         paths = iter([str(root / "exam.html"), str(root / "key.html")])
         monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a: (next(paths), ""))
-        return host, deck, bank, window, ref, presenter, warnings
+        return host, deck, bank, window, ref, None, warnings
 
     yield make
     for sheet in _SHEETS.values():
@@ -131,7 +107,6 @@ def phase(app, tmp_path, monkeypatch):
         sheet.deleteLater()
     _SHEETS.clear()
     for window in windows:
-        window.presentation_log.close()
         window.hide()
         window.deleteLater()
     QApplication.processEvents()
@@ -159,18 +134,14 @@ def issue(host, window):
     return view
 
 
-def test_bank_sessions_swap_and_elp_documents(phase, tmp_path, monkeypatch):
-    host, deck, bank, window, _ref, presenter, warnings = phase()
-    tab = window.sessions_tab
-    window.tabs.setCurrentWidget(tab)
-    host.drain()
-    assert "Room" in tab.current().name  # Cached schedule supplied to Sessions.load.
+def test_bank_swap_and_elp_documents(phase, tmp_path, monkeypatch):
+    host, deck, bank, window, _ref, _, warnings = phase()
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Bank", "Exam"]
     # A swap is offered from the module's eligible candidates.
     current = window.current
     other = bank.create(replace(current, id="replacement", revision=1, status="draft"))
     bank.set_status(other.id, other.revision, "reviewed")
     exam = window.exam_tab
-    exam.slides.setChecked(False)
     exam.propose()
     host.drain()
     outgoing = exam.selection.items[0].id
@@ -180,9 +151,6 @@ def test_bank_sessions_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     assert exam.selection.items[0].id != outgoing
     exam.approve()
     host.drain()
-    tab.session_list.item(0).setCheckState(Qt.CheckState.Unchecked)
-    assert exam.approved is None and not exam.issue.freeze_button.isEnabled()
-    tab.session_list.item(0).setCheckState(Qt.CheckState.Checked)
     view = propose_approve(host, window)
     seed = exam.selection.seed
     view.freeze()
@@ -201,13 +169,6 @@ def test_bank_sessions_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     exam.open_issued()
     host.drain()
     assert exam.issue.manifest.data() == Manifest.read(path).data()
-    # Switching banks closes the old subscription rather than accumulating listeners.
-    from exam_forge.bank import Bank
-    window.switch_bank(Bank(tmp_path / "other-bank", create=True))
-    assert len(presenter.callbacks) == 1
-    assert window.presentation_log.folder == window.bank.folder
-    window.presentation_log.close()
-    assert not presenter.callbacks
 
 
 def test_infeasible_blueprint_is_reported_without_relaxing(phase):
@@ -221,7 +182,6 @@ def test_infeasible_blueprint_is_reported_without_relaxing(phase):
     assert not exam.selection.feasible and not exam.selection.items
     assert not exam.approve_button.isEnabled()
     assert all(p in exam.report.toPlainText() for p in exam.selection.problems)
-    assert "Taught-only exclusions" in exam.report.toPlainText()
     assert "Blueprint exclusions" in exam.report.toPlainText()
 
 
@@ -342,12 +302,3 @@ def test_zero_avoid_last_does_not_read_manifest_history(phase, monkeypatch):
     host.drain()
     assert exam.selection and exam.selection.feasible
     assert "corrupt.manifest.json" not in exam.report.toPlainText()
-
-
-def test_no_presenter_provider_uses_confirmed_schedule_cutoff(phase, monkeypatch):
-    host, _, _, window, _, _, _ = phase(events=False)
-    assert "no presenter.events provider" in window.sessions_tab.logging.text()
-    seen = []
-    monkeypatch.setattr(QInputDialog, "getInt", lambda *a: seen.append(a[3]) or (1, True))
-    issue(host, window)
-    assert seen == [1]

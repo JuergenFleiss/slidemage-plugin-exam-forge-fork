@@ -42,3 +42,9 @@ v0.3.3 (2026-10-30, focused workflows): Streamline question writing, revision qu
 NEW: Exam proposals use topic counts, fixed ELP rules and an automatically generated seed.
 - Keep the seed and scoring rules in the frozen manifest. Slides filtering starts on each time.
 - Remove deck defaults, manual seed and scoring controls, objective counting, duplicate manifest and sidebar open buttons, bank search, and drafting image descriptions.
+
+
+v0.4.0 (2026-10-30, focused exam assembly): Assemble exams from all reviewed ELP questions.
+
+NEW: The window has Bank and Exam tabs.
+- Remove presentation logging and the taught-only filter; retain blueprint exclusions and source checks.
