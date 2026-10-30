@@ -22,26 +22,16 @@ DEFAULT_GUIDANCE = (
 class DraftSlide:
     link: SourceLink
     source: SlideSource
-    descriptions_reviewed: bool = False
 
 
 def build_request(slides: tuple[DraftSlide, ...] = (), *, use: str = "revision",
                   guidance: str | None = None) -> AiChatRequest:
-    """Send only selected slide text and explicitly reviewed descriptions."""
+    """Send only selected slide text."""
     if use not in ("revision", "elp"):
         raise ValueError("Choose revision or ELP use.")
     if not slides:
         raise ValueError("Choose at least one slide.")
-    content = []
-    for slide in slides:
-        row = {"text": slide.source.text}
-        if slide.descriptions_reviewed:
-            row["image_descriptions"] = [
-                {"short": d.short, "long": d.long, "takeaway": d.takeaway}
-                for d in slide.source.descriptions if not d.decorative
-            ]
-        content.append(row)
-    text = json.dumps({"slides": content},
+    text = json.dumps({"slides": [{"text": slide.source.text} for slide in slides]},
                       ensure_ascii=False)
     rules = ("exactly five options and one to four correct options" if use == "elp"
              else "at least two options and exactly one correct option")

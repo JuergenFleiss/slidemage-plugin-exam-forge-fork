@@ -20,7 +20,7 @@ The window has **Bank**, **Exam** and **Sessions** tabs. In Sessions, refresh af
 
 Tick sessions to include their presentation logs in taught evidence; all are included initially.
 
-On Exam, set exact topic or objective counts, easy/hard counts, minutes, scoring rules, seed and recent-exam avoidance. The Slides taught-only filter starts from this deck's saved default; **Save as deck default** persists the setting. Turn it off to remove the taught-only limit. Without a log, slide coverage uses the schedule and asks you to confirm or adjust the estimated last taught slide position. Both exclusion lists show their reasons. Infeasible blueprints keep their reported constraints; they are never relaxed. Swap from the eligible pool, then approve after the source check and changed-question list.
+On Exam, set exact topic counts, easy/hard counts, minutes and recent-exam avoidance. The Slides taught-only filter starts on. Easy questions use 12 points and 2.5 minutes; hard questions use 24 points and 5 minutes. Each proposal gets an automatic seed. Turn it off to remove the taught-only limit. Without a log, slide coverage uses the schedule and asks you to confirm or adjust the estimated last taught slide position. Both exclusion lists show their reasons. Infeasible blueprints keep their reported constraints; they are never relaxed. Swap from the eligible pool, then approve after the source check and changed-question list.
 
 Approval opens the second issuing step. **Freeze approved exam** checks fresh sources again; changed sources stop issuing. Each issue creates a unique `*.manifest.json` in the bank folder. The frozen blueprint includes the seed, taught options, session IDs and confirmed cut-off. Open an issued manifest to inspect it or save its documents again. Later bank edits do not alter it.
 
@@ -34,7 +34,7 @@ Real-window dark-theme and player checks, frozen-build end-to-end operation, Moo
 
 AI support is off by default in Exam Forge Settings. Enable it with an available chat route (for example Claude or Ollama) to show **Draft with AI…** in the Bank tab. Choose the slide view, language and question use, then explicitly tick slides. Nothing is selected initially. Select a row to inspect its text.
 
-Image descriptions are excluded until you inspect them and tick **I reviewed the selected slides' image descriptions for exam use; include them**. This tick starts off on every new drafting choice and resets when sources change. Image files, other bank questions and their keys or rationales, session names and student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
+Image descriptions are never included in drafting requests. Image files, other bank questions and their keys or rationales, session names and student records are never added to the request. Use teaching sources free of student information; source text is sent verbatim.
 
 The host handles the current chat route and model, confirms the full text before each cloud request, and never silently switches routes. Cancel or decline adds nothing. A malformed or truncated JSON reply is refused in full with a message. Valid replies enter the bank only as **Draft**, with the captured route/model and an amber **AI draft** label. Edit and **Mark reviewed** through the normal source check before using them. The permanent **AI-assisted** provenance survives acceptance and later edits; those edits start another draft revision. Chosen slide links are retained.
 

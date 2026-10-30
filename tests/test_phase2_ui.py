@@ -121,7 +121,6 @@ def phase(app, tmp_path, monkeypatch):
         exam.counts.setItem(0, 1, QTableWidgetItem("1"))
         exam.easy.setValue(1)
         exam.minutes.setValue(2.5)
-        exam.seed.setValue(41)
         paths = iter([str(root / "exam.html"), str(root / "key.html")])
         monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a: (next(paths), ""))
         return host, deck, bank, window, ref, presenter, warnings
@@ -172,8 +171,6 @@ def test_bank_sessions_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     bank.set_status(other.id, other.revision, "reviewed")
     exam = window.exam_tab
     exam.slides.setChecked(False)
-    exam.save_default()
-    assert host.settings().get("taught_defaults")[str(deck.path.resolve())] == {"slides": False}
     exam.propose()
     host.drain()
     outgoing = exam.selection.items[0].id
@@ -187,15 +184,21 @@ def test_bank_sessions_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     assert exam.approved is None and not exam.issue.freeze_button.isEnabled()
     tab.session_list.item(0).setCheckState(Qt.CheckState.Checked)
     view = propose_approve(host, window)
+    seed = exam.selection.seed
     view.freeze()
     host.drain()
+    frozen = view.manifest.data()
+    assert frozen["blueprint"]["seed"] == seed
+    assert "by" not in frozen["blueprint"]
+    assert frozen["scoring"]["rules"]["easy"] == {"points": 12, "minutes": 2.5}
+    assert frozen["scoring"]["rules"]["hard"] == {"points": 24, "minutes": 5}
     exam_html = (host.root / "exam.html").read_text()
     assert "Teaching assistant note" in exam_html and current.assistant_note in exam_html
     assert "Correct —" not in exam_html and any("holds answers" in w for w in warnings)
     # UI reopen reads the issued snapshot, independent of the live bank.
     path = exam.issue.manifest_path
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: (str(path), ""))
-    exam.issue.open_manifest()
+    exam.open_issued()
     host.drain()
     assert exam.issue.manifest.data() == Manifest.read(path).data()
     # Switching banks closes the old subscription rather than accumulating listeners.

@@ -3,10 +3,10 @@
 """Blueprint, taught evidence and selection; all selection rules live in modules."""
 from dataclasses import asdict
 from datetime import datetime
+from secrets import randbits
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QInputDialog,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..assembly import Blueprint, assemble, check_approval, swap
-from ..elp import DifficultyRules, ElpRules
+from ..elp import ElpRules
 from ..manifest import Manifest
 from ..presentation_log import Sessions
 from ..presentation_log import read_log
@@ -51,21 +51,14 @@ class ExamTab(QWidget):
         body.addLayout(heading)
         row = QHBoxLayout()
         self.slides = QCheckBox("Slides")
-        defaults = self.host.settings().get("taught_defaults", {}).get(str(window.deck.path.resolve()), {})
-        self.slides.setChecked(defaults.get("slides", True))
+        self.slides.setChecked(True)
         row.addWidget(QLabel("Taught only"))
         row.addWidget(self.slides)
-        save = self.host.Button("Save as deck default")
-        save.clicked.connect(self.save_default)
-        row.addWidget(save)
         body.addLayout(row)
-        self.by = QComboBox()
-        self.by.addItems(["topic", "objective"])
         self.counts = QTableWidget(1, 2)
-        self.counts.setHorizontalHeaderLabels(["Topic / objective", "Exact count"])
+        self.counts.setHorizontalHeaderLabels(["Topic", "Exact count"])
         self.counts.horizontalHeader().setStretchLastSection(True)
         self.counts.setMaximumHeight(130)
-        body.addWidget(self.host.Field("Count by", self.by))
         body.addWidget(self.counts)
         row = QHBoxLayout()
         add = self.host.Button("Add count row")
@@ -76,28 +69,15 @@ class ExamTab(QWidget):
         row.addWidget(remove)
         body.addLayout(row)
         row = QHBoxLayout()
-        self.easy, self.hard, self.avoid, self.seed = QSpinBox(), QSpinBox(), QSpinBox(), QSpinBox()
+        self.easy, self.hard, self.avoid = QSpinBox(), QSpinBox(), QSpinBox()
         self.minutes = QDoubleSpinBox()
         self.minutes.setRange(.01, 1e6)
         self.minutes.setValue(45)
         for label, field in (("Easy count", self.easy), ("Hard count", self.hard),
-                             ("Minutes (exact)", self.minutes), ("Avoid last N exams", self.avoid), ("Seed", self.seed)):
+                             ("Minutes (exact)", self.minutes), ("Avoid last N exams", self.avoid)):
             if isinstance(field, QSpinBox):
                 field.setRange(0, 1000000)
             row.addWidget(self.host.Field(label, field))
-        body.addLayout(row)
-        row = QHBoxLayout()
-        self.rules_fields = []
-        for name, points, minutes in (("Easy", 12, 2.5), ("Hard", 24, 5)):
-            p, m = QSpinBox(), QDoubleSpinBox()
-            p.setRange(12, 12000)
-            p.setSingleStep(12)
-            p.setValue(points)
-            m.setRange(.01, 10000)
-            m.setValue(minutes)
-            self.rules_fields.append((p, m))
-            row.addWidget(self.host.Field(name + " points", p))
-            row.addWidget(self.host.Field(name + " minutes", m))
         body.addLayout(row)
         row = QHBoxLayout()
         build = self.host.Button("Propose selection", "primary")
@@ -120,11 +100,9 @@ class ExamTab(QWidget):
         self.stack.addWidget(self.issue)
         self.counts.itemChanged.connect(self.invalidate)
         self.counts.model().rowsRemoved.connect(self.invalidate)
-        self.by.currentTextChanged.connect(self.invalidate)
         for field in (self.slides,):
             field.toggled.connect(self.invalidate)
-        for field in (self.easy, self.hard, self.minutes, self.avoid, self.seed,
-                      *(f for pair in self.rules_fields for f in pair)):
+        for field in (self.easy, self.hard, self.minutes, self.avoid):
             field.valueChanged.connect(self.invalidate)
         window.sessions_tab.session_list.itemChanged.connect(self.invalidate)
 
@@ -146,35 +124,27 @@ class ExamTab(QWidget):
             self.issue.reset()
             self.stack.setCurrentWidget(self.setup)
 
-    def save_default(self):
-        settings = self.host.settings()
-        defaults = dict(settings.get("taught_defaults", {}))
-        defaults[str(self.window.deck.path.resolve())] = asdict(TaughtOptions(self.slides.isChecked()))
-        settings.set("taught_defaults", defaults)
-        settings.save()
-        self.window.notice.setText("Saved Slides setting as this deck's default.")
-
     def blueprint(self):
         counts = {}
         for row in range(self.counts.rowCount()):
             name, count = (self.counts.item(row, col) for col in (0, 1))
             if not name or not name.text().strip():
                 if count and count.text().strip():
-                    raise ValueError("Each count needs a topic or objective name.")
+                    raise ValueError("Each count needs a topic name.")
                 continue
             name = name.text().strip()
             if name in counts:
-                raise ValueError("Use one count row per topic or objective.")
+                raise ValueError("Use one count row per topic.")
             counts[name] = int(count.text()) if count else 0
         return Blueprint(counts, {"easy": self.easy.value(), "hard": self.hard.value()},
-                         self.minutes.value(), self.by.currentText(), self.avoid.value())
+                         self.minutes.value(), self.avoid.value())
 
     def propose(self):
         if not self.window.may_leave():
             return
         try:
             blueprint = self.blueprint()
-            rules = ElpRules(*(DifficultyRules(p.value(), m.value()) for p, m in self.rules_fields))
+            rules = ElpRules()
         except ValueError as exc:
             self.window.error(exc)
             return
@@ -186,7 +156,7 @@ class ExamTab(QWidget):
         chosen = self.window.sessions_tab.selected_ids()
         language = self.host.deck_language(deck)
         options = TaughtOptions(self.slides.isChecked())
-        seed, as_of = self.seed.value(), datetime.now().astimezone()
+        seed, as_of = randbits(64), datetime.now().astimezone()
 
         def work():
             snapshot = fresh_deck(deck)

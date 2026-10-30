@@ -14,7 +14,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from math import isfinite
-from typing import Literal
 
 from .bank import Bank, ConflictError
 from .elp import ElpRules, check_elp
@@ -32,12 +31,9 @@ class Blueprint:
     counts: Mapping[str, int]
     difficulty_mix: Mapping[str, int]
     minutes: float
-    by: Literal["topic", "objective"] = "topic"
     avoid_last: int = 0
 
     def __post_init__(self):
-        if self.by not in ("topic", "objective"):
-            raise ValueError("Blueprint groups by topic or objective")
         for counts in (self.counts, self.difficulty_mix):
             if any(not isinstance(k, str) or not k or type(v) is not int or v < 0
                    for k, v in counts.items()):
@@ -79,9 +75,9 @@ class Assembly:
 
 def _selection_problems(items: Sequence[Item], blueprint: Blueprint, rules: ElpRules) -> list[str]:
     problems = []
-    groups = Counter(getattr(i, blueprint.by) for i in items)
+    groups = Counter(i.topic for i in items)
     if groups != Counter(blueprint.counts):
-        problems.append(f"Selection does not meet the {blueprint.by} counts.")
+        problems.append("Selection does not meet the topic counts.")
     mix = Counter(i.difficulty for i in items)
     if mix != Counter(blueprint.difficulty_mix):
         problems.append("Selection does not meet the difficulty mix.")
@@ -115,8 +111,8 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
         reasons.extend(check_elp(item))
         if item.difficulty not in ("easy", "hard"):
             reasons.append("Item has no supported difficulty class.")
-        if not blueprint.counts.get(getattr(item, blueprint.by), 0):
-            reasons.append(f"Item is outside the requested {blueprint.by} counts.")
+        if not blueprint.counts.get(item.topic, 0):
+            reasons.append("Item is outside the requested topic counts.")
         if item.id in recent:
             reasons.append(f"Item was used in the last {blueprint.avoid_last} exams.")
         if reasons:
@@ -129,7 +125,7 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
     if not sum(blueprint.counts.values()):
         problems.append("The blueprint requests no items.")
     if sum(blueprint.counts.values()) != sum(blueprint.difficulty_mix.values()):
-        problems.append("Topic/objective counts and difficulty counts have different totals.")
+        problems.append("Topic counts and difficulty counts have different totals.")
     planned = sum((Decimal(str(getattr(rules, d).minutes)) * n
                    for d, n in blueprint.difficulty_mix.items()), Decimal(0))
     if planned != Decimal(str(blueprint.minutes)):
@@ -139,15 +135,15 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
     # interval. Respect their joint bounds before drawing any random samples.
     groups = []
     for name, count in sorted(blueprint.counts.items()):
-        easy = [i for i in candidates if getattr(i, blueprint.by) == name and i.difficulty == "easy"]
-        hard = [i for i in candidates if getattr(i, blueprint.by) == name and i.difficulty == "hard"]
+        easy = [i for i in candidates if i.topic == name and i.difficulty == "easy"]
+        hard = [i for i in candidates if i.topic == name and i.difficulty == "hard"]
         low, high = max(0, count - len(hard)), min(count, len(easy))
         if low > high:
-            problems.append(f"{blueprint.by.title()} {name!r} needs {count} items; only {len(easy) + len(hard)} are eligible.")
+            problems.append(f"Topic {name!r} needs {count} items; only {len(easy) + len(hard)} are eligible.")
         groups.append((count, easy, hard, low, high))
     remaining = blueprint.difficulty_mix.get("easy", 0)
     if not sum(g[3] for g in groups) <= remaining <= sum(g[4] for g in groups):
-        problems.append("Eligible items cannot satisfy the difficulty mix within the topic/objective counts.")
+        problems.append("Eligible items cannot satisfy the difficulty mix within the topic counts.")
     if problems:
         return replace(result, problems=tuple(problems))
     rng, chosen = random.Random(seed), []

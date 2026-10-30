@@ -37,16 +37,12 @@ def test_request_is_only_selected_teaching_text(tmp_path):
         assert excluded not in request.text + request.instructions
 
 
-def test_image_description_review_is_explicit_and_only_for_selected_slides():
+def test_image_descriptions_are_excluded():
     source = SlideSource("teaching text", descriptions=(
-        MediaDescription("PRIVATE_PATH", short="Reviewed short", long="Reviewed long", takeaway="Reviewed takeaway"),
-        MediaDescription("decoration", decorative=True, short="Decorative")))
-    choice = DraftSlide(SourceLink(), source)
-    assert "image_descriptions" not in build_request((choice,)).text
-    data = json.loads(build_request((replace(choice, descriptions_reviewed=True),)).text)
-    assert data["slides"][0]["image_descriptions"] == [
-        {"short": "Reviewed short", "long": "Reviewed long", "takeaway": "Reviewed takeaway"}]
-    assert "PRIVATE_PATH" not in str(data) and "Decorative" not in str(data)
+        MediaDescription("PRIVATE_PATH", short="PRIVATE_DESCRIPTION"),))
+    request = build_request((DraftSlide(SourceLink(), source),))
+    assert json.loads(request.text) == {"slides": [{"text": "teaching text"}]}
+    assert "PRIVATE_DESCRIPTION" not in request.text + request.instructions
 
 
 def test_request_requires_slides():

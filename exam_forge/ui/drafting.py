@@ -3,7 +3,7 @@
 """Small source chooser and one cancellable host AI request."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget,
+    QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPlainTextEdit, QVBoxLayout,
 )
 from slidemage.plugin_api import ServiceError
@@ -51,11 +51,9 @@ class DraftDialog(QDialog):
         self.controls.body.addLayout(row)
         self.choices = QListWidget()
         self.controls.body.addWidget(self.choices)
-        self.review = QCheckBox("I reviewed the selected slides' image descriptions for exam use; include them")
-        self.controls.body.addWidget(self.review)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
-        self.preview.setPlaceholderText("Select a row to inspect its source text and image descriptions before ticking it.")
+        self.preview.setPlaceholderText("Select a row to inspect its source text before ticking it.")
         self.preview.setMaximumHeight(160)
         self.controls.body.addWidget(self.preview)
         self.message = QLabel()
@@ -72,14 +70,12 @@ class DraftDialog(QDialog):
         self.view.currentTextChanged.connect(self.load)
         self.language.currentTextChanged.connect(self.load)
         self.choices.currentRowChanged.connect(self.show_source)
-        self.choices.itemChanged.connect(lambda *_: self.review.setChecked(False))
         self.load()
 
     def load(self, *_):
         self.generation += 1
         generation = self.generation
         view, language = self.view.currentText(), self.language.currentText()
-        self.review.setChecked(False)
         self.choices.clear()
         self.preview.clear()
         self.send.setEnabled(False)
@@ -121,9 +117,7 @@ class DraftDialog(QDialog):
         if isinstance(source, Exception):
             self.message.setText(str(source))
             return
-        descriptions = "\n\n".join("\n".join((d.short, d.long, d.takeaway))
-                                     for d in source.descriptions if not d.decorative)
-        self.preview.setPlainText(source.text + "\n\nImage descriptions (require review tick):\n" + descriptions)
+        self.preview.setPlainText(source.text)
 
     def generate(self):
         # Check again after source selection: disabling AI closes the gate immediately.
@@ -140,7 +134,6 @@ class DraftDialog(QDialog):
         refs = [self.refs[i] for i in indices if i < len(self.refs)]
         sources = [self.sources[i] for i in indices if i < len(self.sources)]
         view, language, use = self.view.currentText(), self.language.currentText(), self.use.currentData()
-        reviewed = self.review.isChecked()
         guidance = self.host.settings().get("drafting_guidance")
         self.controls.setEnabled(False)
         self.send.setEnabled(False)
@@ -152,7 +145,7 @@ class DraftDialog(QDialog):
                 if isinstance(source, Exception):
                     raise source
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source))
-                slides.append(DraftSlide(link, source, reviewed))
+                slides.append(DraftSlide(link, source))
             return build_request(tuple(slides), use=use, guidance=guidance), tuple(s.link for s in slides)
 
         def ready(prepared, error):

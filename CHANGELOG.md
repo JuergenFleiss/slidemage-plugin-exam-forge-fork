@@ -35,3 +35,10 @@ v0.3.2 (2026-10-30, presentation logs): Simplify Sessions to logged presentation
 
 NEW: Sessions lists logged presentations.
 - Remove manual sessions and recording and transcript attachments. Presentation logs continue to support the Slides filter and cached schedules provide labels and fallback coverage.
+
+
+v0.3.3 (2026-10-30, focused workflows): Streamline question writing, revision quizzes and ELP exams.
+
+NEW: Exam proposals use topic counts, fixed ELP rules and an automatically generated seed.
+- Keep the seed and scoring rules in the frozen manifest. Slides filtering starts on each time.
+- Remove deck defaults, manual seed and scoring controls, objective counting, duplicate manifest and sidebar open buttons, bank search, and drafting image descriptions.

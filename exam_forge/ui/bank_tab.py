@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -40,9 +39,6 @@ class BankTab:
         left = host.Page()
         left.body.setContentsMargins(0, 0, 10, 0)
         split.addWidget(left)
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search questions")
-        left.body.addWidget(self.search)
         new = host.Button("New question", "primary")
         new.clicked.connect(self.new_question)
         left.body.addWidget(new)
@@ -75,7 +71,6 @@ class BankTab:
         left.body.addWidget(self.count)
         for field in (self.status_filter, self.use_filter, self.topic_filter):
             field.currentIndexChanged.connect(self.filter_items)
-        self.search.textChanged.connect(self.filter_items)
         self.item_list.currentItemChanged.connect(self.select_item)
         self.build_editor(host, split)
         split.setSizes([330, 790])
@@ -139,8 +134,7 @@ class BankTab:
                     or self.use_filter.currentData() not in ("", item.use)
                     or self.topic_filter.currentData() not in (None, "", item.topic)
                     or (self.source_filter.isChecked() and not item.source_changed)
-                    or (self.ai_filter.isChecked() and not (item.origin.kind == "ai" and item.status == "draft"))
-                    or self.search.text().casefold() not in (item.stem + " " + item.topic + " " + item.id).casefold()):
+                    or (self.ai_filter.isChecked() and not (item.origin.kind == "ai" and item.status == "draft"))):
                 continue
             labels = [item.status.title(), item.use, item.topic, item.difficulty]
             if item.source_changed:

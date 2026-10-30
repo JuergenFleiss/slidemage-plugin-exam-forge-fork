@@ -172,8 +172,6 @@ def test_45_minutes_216_points_seeded_exact_counts_and_objectives():
     assert Counter(q.difficulty for q in result.items) == blueprint.difficulty_mix
     assert result.items == assemble(list(reversed(pool())), blueprint, seed=42).items
     assert result.items != assemble(pool(), blueprint, seed=43).items
-    objectives = Blueprint({"A": 4, "B": 4, "C": 4}, {"easy": 6, "hard": 6}, 45, by="objective")
-    assert assemble(pool(), objectives, seed=42).items == result.items
 
 
 @pytest.mark.parametrize("blueprint,questions,reason", [
@@ -241,7 +239,7 @@ def test_swap_keeps_blueprint_and_eligible_pool():
 
 @pytest.mark.parametrize("kwargs", [{"counts": {"a": -1}}, {"difficulty_mix": {"medium": 1}},
                                     {"minutes": float("nan")}, {"minutes": True}, {"avoid_last": -1},
-                                    {"by": "invalid"}, {"counts": {"a": True}}])
+                                    {"counts": {"a": True}}])
 def test_invalid_blueprint_configuration(kwargs):
     params = {"counts": {"a": 1}, "difficulty_mix": {"easy": 1}, "minutes": 2.5}
     with pytest.raises(ValueError):

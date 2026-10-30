@@ -96,7 +96,6 @@ def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env):
     assert not window.draft_button.isHidden()
     dialog = choose(host, window)
     assert len(dialog.refs) == 2 and dialog.choices.count() == 2
-    assert not dialog.review.isChecked()
     assert all(dialog.choices.item(i).checkState() == Qt.CheckState.Unchecked
                for i in range(dialog.choices.count()))
     dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
@@ -114,7 +113,7 @@ def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env):
     assert window.draft_tag.isVisible() and "color:" in window.draft_tag.styleSheet()
     assert draft.sources[0].slide_id == ref.id
     assert window.ai_tag.toolTip() == "captured-route · captured-model"
-    window.search.setText(draft.stem)
+    window.status_filter.setCurrentIndex(window.status_filter.findData("draft"))
     window.export()
     host.drain()
     assert "No reviewed" in window.notice.text()  # Drafts are not exportable.
@@ -126,26 +125,6 @@ def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env):
     window.save()
     assert window.current.status == "draft" and window.draft_tag.isVisible()
     assert bank.get(draft.id, 2).status == "reviewed"
-
-
-def test_review_tick_preview_and_request_payload(env):
-    host, deck, _, _, window = env
-    ref = source(host, deck)
-    host.sources[ref] = SlideSource("Slide", descriptions=(MediaDescription("PRIVATE_KEY", short="Image meaning"),))
-    chat, page = enable(host)
-    dialog = choose(host, window)
-    dialog.choices.setCurrentRow(0)
-    host.drain()
-    assert "Image meaning" in dialog.preview.toPlainText()
-    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
-    dialog.review.setChecked(True)
-    dialog.send.click()
-    host.drain()
-    assert json.loads(chat.requests[0].text)["slides"][0]["image_descriptions"][0]["short"] == "Image meaning"
-    chat.done(None, None)
-    again = choose(host, window)
-    assert not again.review.isChecked()
-    again.reject()
 
 
 def test_preview_and_request_share_source_snapshot(env, monkeypatch):
@@ -163,15 +142,14 @@ def test_preview_and_request_share_source_snapshot(env, monkeypatch):
     chat, page = enable(host)
     dialog = choose(host, window)
     dialog.choices.setCurrentRow(0)
-    assert "Reviewed" in dialog.preview.toPlainText()
+    assert dialog.preview.toPlainText() == "Original"
     dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
-    dialog.review.setChecked(True)
     host.sources[ref] = SlideSource("Changed", descriptions=(MediaDescription("image", short="Not reviewed"),))
     dialog.send.click()
     host.drain()
     payload = json.loads(chat.requests[0].text)["slides"][0]
     assert payload["text"] == "Original"
-    assert payload["image_descriptions"][0]["short"] == "Reviewed"
+    assert "image_descriptions" not in payload
     assert calls == [ref]
     dialog.reject()
 

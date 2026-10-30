@@ -50,9 +50,6 @@ class IssueView(QWidget):
         back = self.host.Button("Back to selection")
         back.clicked.connect(lambda: exam.stack.setCurrentIndex(0))
         row.addWidget(back)
-        reopen = self.host.Button("Open issued manifest…")
-        reopen.clicked.connect(self.open_manifest)
-        row.addWidget(reopen)
         layout.addLayout(row)
         self.reset()
 
