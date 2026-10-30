@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """G7 integration proofs through real widgets and the fake host's worker queue."""
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from threading import get_ident
@@ -8,6 +9,7 @@ from threading import get_ident
 import pytest
 from fake_host import FakeDeck
 from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -28,7 +30,7 @@ from test_ui import GuiHost, source
 import exam_forge
 from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
-from exam_forge.passages import Sessions
+from exam_forge.passages import Passage, Session, Sessions
 from exam_forge.ui.corrections import _SHEETS
 
 
@@ -285,12 +287,99 @@ def test_correction_is_recorded_in_separate_sheet(phase):
     sheet.reason.setPlainText("Ambiguous wording")
     sheet.append.click()
     assert sheet.busy and not sheet.append.isEnabled()
+    assert all(not field.isEnabled() for field in (sheet.item, sheet.change, sheet.reason))
+    QTest.keyClicks(sheet.change, "New text while saving")
+    QTest.keyClicks(sheet.reason, "New reason while saving")
+    assert sheet.change.toPlainText() == "Accept option B too"
+    assert sheet.reason.toPlainText() == "Ambiguous wording"
     view.corrections()  # Reopening cannot create a concurrent writer.
     assert view.correction_sheet is sheet
     host.drain()
     rows = read_corrections(view.journal_path)
     assert len(rows) == 1 and rows[0]['change'] == "Accept option B too"
+    assert all(field.isEnabled() for field in (sheet.item, sheet.change, sheet.reason, sheet.append))
+    assert sheet.change.toPlainText() == sheet.reason.toPlainText() == ""
     assert view.manifest_path.read_bytes() == before
+
+
+def test_failed_correction_save_reenables_fields_and_keeps_input(phase, monkeypatch):
+    host, _, _, window, _, _, _ = phase()
+    view = issue(host, window)
+    view.corrections()
+    host.drain()
+    sheet = view.correction_sheet
+    sheet.change.setPlainText("Accept option B too")
+    sheet.reason.setPlainText("Ambiguous wording")
+
+    def fail(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("exam_forge.ui.corrections.append_correction", fail)
+    sheet.record()
+    assert all(not field.isEnabled() for field in (sheet.item, sheet.change, sheet.reason, sheet.append))
+    host.drain()
+    assert all(field.isEnabled() for field in (sheet.item, sheet.change, sheet.reason, sheet.append))
+    assert sheet.change.toPlainText() == "Accept option B too"
+    assert sheet.reason.toPlainText() == "Ambiguous wording"
+    assert "disk full" in sheet.message.text()
+
+
+@pytest.mark.parametrize("corrupt", ["invalid JSON", {"schema_version": 1}, "invalid items"])
+def test_corrupt_manifest_is_reported_and_valid_history_still_applies(phase, corrupt):
+    host, _, bank, window, _, _, _ = phase()
+    question = window.current
+    replacement = bank.create(replace(question, id="replacement", revision=1, status="draft"))
+    bank.set_status(replacement.id, 1, "reviewed")
+    Manifest(json.dumps({"schema_version": 1, "bank_id": bank.id,
+                         "items": [{"id": question.id}]}).encode()).write(bank.folder / "valid.manifest.json")
+    path = bank.folder / "corrupt.manifest.json"
+    if corrupt == "invalid items":
+        corrupt = {"schema_version": 1, "bank_id": bank.id, "items": None}
+    path.write_text(json.dumps(corrupt) if isinstance(corrupt, dict) else corrupt)
+    exam = window.exam_tab
+    exam.avoid.setValue(1)
+    exam.propose()
+    host.drain()
+    assert exam.selection and exam.selection.feasible
+    assert [i.id for i in exam.selection.items] == [replacement.id]
+    assert any(row.item.id == question.id for row in exam.selection.excluded)
+    assert path.name in exam.report.toPlainText() and "Could not read exam history" in exam.report.toPlainText()
+
+
+def test_zero_avoid_last_does_not_read_manifest_history(phase, monkeypatch):
+    host, _, bank, window, _, _, _ = phase()
+    (bank.folder / "corrupt.manifest.json").write_text("invalid JSON")
+
+    def unexpected_read(*args):
+        raise AssertionError("History must not be read when avoid_last is zero")
+
+    monkeypatch.setattr(Manifest, "read", unexpected_read)
+    exam = window.exam_tab
+    assert exam.avoid.value() == 0
+    exam.propose()
+    host.drain()
+    assert exam.selection and exam.selection.feasible
+    assert "corrupt.manifest.json" not in exam.report.toPlainText()
+
+
+def test_proposal_rechecks_transcript_replaced_in_place(phase):
+    host, _, bank, window, ref, _, _ = phase()
+    path = bank.folder / "talk.txt"
+    path.write_text("Original transcript")
+    store = Sessions(bank)
+    session = Session("Talk", "talk", transcript="talk.txt")
+    store.save(replace(session, passages=(Passage(ref.id, ref.version, 0, 10).confirm(store.read_transcript(session)),)))
+    exam = window.exam_tab
+    exam.slides.setChecked(False)
+    exam.talk.setChecked(True)
+    exam.propose()
+    host.drain()
+    assert exam.selection and exam.selection.feasible
+    path.write_text("Replacement transcript")
+    exam.propose()
+    host.drain()
+    assert exam.selection and not exam.selection.feasible
+    assert window.current.id in exam.report.toPlainText()
 
 
 def test_no_presenter_provider_uses_confirmed_schedule_cutoff(phase, monkeypatch):

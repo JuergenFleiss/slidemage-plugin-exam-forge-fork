@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict
 from pathlib import Path
 from uuid import uuid4
@@ -22,6 +21,7 @@ class PresentationLog:
 
     Events before the next presentation start cannot be reconstructed: the service
     does not replay events. Keep this object alive until close() is called.
+    Each event is flushed to survive an app crash, not a power cut.
     """
 
     def __init__(self, host, folder: str | Path):
@@ -66,7 +66,6 @@ class PresentationLog:
             with self._path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(data, ensure_ascii=False) + "\n")
                 stream.flush()
-                os.fsync(stream.fileno())
         except OSError as exc:
             self._failed = True
             self.host.show_message(f"Could not write the presentation log: {exc}", error=True)

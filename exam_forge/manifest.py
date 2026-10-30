@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -45,16 +46,19 @@ class Manifest:
     def write(self, path: str | Path) -> None:
         """Create a new manifest without overwriting an issued one."""
         path = Path(path)
-        # A failed write removes the incomplete file; an existing file is never replaced.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        name = None
         try:
-            with os.fdopen(fd, "wb") as stream:
+            with tempfile.NamedTemporaryFile(dir=path.parent, prefix="." + path.name + ".",
+                                             delete=False) as stream:
+                name = stream.name
                 stream.write(self.encoded + b"\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-        except BaseException:
-            path.unlink(missing_ok=True)
-            raise
+            # Linking publishes the complete file atomically and refuses an existing path.
+            os.link(name, path)
+        finally:
+            if name is not None:
+                os.unlink(name)
 
     @classmethod
     def read(cls, path: str | Path) -> Manifest:

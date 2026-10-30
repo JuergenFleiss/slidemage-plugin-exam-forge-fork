@@ -3,6 +3,7 @@
 """Blueprint, taught evidence and selection; all selection rules live in modules."""
 from dataclasses import asdict
 from datetime import datetime
+from hashlib import sha256
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -197,16 +198,31 @@ class ExamTab(QWidget):
             store = Sessions(bank)
             sessions = [s for s in store.load(deck=snapshot, schedule=schedule) if chosen is None or s.id in chosen]
             logs = {s.id: read_log(store.path(s.presentation)) for s in sessions if s.presentation}
-            evidence = build_evidence(refs, sessions, logs, schedule=schedule, as_of=as_of, language=language)
+            transcript_hashes = {}
+            for session in sessions:
+                if session.transcript:
+                    try:
+                        transcript_hashes[session.id] = sha256(store.path(session.transcript).read_bytes()).hexdigest()
+                    except OSError:
+                        pass  # An unreadable transcript cannot confirm talk.
+            evidence = build_evidence(refs, sessions, logs, schedule=schedule, as_of=as_of,
+                                      language=language, transcript_hashes=transcript_hashes)
             items, errors = bank.load()
             if errors:
                 raise ValueError("\n".join(map(str, errors)))
-            history = [Manifest.read(p).data() for p in sorted(bank.folder.glob("*.manifest.json"))]
-            previous = [[i['id'] for i in m['items']] for m in history if m['bank_id'] == bank.id]
-            return refs, sessions, logs, evidence, items, previous
+            previous, history_errors = [], []
+            if blueprint.avoid_last:
+                for path in sorted(bank.folder.glob("*.manifest.json")):
+                    try:
+                        manifest = Manifest.read(path).data()
+                        if manifest['bank_id'] == bank.id:
+                            previous.append([i['id'] for i in manifest['items']])
+                    except (OSError, ValueError, KeyError, TypeError) as exc:
+                        history_errors.append(f"Could not read exam history {path.name}: {exc}")
+            return refs, sessions, logs, evidence, items, previous, history_errors, transcript_hashes
 
         def prepared(data):
-            refs, sessions, logs, evidence, items, previous = data
+            refs, sessions, logs, evidence, items, previous, history_errors, transcript_hashes = data
             cutoff = None
             if options.slides and evidence.slide_method == "schedule":
                 cutoff, ok = QInputDialog.getInt(self, "Confirm estimated cut-off", evidence.slide_reason +
@@ -217,7 +233,8 @@ class ExamTab(QWidget):
 
             def select():
                 confirmed = build_evidence(refs, sessions, logs, schedule=schedule, as_of=as_of,
-                                           language=language, cutoff_position=cutoff)
+                                           language=language, cutoff_position=cutoff,
+                                           transcript_hashes=transcript_hashes)
                 filtered = filter_items(items, confirmed, options=options)
                 selection = assemble(filtered.included, blueprint, seed=seed, rules=rules, previous_exams=previous)
                 return confirmed, filtered, selection
@@ -228,7 +245,7 @@ class ExamTab(QWidget):
                                         "method": evidence.slide_method, "sessions": [s.id for s in sessions],
                                         "as_of": as_of.isoformat()}
                 exclusions = lambda rows: "\n".join(f"{r.item.id}: {' '.join(r.reasons)}" for r in rows) or "None"
-                self.report.setPlainText("\n".join(filter(None, (evidence.slide_reason, evidence.talk_reason))) +
+                self.report.setPlainText("\n".join(filter(None, (*history_errors, evidence.slide_reason, evidence.talk_reason))) +
                     f"\nCut-off position: {evidence.cutoff_position}\n\nTaught-only exclusions\n" + exclusions(filtered.excluded) +
                     "\n\nBlueprint exclusions\n" + exclusions(self.selection.excluded) +
                     "\n\n" + ("\n".join(self.selection.problems) if not self.selection.feasible else

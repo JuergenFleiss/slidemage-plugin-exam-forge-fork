@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -23,8 +24,11 @@ class TranscriptError:
 
 @dataclass(frozen=True)
 class Transcript:
+    """Parsed cues with a SHA-256 of the source bytes (UTF-8 for parsed strings)."""
+
     segments: tuple[Segment, ...]
     errors: tuple[TranscriptError, ...] = ()
+    sha256: str = ""
 
     def text_between(self, start: float, end: float) -> str:
         """Whole cues overlapping a range, without inventing word timestamps."""
@@ -65,9 +69,10 @@ def parse_transcript(text: str, format: str) -> Transcript:
             block = []
     if block:
         blocks.append(block)
+    digest = sha256(text.encode("utf-8")).hexdigest()
     if format == "txt":
         return Transcript(tuple(Segment(None, None, "\n".join(line for _, line in block))
-                                for block in blocks))
+                                for block in blocks), sha256=digest)
 
     segments, errors = [], []
     if format == "vtt":
@@ -107,10 +112,12 @@ def parse_transcript(text: str, format: str) -> Transcript:
             segments.append(Segment(start, end, "\n".join(line for _, line in body)))
         except ValueError as exc:
             errors.append(TranscriptError(number, str(exc)))
-    return Transcript(tuple(segments), tuple(errors))
+    return Transcript(tuple(segments), tuple(errors), digest)
 
 
 def read_transcript(path: str | Path) -> Transcript:
     """Read UTF-8 (including BOM). File and decoding errors reach the caller."""
     path = Path(path)
-    return parse_transcript(path.read_text(encoding="utf-8-sig"), path.suffix)
+    raw = path.read_bytes()
+    return replace(parse_transcript(raw.decode("utf-8-sig"), path.suffix),
+                   sha256=sha256(raw).hexdigest())

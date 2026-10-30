@@ -47,8 +47,8 @@ class Visit:
 def slide_visits(records: Sequence[dict]) -> tuple[Visit, ...]:
     """Read one log in event order. Times are monotonic, never wall-clock times.
 
-    ScreenState is authoritative after its first event. Only `shown` counts;
-    black/frozen states and unknown page identities leave gaps. Reveal steps of
+    ScreenState is authoritative after its first event. A freeze still shows
+    audience_page; only black or unknown page identities leave gaps. Reveal steps of
     the same slide/version stay in one visit; returning after a gap or another
     slide starts a new visit. An unfinished log stops at its last known time.
     """
@@ -75,7 +75,7 @@ def slide_visits(records: Sequence[dict]) -> tuple[Visit, ...]:
             has_screen = True
             state, audience = row["state"], row["audience_page"]
         page = audience if has_screen else presenter
-        identity = pages.get(page) if state == "shown" else None
+        identity = pages.get(page) if state != "black" else None
         if identity is not None and identity[0] is None:
             identity = None
         if kind == "PresentationEnded":
@@ -107,6 +107,7 @@ class Passage:
     segments: tuple[int, ...] = ()
     confirmed: bool = False
     suggest_exclusion: bool = False
+    transcript_sha256: str = ""
 
     def __post_init__(self):
         object.__setattr__(self, "segments", tuple(self.segments))
@@ -124,6 +125,7 @@ class Passage:
 
         Supply the transcript when trimming timed text so cue references follow
         the new range. Untimed paragraphs retain their original text references.
+        Its SHA-256 is retained so later transcript edits invalidate confirmation.
         """
         left = self.start if start is None else start
         right = self.end if end is None else end
@@ -137,7 +139,8 @@ class Passage:
         indices = self.segments
         if transcript is not None and self.start is not None:
             indices = _segments(transcript, left, right)
-        return replace(self, start=left, end=right, segments=indices, confirmed=True)
+        return replace(self, start=left, end=right, segments=indices, confirmed=True,
+                       transcript_sha256=transcript.sha256 if transcript is not None else "")
 
 
 def propose_passages(records: Sequence[dict], transcript: Transcript | None = None, *,

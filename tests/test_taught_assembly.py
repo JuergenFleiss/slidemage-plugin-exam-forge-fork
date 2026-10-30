@@ -3,6 +3,7 @@
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
+from hashlib import sha256
 from itertools import combinations, product
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from exam_forge.assembly import Blueprint, assemble, check_approval, swap
 from exam_forge.bank import Bank, ConflictError
 from exam_forge.elp import DifficultyRules, ElpRules
 from exam_forge.model import Item, Option, SourceLink
-from exam_forge.passages import Passage, Session
+from exam_forge.passages import Passage, Session, Sessions
 from exam_forge.sources import link_slide
 from exam_forge.taught import TaughtOptions, build_evidence, filter_items
 
@@ -38,9 +39,9 @@ def decks():
             for view in ("instructor", "during-course") for lang in ("de", "en")}
 
 
-def log(slide="a-de", *, view="instructor"):
+def log(slide="a-de", *, view="instructor", version="1-0-0"):
     return [{"type": "PresentationStarted", "monotonic": 100, "view": view, "language": "de"},
-            {"type": "PageShown", "monotonic": 100, "page": 1, "slide_id": slide, "version": "1-0-0"},
+            {"type": "PageShown", "monotonic": 100, "page": 1, "slide_id": slide, "version": version},
             {"type": "PresentationEnded", "monotonic": 110}]
 
 
@@ -51,7 +52,7 @@ def schedule():
 def evidence():
     return build_evidence(decks(), [
         Session("Presented", "logged", presentation="presentations/logged.jsonl"),
-        Session("Talk", "talk", transcript="talk.vtt", passages=(Passage("c-en", None, 0, 10, confirmed=True),)),
+        Session("Talk", "talk", recording="talk.mp4", passages=(Passage("c-en", None, 0, 10, confirmed=True),)),
     ], {"logged": log()})
 
 
@@ -92,13 +93,41 @@ def test_logs_win_over_schedule_translation_by_position_and_skips():
     assert build_evidence(decks(), [Session("L", "l", presentation="l")], {"l": rows}).slides == {"c-de", "c-en"}
 
 
+@pytest.mark.parametrize("slide_id", ["a-de", "a-en"])
+@pytest.mark.parametrize("logged,linked,included", [
+    ("1-0-0", "2-0-0", False), ("1-0-0", "1-0-0", True),
+    (None, "2-0-0", True), ("1-0-0", "", True),
+])
+def test_logged_pinned_versions_must_match_but_unpinned_versions_cannot_be_compared(slide_id, logged, linked, included):
+    data = build_evidence(decks(), [Session("Log", "l", presentation="l")], {"l": log(version=logged)})
+    assert data.slide_versions[slide_id] == {logged}
+    question = item("q", sources=(SourceLink(slide_id, linked),))
+    result = filter_items([question], data)
+    assert bool(result.included) == included
+    if not included:
+        assert result.excluded[0].item == question
+        assert all(value in result.excluded[0].reasons[0] for value in (slide_id, logged, linked, "version"))
+
+
+def test_any_shown_version_can_supply_slide_evidence_and_talk_can_still_cover_a_mismatch():
+    sessions = [Session("Old", "old", presentation="old"), Session("New", "new", presentation="new")]
+    logs = {"old": log(version="1-0-0"), "new": log(version="2-0-0")}
+    questions = [item(v, sources=(SourceLink("a-en", v),)) for v in ("1-0-0", "2-0-0")]
+    data = build_evidence(decks(), sessions, logs)
+    assert data.slide_versions["a-en"] == {"1-0-0", "2-0-0"}
+    assert filter_items(questions, data).included == tuple(questions)
+    talk = Session("Talk", "talk", recording="r.mp4", passages=(Passage("a-en", None, 0, 10).confirm(),))
+    data = build_evidence(decks(), [sessions[0], talk], logs)
+    assert filter_items(questions, data, options=TaughtOptions(True, True)).included == tuple(questions)
+
+
 def test_audience_state_jump_back_and_no_passage_can_rescue_none_slide_ids():
     rows = log()
     rows[2:2] = [{"type": "ScreenState", "monotonic": 102, "state": "black", "audience_page": 1},
                  {"type": "PageShown", "monotonic": 103, "page": 2, "slide_id": "c-de", "version": None},
                  {"type": "ScreenState", "monotonic": 104, "state": "black", "audience_page": 2},
                  {"type": "ScreenState", "monotonic": 105, "state": "shown", "audience_page": 1}]
-    session = Session("Log", "l", presentation="l", transcript="t.vtt",
+    session = Session("Log", "l", presentation="l", recording="r.mp4",
                       passages=(Passage("c-de", None, 0, 10, confirmed=True),))
     result = build_evidence(decks(), [session], {"l": rows})
     assert result.slides == {"a-de", "a-en"} and not result.talk
@@ -116,15 +145,44 @@ def test_audience_state_jump_back_and_no_passage_can_rescue_none_slide_ids():
 
 def test_talk_requires_attachment_and_confirmation_but_can_be_manual():
     proposal = Passage("c-de", None, 0, 10)
-    session = Session("Talk", "t", transcript="t.vtt", passages=(proposal,))
+    session = Session("Talk", "t", recording="r.mp4", passages=(proposal,))
     assert build_evidence(decks(), [session]).talk == frozenset()
     confirmed = replace(session, passages=(proposal.confirm(),))
     assert build_evidence(decks(), [confirmed]).talk == {"c-de", "c-en"}
-    assert build_evidence(decks(), [replace(confirmed, transcript="")]).talk is None
+    assert build_evidence(decks(), [replace(confirmed, recording="")]).talk is None
     logged = replace(confirmed, presentation="t")
     assert build_evidence(decks(), [logged], {"t": log("c-de")}).talk == {"c-de", "c-en"}
     # Confirmed talk never becomes evidence that the slide was shown.
     assert build_evidence(decks(), [confirmed]).slides is None
+
+
+@pytest.mark.parametrize("logged", [False, True])
+def test_replaced_transcript_invalidates_persisted_confirmation_at_build_evidence(tmp_path, logged):
+    store = Sessions(Bank(tmp_path, create=True))
+    path = tmp_path / "talk.vtt"
+    raw = b"\xef\xbb\xbfWEBVTT\r\n\r\n00:00.000 --> 00:10.000\r\nOriginal words\r\n"
+    path.write_bytes(raw)
+    session = Session("Talk", "t", transcript="talk.vtt", recording="r.mp4",
+                      presentation="t" if logged else "")
+    passage = Passage("c-de", None, 0, 10).confirm(store.read_transcript(session))
+    assert passage.transcript_sha256 == sha256(raw).hexdigest()
+    store.save(replace(session, passages=(passage,)))
+    session = store.load()[0]
+    logs = {"t": log("c-de")} if logged else {}
+
+    def evidence():
+        return build_evidence(decks(), [session], logs,
+                              transcript_hashes={"t": sha256(path.read_bytes()).hexdigest()})
+
+    assert evidence().talk == {"c-de", "c-en"}
+    path.write_bytes(raw.replace(b"Original words", b"Replacement text"))
+    assert evidence().talk == frozenset()
+    assert store.load()[0].passages[0].confirmed  # Invalidation is evaluated, not rewritten on disk.
+    path.write_bytes(raw)
+    assert evidence().talk == {"c-de", "c-en"}
+    assert build_evidence(decks(), [session], logs).talk == frozenset()
+    session = replace(session, passages=(replace(passage, transcript_sha256=""),))
+    assert evidence().talk == frozenset()  # Legacy confirmations have no trusted transcript hash.
 
 
 def test_schedule_fallback_completed_sessions_visible_order_and_explicit_cutoff():

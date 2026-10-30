@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 
 from fake_host import FakeHost
@@ -72,7 +73,11 @@ def test_replay_jump_back_screen_state_and_separate_presentations(tmp_path):
     assert not events.callbacks
 
 
-def test_crash_keeps_complete_lines_and_ignores_incomplete_tail(tmp_path):
+def test_crash_keeps_complete_lines_and_ignores_incomplete_tail_without_fsync(tmp_path, monkeypatch):
+    def unexpected_fsync(*args):
+        raise AssertionError("Presentation events should flush without fsync")
+
+    monkeypatch.setattr(os, "fsync", unexpected_fsync)
     host = FakeHost(tmp_path)
     events = Events()
     host.offer("presenter.events", 1, events)

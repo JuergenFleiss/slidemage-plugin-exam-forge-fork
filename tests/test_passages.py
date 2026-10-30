@@ -58,16 +58,25 @@ def test_reveals_one_visit_jump_back_new_visit_skipped_slides_and_padding():
     assert ranges(propose_passages(log(), padding=6)) == [("a", 0, 46), ("b", 14, 36), ("c", 34, 56)]
 
 
-def test_audience_page_wins_and_black_frozen_and_unknown_pages_leave_gaps():
+def test_audience_page_counts_while_frozen_and_only_black_and_unknown_pages_leave_gaps():
     rows = [start(), page(100, 1, "a"), screen(110, "frozen", 1), page(115, 2, "b"),
             screen(120, "shown", 1), page(125, 3, "c"), screen(130, "shown", 2),
             screen(135, "black", 2), page(138, 4, "hidden"), screen(140, "black", 4),
             screen(145, "shown", 3), screen(148, "shown", 99), event("PresentationEnded", 150)]
-    assert slide_visits(rows) == (Visit("a", "1-0-0", 100, 110), Visit("a", "1-0-0", 120, 130),
+    assert slide_visits(rows) == (Visit("a", "1-0-0", 100, 130),
                                   Visit("b", "1-0-0", 130, 135), Visit("c", "1-0-0", 145, 148))
-    assert ranges(propose_passages(rows, padding=0)) == [("a", 0, 10), ("a", 20, 30),
+    assert ranges(propose_passages(rows, padding=0)) == [("a", 0, 30),
                                                        ("b", 30, 35), ("c", 45, 48)]
     assert propose_passages([start(), page(100, 1, None), event("PresentationEnded", 150)]) == ()
+
+
+def test_freeze_exposure_counts_and_an_unidentified_held_page_does_not():
+    rows = [start(), page(100, 1, "a"), screen(101, "frozen", 1), page(102, 2, "b"),
+            screen(110, "frozen", 99), event("PresentationEnded", 120)]
+    assert slide_visits(rows) == (Visit("a", "1-0-0", 100, 110),)
+    proposals = propose_passages(rows, padding=0)
+    assert ranges(proposals) == [("a", 0, 10)]
+    assert not proposals[0].suggest_exclusion
 
 
 def test_manual_sync_uses_monotonic_even_if_wall_clock_jumps():
@@ -187,7 +196,7 @@ def test_attachments_paths_copy_open_player_and_persist_sync_and_confirmation(tm
     assert store.path(session.transcript).read_bytes() == transcript.read_bytes()
     parsed = store.read_transcript(session)
     proposed = propose_passages(log(), parsed)[0]
-    session = replace(session, sync=SyncPoint(100, 2), passages=(proposed, proposed.confirm()))
+    session = replace(session, sync=SyncPoint(100, 2), passages=(proposed, proposed.confirm(parsed)))
     store.save(session)
     assert Sessions(Bank(folder)).load() == [session]
     host = FakeHost(tmp_path)

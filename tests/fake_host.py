@@ -120,6 +120,12 @@ class FakeHost:
             self._settings = FakeSettings()
         return self._settings
 
+    def add_settings_tab(self, title, build):
+        if not self._active:
+            raise RuntimeError("registrations are only allowed in activate()")
+        self.settings_tabs = getattr(self, "settings_tabs", {})
+        self.settings_tabs[title] = build
+
     def add_sidebar_box(self, key, title, build, size="compact", when=lambda deck: True):
         if not self._active:
             raise RuntimeError("registrations are only allowed in activate()")

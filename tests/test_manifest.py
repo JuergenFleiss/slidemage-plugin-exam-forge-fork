@@ -1,7 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 import base64
+import os
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from fake_host import FakeDeck, FakeHost
@@ -60,6 +62,49 @@ def test_issue_is_detached_and_persistent_after_edit_and_retirement(setup, tmp_p
     assert data["scoring"]["tables"]["12"][0]["wrong_tick"] == -3
     with pytest.raises(FileExistsError):
         manifest.write(path)
+
+
+def test_manifest_is_complete_before_atomic_publication(tmp_path, monkeypatch):
+    manifest = Manifest(b'{"schema_version":1}')
+    path = tmp_path / "exam.manifest.json"
+    link = os.link
+
+    def publish(source, target):
+        assert not path.exists()
+        assert target == path
+        assert path.parent == Path(source).parent
+        assert Path(source).read_bytes() == manifest.encoded + b"\n"
+        link(source, target)
+
+    monkeypatch.setattr(os, "link", publish)
+    manifest.write(path)
+    assert Manifest.read(path).data() == manifest.data()
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_failed_manifest_write_leaves_no_published_or_temporary_file(tmp_path, monkeypatch):
+    def fail(_fd):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "fsync", fail)
+    with pytest.raises(OSError, match="disk full"):
+        Manifest(b'{"schema_version":1}').write(tmp_path / "exam.manifest.json")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_atomic_manifest_publication_refuses_a_concurrent_issuer(tmp_path, monkeypatch):
+    path = tmp_path / "exam.manifest.json"
+    link = os.link
+
+    def publish(source, target):
+        path.write_bytes(b"another issued manifest")
+        link(source, target)
+
+    monkeypatch.setattr(os, "link", publish)
+    with pytest.raises(FileExistsError):
+        Manifest(b'{"schema_version":1}').write(path)
+    assert path.read_bytes() == b"another issued manifest"
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_checks_all_sources_before_issue(setup):

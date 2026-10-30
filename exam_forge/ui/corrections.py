@@ -57,11 +57,13 @@ class CorrectionSheet(QDialog):
         if self.busy:
             return
         self.busy = True
-        self.append.setEnabled(False)
+        for field in (self.item, self.change, self.reason, self.append):
+            field.setEnabled(False)
 
         def completed(result, error):
             self.busy = False
-            self.append.setEnabled(True)
+            for field in (self.item, self.change, self.reason, self.append):
+                field.setEnabled(True)
             if error:
                 self.message.setText(str(error))
             else:

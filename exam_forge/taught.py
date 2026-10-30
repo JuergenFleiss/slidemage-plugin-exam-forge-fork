@@ -10,7 +10,7 @@ coverage is only an estimate: G7 must show and confirm the cutoff position.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
 from slidemage.plugin_api import CourseSessionInfo, SlideRef
@@ -36,6 +36,7 @@ class TaughtEvidence:
     talk_reason: str = ""
     slide_method: str = "log"
     cutoff_position: int | None = None
+    slide_versions: Mapping[str, frozenset[str | None]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -67,13 +68,17 @@ def build_evidence(
     view: str = "during-course",
     language: str = "en",
     cutoff_position: int | None = None,
+    transcript_hashes: Mapping[str, str] | None = None,
 ) -> TaughtEvidence:
     """Logs win even if empty or unmapped; confirmed talk needs an attachment.
 
     A logged passage also needs a trusted audience visit to that slide (or its
     translation). A manual, unlogged session can use confirmed text matches.
-    No passage manufactures slide evidence. Versions belong to the independent
-    source check, not to this test of whether material was taught.
+    No passage manufactures slide evidence. Logged pinned versions must match a
+    source link's named version. PageShown.version=None is unpinned and cannot
+    be compared, so it still counts. Transcript confirmations need a matching
+    current SHA-256 in transcript_hashes, keyed by session ID; missing hashes
+    (including old confirmations) do not confirm talk from a transcript.
 
     Without logs, divide visible slide calls equally over all scheduled
     sessions, rounding down after sessions completed by as_of. An explicit
@@ -81,7 +86,9 @@ def build_evidence(
     Supply as_of explicitly so results do not depend on the machine clock.
     """
     logs = logs or {}
+    transcript_hashes = transcript_hashes or {}
     shown, spoken = set(), set()
+    versions = {}
     has_log = has_talk = False
     for session in sessions:
         trusted = set()
@@ -95,13 +102,18 @@ def build_evidence(
                 first = rows[0]
                 refs = tuple(ref for lang in ("de", "en")
                              for ref in deck_slides.get((first["view"], lang), ()))
-                trusted = _equivalents(refs, {v.slide_id for v in slide_visits(rows)})
-                # A removed/foreign ID is not evidence about this deck.
-                trusted &= {ref.id for ref in refs}
+                for visit in slide_visits(rows):
+                    # A removed/foreign ID is not evidence about this deck.
+                    ids = _equivalents(refs, {visit.slide_id}) & {ref.id for ref in refs}
+                    trusted.update(ids)
+                    for slide_id in ids:
+                        versions.setdefault(slide_id, set()).add(visit.version)
                 shown.update(trusted)
         if session.recording or session.transcript:
             has_talk = True
-            ids = {p.slide_id for p in session.passages if p.confirmed and p.slide_id}
+            ids = {p.slide_id for p in session.passages if p.confirmed and p.slide_id
+                   and (not session.transcript or (p.transcript_sha256
+                        and p.transcript_sha256 == transcript_hashes.get(session.id)))}
             if session.presentation:
                 ids = _equivalents(refs, ids) & trusted
             else:
@@ -144,7 +156,7 @@ def build_evidence(
         reason = "Slides unavailable: no presentation log or course schedule."
     return TaughtEvidence(slides, frozenset(spoken) if has_talk else None, reason,
                           "" if has_talk else "Talk unavailable: no recording or transcript attached.",
-                          method, cutoff)
+                          method, cutoff, {slide_id: frozenset(values) for slide_id, values in versions.items()})
 
 
 def filter_items(items: Sequence[Item], evidence: TaughtEvidence, *,
@@ -157,19 +169,23 @@ def filter_items(items: Sequence[Item], evidence: TaughtEvidence, *,
     """
     options = deck_default if options is None else options
     included, excluded = [], []
-    covered = set()
-    if options.slides:
-        covered.update(evidence.slides or ())
-    if options.talk:
-        covered.update(evidence.talk or ())
     for item in items:
         reasons = []
         if options.slides or options.talk:
             if not item.sources:
                 reasons.append("No linked slide or confirmed talk source.")
             for source in item.sources:
-                if source.slide_id not in covered:
-                    reasons.append(f"Source {source.slide_id or '(unidentified)'} is outside the taught cutoff.")
+                slide = options.slides and source.slide_id in (evidence.slides or ())
+                versions = evidence.slide_versions.get(source.slide_id, ())
+                mismatch = (slide and source.version and versions and None not in versions
+                            and source.version not in versions)
+                talk = options.talk and source.slide_id in (evidence.talk or ())
+                if not ((slide and not mismatch) or talk):
+                    if mismatch:
+                        reasons.append(f"Source {source.slide_id} links version {source.version}, "
+                                       f"but the logged versions shown were {', '.join(sorted(versions))}.")
+                    else:
+                        reasons.append(f"Source {source.slide_id or '(unidentified)'} is outside the taught cutoff.")
             if reasons and options.slides and evidence.slides is None:
                 reasons.append(evidence.slide_reason)
             if reasons and options.talk and evidence.talk is None:
