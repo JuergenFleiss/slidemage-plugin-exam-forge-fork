@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-from dataclasses import replace
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -100,7 +100,7 @@ def test_interrupted_replace_leaves_old_file(bank, monkeypatch):
 
 def test_source_check_does_not_conflict_with_editor_or_create_revision(bank):
     item = bank.create(replace(question(), source_changed=False))
-    changed = bank.set_source_changed(item.id, item.revision, True)
+    changed = bank.set_source_changed(item.id, True)
     assert changed.revision == item.revision and changed.source_changed
     data = json.loads((bank.folder / "q1.json").read_text())
     assert data["source_changed"] is True
@@ -110,8 +110,7 @@ def test_source_check_does_not_conflict_with_editor_or_create_revision(bank):
     edited = bank.save(replace(item, stem="Edited"))
     assert edited.revision == 2 and edited.source_changed
     assert bank.get(item.id, 1).source_changed
-    # An old revision is irrelevant to a source check.
-    cleared = bank.set_source_changed(item.id, item.revision, False)
+    cleared = bank.set_source_changed(item.id, False)
     assert cleared.revision == 2 and not cleared.source_changed
     assert len(json.loads((bank.folder / "q1.json").read_text())["revisions"]) == 2
 
@@ -135,20 +134,6 @@ def test_status_moves_and_rejected_transitions(bank):
     assert bank.get(current.id) == current
 
 
-def test_source_flag_legacy_format_migrates_on_write(bank):
-    item = bank.create(question())
-    path = bank.folder / "q1.json"
-    data = json.loads(path.read_text())
-    del data["source_changed"]
-    data["revisions"][0]["source_changed"] = True
-    path.write_text(json.dumps(data))
-    assert bank.get(item.id) == item
-    bank.save(replace(item, stem="New", source_changed=False))
-    data = json.loads(path.read_text())
-    assert data["source_changed"] is True
-    assert all("source_changed" not in row for row in data["revisions"])
-
-
 def test_failed_creation_still_reserves_id(bank, monkeypatch):
     original_write = storage._atomic_write
     def fail_item(path, data):
@@ -161,3 +146,41 @@ def test_failed_creation_still_reserves_id(bank, monkeypatch):
     with pytest.raises(ConflictError):
         bank.create(question())
     assert len(bank.load()[1]) == 1
+
+
+def test_media_round_trip_hash_validation_and_immutable_reviewed_image(bank):
+    from exam_forge.bank import BankError
+    from exam_forge.model import Media
+    first = bank.store_media("first.png", b"first picture", "First image")
+    assert first.sha256 in first.name
+    item = bank.create(replace(question(), media=(first,)))
+    reviewed = bank.set_status(item.id, item.revision, "reviewed")
+    second = bank.store_media("replacement.png", b"second picture", "Second image")
+    edited = bank.save(replace(reviewed, status="draft", media=(second,)))
+    assert edited.status == "draft" and edited.revision == reviewed.revision + 1
+    reopened = Bank(bank.folder)
+    assert reopened.get(item.id).media == (second,)
+    assert reopened.get(item.id, reviewed.revision).media == (first,)
+    assert reopened.read_media(first) == b"first picture"
+    assert reopened.read_media(second) == b"second picture"
+    assert bank.store_media("same.png", b"first picture", "New alt text").name == first.name
+    (bank.folder / "media" / first.name).write_bytes(b"tampered")
+    with pytest.raises(BankError, match="hash mismatch"):
+        reopened.read_media(first)
+    with pytest.raises(ValueError, match="filename"):
+        Media("../outside.png", first.sha256)
+    with pytest.raises(ValueError, match="SHA-256"):
+        Media("ok.png", "invalid")
+    with pytest.raises(ValueError, match="unique"):
+        replace(item, media=(first, first))
+
+
+def test_interrupted_media_write_leaves_existing_images_intact(bank, monkeypatch):
+    first = bank.store_media("first.png", b"old image")
+    def fail(*args):
+        raise OSError("interrupted")
+    monkeypatch.setattr(storage.os, "replace", fail)
+    with pytest.raises(OSError, match="interrupted"):
+        bank.store_media("new.png", b"new image")
+    assert bank.read_media(first) == b"old image"
+    assert list((bank.folder / "media").iterdir()) == [bank.folder / "media" / first.name]

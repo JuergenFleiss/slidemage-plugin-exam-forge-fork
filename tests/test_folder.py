@@ -7,12 +7,11 @@ import subprocess
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from fake_host import FakeDeck, FakeHost
 from PySide6.QtWidgets import QMessageBox
 
-from exam_forge.bank import CorruptFileError
 from exam_forge.folder import folder_warnings, remembered_folder
 from exam_forge.ui.first_use import choose_bank
-from fake_host import FakeDeck, FakeHost
 
 
 class Settings:
@@ -99,8 +98,7 @@ def test_moved_deck_and_missing_folder_ask_again(setup, monkeypatch, tmp_path):
     assert choose_bank(host, moved) is None
     assert choose_bank(host, deck).id == bank.id
     (folder / "bank.json").unlink()
-    with pytest.raises(CorruptFileError):
-        choose_bank(host, deck)
+    assert choose_bank(host, deck) is None
     (folder / ".bank.lock").unlink()
     folder.rmdir()
     assert choose_bank(host, deck) is None

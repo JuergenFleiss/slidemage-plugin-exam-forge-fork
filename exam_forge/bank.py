@@ -3,16 +3,17 @@
 """Revision-preserving JSON bank. All writers cooperate using the bank lock."""
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import asdict, replace
+import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import tempfile
+from contextlib import contextmanager
+from dataclasses import asdict, replace
+from pathlib import Path
 from uuid import uuid4
 
-from .model import Item, Option, Origin, SourceLink
+from .model import Item, Media, Option, Origin, SourceLink
 
 SCHEMA_VERSION = 1
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
@@ -71,6 +72,7 @@ def _item(data: dict) -> Item:
     data["options"] = tuple(Option(**option) for option in data["options"])
     data["sources"] = tuple(SourceLink(**source) for source in data["sources"])
     data["origin"] = Origin(**data["origin"])
+    data["media"] = tuple(Media(**entry) for entry in data.get("media", ()))
     return Item(**data)
 
 
@@ -148,9 +150,7 @@ class Bank:
         data = _read(path)
         try:
             rows = data["revisions"]
-            # Accept files written by the earlier F1 format and migrate them on
-            # the next write, using the most recent revision's flag.
-            changed = data.get("source_changed", rows[-1].get("source_changed", False))
+            changed = data["source_changed"]
             if type(changed) is not bool:
                 raise ValueError("invalid source_changed flag")
             revisions = [_item({**row, "source_changed": changed}) for row in rows]
@@ -247,12 +247,9 @@ class Bank:
             self._write_item(item_id, data, revisions, current.source_changed)
             return updated
 
-    def set_source_changed(self, item_id: str, revision: int, changed: bool, *,
+    def set_source_changed(self, item_id: str, changed: bool, *,
                            expected_sources: tuple[SourceLink, ...] | None = None) -> Item:
-        """Record a source check; optionally reject results for links edited during a check.
-
-        revision is kept for API compatibility; edits retaining the same sources are safe.
-        """
+        """Record a source check; optionally reject results for links edited during a check."""
         if type(changed) is not bool:
             raise ValueError("source_changed must be a boolean")
         with _lock(self.folder):
@@ -268,6 +265,45 @@ class Bank:
             updated = replace(current, source_changed=changed)
             self._write_item(item_id, data, revisions, changed)
             return updated
+
+    def store_media(self, name: str, data: bytes, alt: str = "") -> Media:
+        """Atomically store content by hash; replacing an image never changes old revisions."""
+        if not isinstance(data, bytes) or not data:
+            raise ValueError("media data must be nonempty bytes")
+        digest = hashlib.sha256(data).hexdigest()
+        # Validate the supplied filename before using its suffix.
+        Media(name, digest, alt)
+        media = Media(digest + Path(name).suffix.lower(), digest, alt)
+        with _lock(self.folder):
+            folder = self.folder / "media"
+            folder.mkdir(exist_ok=True)
+            path = folder / media.name
+            if path.exists():
+                self.read_media(media)
+                return media
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=folder, prefix=".media-", delete=False) as stream:
+                    temporary = stream.name
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, path)
+            finally:
+                if temporary is not None and os.path.exists(temporary):
+                    os.unlink(temporary)
+        return media
+
+    def read_media(self, media: Media) -> bytes:
+        """Read and verify an attachment, failing on missing or modified content."""
+        folder = self.folder / "media"
+        path = folder / media.name
+        if path.resolve().parent != folder.resolve():
+            raise BankError(f"Media is outside the bank: {media.name}")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != media.sha256:
+            raise BankError(f"Media hash mismatch: {media.name}")
+        return data
 
     def delete(self, item_id: str, revision: int) -> None:
         """Hide an item without removing its history or releasing its ID."""

@@ -184,7 +184,7 @@ def check_bank(
         results = []
         for item in items:
             checked = checker.item(item)
-            updated = bank.set_source_changed(item.id, item.revision, checked.source_changed,
+            updated = bank.set_source_changed(item.id, checked.source_changed,
                                               expected_sources=item.sources)
             results.append(ItemCheck(updated, checked.sources))
         return BankCheck(tuple(results), tuple(errors))

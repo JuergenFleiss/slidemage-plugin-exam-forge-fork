@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Export phase 1 items to Moodle XML without Qt or filesystem access.
+"""Export phase 1 items to Moodle XML without Qt. Bank attachments are verified before export.
 
 Stems, options and rationales are plain text, not HTML. Write inline TeX as
 \\( ... \\); it is passed through for Moodle's enabled MathJax filter. Images
@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from html import escape
 from xml.etree import ElementTree as ET
 
+from .bank import Bank
 from .model import Item, check_phase1
 
 
@@ -52,6 +53,7 @@ def export_moodle_xml(
     items: Iterable[Item], *,
     released_elp: Iterable[tuple[str, int]] = (),
     images: Mapping[tuple[str, int], Iterable[Image]] | None = None,
+    bank: Bank | None = None,
 ) -> bytes:
     """Return UTF-8 XML. ELP release is explicit and specific to a revision.
 
@@ -74,7 +76,10 @@ def export_moodle_xml(
         questiontext = ET.SubElement(question, 'questiontext', {'format': 'html'})
         html = _html(item.stem)
         filenames: set[str] = set()
-        for image in image_map.get(key, ()):
+        if item.media and bank is None:
+            raise ValueError(f'{item.id}: attached media requires its bank')
+        attached = [Image(media.name, bank.read_media(media), media.alt) for media in item.media]
+        for image in (*attached, *image_map.get(key, ())):
             if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', image.name) or image.name in filenames:
                 raise ValueError(f'{item.id}: image filename must be simple and unique')
             if not isinstance(image.data, bytes) or not image.data:

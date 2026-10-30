@@ -3,6 +3,7 @@
 """Stored question types. Validation for a particular output belongs outside the model."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -40,6 +41,21 @@ class Origin:
 
 
 @dataclass(frozen=True)
+class Media:
+    """An immutable image in the bank's media folder."""
+
+    name: str
+    sha256: str
+    alt: str = ""
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", self.name):
+            raise ValueError("media filename must be simple")
+        if not re.fullmatch(r"[a-f0-9]{64}", self.sha256):
+            raise ValueError("media needs a SHA-256 digest")
+
+
+@dataclass(frozen=True)
 class Item:
     id: str
     revision: int
@@ -53,10 +69,14 @@ class Item:
     sources: tuple[SourceLink, ...] = ()
     source_changed: bool = False  # Current item-level check, not revision content.
     origin: Origin = field(default_factory=Origin)
+    media: tuple[Media, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", tuple(self.options))
         object.__setattr__(self, "sources", tuple(self.sources))
+        object.__setattr__(self, "media", tuple(self.media))
+        if len({entry.name for entry in self.media}) != len(self.media):
+            raise ValueError("media filenames must be unique")
         if not self.id or type(self.revision) is not int or self.revision < 1:
             raise ValueError("item needs an id and a positive revision")
         if self.status not in ("draft", "reviewed", "retired"):

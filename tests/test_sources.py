@@ -354,7 +354,7 @@ def test_background_check_cannot_overwrite_marker_for_edited_links(env, tmp_path
         bank.save(replace(original, sources=(), source_changed=True))
         return source_reader(ref)
 
-    bank.set_source_changed(original.id, original.revision, True)
+    bank.set_source_changed(original.id, True)
     monkeypatch.setattr(env.host, "slide_source", edit_during_read)
     report, error = run_bank(env, bank)
     assert report is None and isinstance(error, ConflictError)
@@ -382,4 +382,4 @@ def test_source_check_guard_applies_even_when_marker_would_be_unchanged(env, tmp
     bank = make_bank(tmp_path, item)
     bank.save(replace(item, sources=()))
     with pytest.raises(ConflictError, match="source links"):
-        bank.set_source_changed(item.id, 1, False, expected_sources=item.sources)
+        bank.set_source_changed(item.id, False, expected_sources=item.sources)

@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Stefan Palan, Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A small fake for the Host services used by Exam Forge; no Qt or SlideMage UI."""
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from slidemage.plugin_api import Deck, ServiceInfo, SlideRef, SlideSource
 
@@ -114,3 +114,68 @@ class FakeHost:
         if not path.exists():
             raise FileNotFoundError(path)
         self.opened_files.append(path)
+
+    def settings(self):
+        if not hasattr(self, "_settings"):
+            self._settings = FakeSettings()
+        return self._settings
+
+    def add_sidebar_box(self, key, title, build, size="compact", when=lambda deck: True):
+        if not self._active:
+            raise RuntimeError("registrations are only allowed in activate()")
+        if not hasattr(self, "boxes"):
+            self.boxes = {}
+        self.boxes[key] = (title, build, size, when)
+
+    def refresh_sidebar_box(self, key):
+        self.refreshed = getattr(self, "refreshed", []) + [key]
+
+    def focus(self):
+        from slidemage.plugin_api import Focus
+        return getattr(self, "current_focus", Focus(None, None, "slide"))
+
+    def deck_language(self, deck):
+        return "en"
+
+    def run_in_background(self, work, done):
+        try:
+            result = work()
+        except BaseException as exc:  # noqa: BLE001 - deliver errors like the real host worker
+            done(None, exc)
+        else:
+            done(result, None)
+
+    def Page(self):
+        from PySide6.QtWidgets import QVBoxLayout, QWidget
+        page = QWidget()
+        page.body = QVBoxLayout(page)
+        return page
+
+    def Field(self, label, widget):
+        from PySide6.QtWidgets import QLabel
+        page = self.Page()
+        page.body.addWidget(QLabel(label))
+        page.body.addWidget(widget)
+        return page
+
+    def Button(self, text, kind="secondary", *, compact=False):
+        from PySide6.QtWidgets import QPushButton
+        return QPushButton(text)
+
+    def Chip(self, text, tone="neutral"):
+        from PySide6.QtWidgets import QLabel
+        return QLabel(text)
+
+
+class FakeSettings:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key, value):
+        self.data[key] = value
+
+    def save(self):
+        pass
