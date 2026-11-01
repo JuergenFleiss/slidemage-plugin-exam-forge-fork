@@ -334,7 +334,7 @@ def test_grid_scopes_to_topic_ticks_only_the_opening_slide_and_widens(env):
     dialog.show_all.setChecked(False)
     assert ticks(dialog) == [False, True]
     dialog.show_all.setChecked(True)
-    assert ticks(dialog) == [False, True, True]
+    assert ticks(dialog) == [False, True, False]  # the hidden tick was dropped when the grid narrowed
     dialog.reject()
     outside = scoped(host, deck, window, "s1", preselect="s3")
     assert outside.show_all.isChecked() and outside.choices.count() == 3
@@ -405,3 +405,39 @@ def test_only_ticked_slide_text_is_sent_from_a_scoped_grid(env):
     chat.done(result(), None)
     host.drain()
     assert dialog.result() == dialog.DialogCode.Accepted and dialog.items[0].sources[0].slide_id == "s2"
+
+
+def test_tick_outside_the_shown_grid_is_never_sent(env):
+    host, deck, _, _, window = env
+    slides(host, deck)
+    chat, _ = enable(host)
+    dialog = scoped(host, deck, window, "s1", "s2", preselect="s2")
+    dialog.show_all.setChecked(True)
+    dialog.choices.item(2).setCheckState(Qt.CheckState.Checked)
+    assert "2 ticked slides" in dialog.note.text()
+    dialog.show_all.setChecked(False)
+    assert "1 ticked slide " in dialog.note.text()
+    dialog.send.click()
+    host.drain()
+    request, = chat.requests
+    assert "Text of s3" not in request.text and "Text of s2" in request.text
+    dialog.reject()
+
+
+def test_same_slide_at_two_versions_is_ticked_per_row(env):
+    host, deck, _, _, window = env
+    first = source(host, deck)
+    other = replace(first, version="2-0-0", position=2)
+    host.slides[(deck.path, "instructor", "en")] = [first, other]
+    host.sources[other] = SlideSource("Second version text")
+    chat, _ = enable(host)
+    dialog = scoped(host, deck, window, topic=False, preselect="s1")
+    assert ticks(dialog) == [True, False]  # only the first ref with that id
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Unchecked)
+    dialog.choices.item(1).setCheckState(Qt.CheckState.Checked)
+    assert ticks(dialog) == [False, True] and "1 ticked slide " in dialog.note.text()
+    dialog.send.click()
+    host.drain()
+    request, = chat.requests
+    assert json.loads(request.text) == {"slides": [{"slide": 1, "text": "Second version text"}]}
+    dialog.reject()

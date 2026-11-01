@@ -20,8 +20,9 @@ from .work import fresh_deck
 NO_SNAPSHOT = "Earlier text not stored"
 
 
-def link_for(item, slide_id):
-    return next((s for s in item.sources if s.slide_id == slide_id), item.sources[0] if item.sources else None)
+def ordered(item, slide_id):
+    """The item's links, the one for `slide_id` first."""
+    return sorted(item.sources, key=lambda link: link.slide_id != slide_id)
 
 
 class _Row(QWidget):
@@ -116,22 +117,23 @@ class ReviewChangesDialog(QDialog):
         def work():
             deck, decks, out = fresh_deck(self.shell.deck), {}, {}
             for item in items:
-                try:
-                    link = link_for(item, slide_id)
-                    if link is None:
-                        raise ValueError("This question has no linked slide.")
-                    context = (link.view, link.language)
-                    if context not in decks:
-                        decks[context] = self.host.deck_slides(deck, *context)
-                    out[item.id] = self.host.slide_source(_resolve(decks[context], link)).text
-                except Exception as exc:
-                    out[item.id] = exc
+                entries = []
+                for link in ordered(item, slide_id):
+                    try:
+                        context = (link.view, link.language)
+                        if context not in decks:
+                            decks[context] = self.host.deck_slides(deck, *context)
+                        ref = _resolve(decks[context], link)
+                        entries.append((link, self.host.slide_source(ref).text, ref.title or ""))
+                    except Exception as exc:
+                        entries.append((link, exc, ""))
+                out[item.id] = entries or [(None, ValueError("This question has no linked slide."), "")]
             return out
 
         def done(result, error):
             if not self.state["active"] or generation != self.generation:
                 return
-            self.current = result if not error else {i.id: error for i in items}
+            self.current = result if not error else {i.id: [(None, error, "")] for i in items}
             self.message.setText("")
             self.sync()
             self.show_row(self.list.currentRow())
@@ -141,7 +143,8 @@ class ReviewChangesDialog(QDialog):
     def sync(self):
         ai = bool(self.host.settings().get("ai_support", False))
         for row in self.rows:
-            ok = isinstance(self.current.get(row.item.id), str)
+            entries = self.current.get(row.item.id)
+            ok = bool(entries) and all(isinstance(text, str) for _, text, _ in entries)
             can = not self.busy and ok and not row.resolved
             row.keep.setEnabled(can)
             row.update.setVisible(ai)
@@ -153,22 +156,28 @@ class ReviewChangesDialog(QDialog):
             pane.clear()
         if not 0 <= index < len(self.rows):
             return
-        item = self.rows[index].item
-        new = self.current.get(item.id)
-        if new is None:
+        entries = self.current.get(self.rows[index].item.id)
+        if entries is None:
             return
-        if not isinstance(new, str):
-            self.old_pane.setPlainText(str(new))
-            self.new_pane.setPlainText(str(new))
-            return
-        link = link_for(item, self.slide_id)
-        if not link.text:
-            self.old_pane.setPlainText(NO_SNAPSHOT)
-            self.new_pane.setHtml(self.html([(new, False)], None))
-            return
-        left, right = word_diff(link.text, new)
-        self.old_pane.setHtml(self.html(left, "old"))
-        self.new_pane.setHtml(self.html(right, "new"))
+        old, new = [], []
+        for link, text, title in entries:
+            name = f"Slide {link.slide_id}" + (f" · {title}" if title else "") if link else ""
+            head = f"<p><b>{escape(name)}</b></p>" if link else ""
+            if not isinstance(text, str):
+                note = f"<p>{escape(str(text))}</p>"
+                old.append(head + note)
+                new.append(head + note)
+            elif not link.text:
+                old.append(head + f"<p><i>{NO_SNAPSHOT}</i></p>")
+                new.append(head + self.html([(text, False)], None))
+            elif link.text != text:
+                left, right = word_diff(link.text, text)
+                old.append(head + self.html(left, "old"))
+                new.append(head + self.html(right, "new"))
+        if not new:
+            new.append("<p>The slide text matches the stored text.</p>")
+        self.old_pane.setHtml("".join(old))
+        self.new_pane.setHtml("".join(new))
 
     def html(self, segments, side):
         color = accent_color(self.new_pane)

@@ -48,7 +48,7 @@ def test_diff_marks_changes_with_escaped_text_and_no_backgrounds(env):
     host, deck, bank, _, window = env
     changed_item(host, deck, bank)
     dialog = open_dialog(host, window, bank)
-    assert dialog.old_pane.toPlainText() == OLD and dialog.new_pane.toPlainText() == NEW
+    assert OLD in dialog.old_pane.toPlainText() and NEW in dialog.new_pane.toPlainText()
     old_html, new_html = dialog.old_pane.toHtml(), dialog.new_pane.toHtml()
     assert "line-through" in old_html and "underline" in new_html
     assert accent_color(dialog.new_pane) in new_html
@@ -63,7 +63,7 @@ def test_missing_snapshot_shows_note_and_unmarked_current_text(env):
     item = changed_item(host, deck, bank)
     dialog = ReviewChangesDialog(window, [replace(item, sources=(replace(item.sources[0], text=""),))])
     host.drain()
-    assert dialog.old_pane.toPlainText() == NO_SNAPSHOT and dialog.new_pane.toPlainText() == NEW
+    assert NO_SNAPSHOT in dialog.old_pane.toPlainText() and NEW in dialog.new_pane.toPlainText()
     assert "underline" not in dialog.new_pane.toHtml()
     dialog.reject()
 
@@ -76,12 +76,13 @@ def test_uses_link_for_slide_id_else_first_and_filters_retired(env):
     retired = replace(item, id="r", status="retired")
     dialog = ReviewChangesDialog(window, [two, retired], "s1")
     host.drain()
-    assert len(dialog.rows) == 1 and dialog.new_pane.toPlainText() == NEW
-    assert dialog.old_pane.toPlainText() == OLD
+    assert len(dialog.rows) == 1 and not dialog.rows[0].keep.isEnabled()  # the missing "gone" link blocks it
+    assert dialog.new_pane.toPlainText().startswith("Slide s1") and "Slide gone" in dialog.new_pane.toPlainText()
+    assert OLD in dialog.old_pane.toPlainText()
     dialog.reject()
-    first = ReviewChangesDialog(window, [two])
+    first =ReviewChangesDialog(window, [two])
     host.drain()
-    assert "no longer" in first.new_pane.toPlainText() or "missing" in first.new_pane.toPlainText()
+    assert first.new_pane.toPlainText().startswith("Slide gone")
     first.reject()
 
 
@@ -239,3 +240,29 @@ def test_destroyed_dialog_drops_late_reply(env):
     chat.done(reply(), None)
     host.drain()
     assert bank.get("q1").revision == 1
+
+
+def test_every_changed_link_is_shown_and_an_unreadable_link_blocks_actions(env):
+    host, deck, bank, _, window = env
+    item = changed_item(host, deck, bank)
+    ref = host.slides[(deck.path, "instructor", "en")][0]
+    second = replace(ref, id="s2", id_slug="s2", position=2, title="Second")
+    host.slides[(deck.path, "instructor", "en")].append(second)
+    host.sources[second] = SlideSource("Beta two")
+    link2 = replace(item.sources[0], slide_id="s2", version=second.version or "", text="Alpha one")
+    two = replace(item, sources=(item.sources[0], link2))
+    enable(host)
+    dialog = ReviewChangesDialog(window, [two], "s2")
+    host.drain()
+    old, new = dialog.old_pane.toPlainText(), dialog.new_pane.toPlainText()
+    assert new.index("Slide s2 · Second") < new.index("Slide s1 · Addition")
+    assert "Alpha one" in old and "Beta two" in new and OLD in old and NEW in new
+    assert dialog.rows[0].keep.isEnabled() and dialog.rows[0].update.isEnabled()
+    dialog.reject()
+    host.slides[(deck.path, "instructor", "en")].remove(second)
+    blocked = ReviewChangesDialog(window, [two], "s1")
+    host.drain()
+    assert "Slide s2" in blocked.new_pane.toPlainText() and "missing" in blocked.new_pane.toPlainText()
+    assert not blocked.rows[0].keep.isEnabled() and not blocked.rows[0].update.isEnabled()
+    assert blocked.rows[0].edit.isEnabled()
+    blocked.reject()

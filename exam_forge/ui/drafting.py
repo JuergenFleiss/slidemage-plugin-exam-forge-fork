@@ -17,6 +17,10 @@ from .work import fresh_deck
 VIEWS = (("Instructor view", "instructor"), ("During course", "during-course"), ("After course", "after-course"))
 
 
+def key(ref):
+    return ref.id, ref.version or ""
+
+
 def plural(n, word):
     return f"{n} {word}{'' if n == 1 else 's'}"
 
@@ -32,7 +36,7 @@ class DraftDialog(QDialog):
         self.loading = self.busy = False
         topic = next((t for t in topics if t.id == topic_id), None)
         self.scope = set(topic.slides) if topic else set()
-        self.ticked = {preselect} if preselect else set()
+        self.ticked, self.preselect = set(), preselect
         self.state = state = {"active": True, "cancel": None}
 
         def stop(*_):
@@ -108,7 +112,7 @@ class DraftDialog(QDialog):
         self.load()
 
     def selected(self):
-        return [i for i, ref in enumerate(self.refs) if ref.id in self.ticked]
+        return [i for i, ref in enumerate(self.refs) if key(ref) in self.ticked]
 
     def refresh(self, *_):
         n = len(self.selected())
@@ -120,7 +124,7 @@ class DraftDialog(QDialog):
         self.send.setEnabled(not self.busy and not self.loading and n > 0)
 
     def tick(self, row):
-        slide = self.refs[row.data(Qt.ItemDataRole.UserRole)].id
+        slide = key(self.refs[row.data(Qt.ItemDataRole.UserRole)])
         (self.ticked.add if row.checkState() == Qt.CheckState.Checked else self.ticked.discard)(slide)
         self.refresh()
 
@@ -128,6 +132,7 @@ class DraftDialog(QDialog):
         shown = [i for i, ref in enumerate(self.refs) if ref.id in self.scope]
         if self.show_all.isChecked() or not shown:
             shown = range(len(self.refs))
+        self.ticked &= {key(self.refs[i]) for i in shown}  # Only visibly ticked slides are ever sent.
         self.choices.blockSignals(True)
         self.choices.clear()
         self.preview.clear()
@@ -137,7 +142,7 @@ class DraftDialog(QDialog):
                                   + (" · hidden" if r.hidden else ""))
             row.setFlags(row.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             row.setData(Qt.ItemDataRole.UserRole, i)
-            row.setCheckState(Qt.CheckState.Checked if r.id in self.ticked else Qt.CheckState.Unchecked)
+            row.setCheckState(Qt.CheckState.Checked if key(r) in self.ticked else Qt.CheckState.Unchecked)
             self.choices.addItem(row)
         self.choices.blockSignals(False)
         self.refresh()
@@ -172,7 +177,12 @@ class DraftDialog(QDialog):
                 self.refresh()
                 return
             self.refs, self.sources = result
-            self.ticked &= {ref.id for ref in self.refs}
+            self.ticked &= {key(ref) for ref in self.refs}
+            if self.preselect:
+                first = next((ref for ref in self.refs if ref.id == self.preselect), None)
+                self.preselect = None
+                if first:
+                    self.ticked.add(key(first))
             self.populate()
             self.message.setText("Choose slides.")
 
