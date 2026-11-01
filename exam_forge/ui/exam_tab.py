@@ -4,7 +4,6 @@
 from secrets import randbits
 
 from PySide6.QtWidgets import (
-    QDoubleSpinBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -42,8 +41,8 @@ class ExamTab(QWidget):
         issued.clicked.connect(self.open_issued)
         heading.addWidget(issued)
         body.addLayout(heading)
-        self.counts = QTableWidget(1, 2)
-        self.counts.setHorizontalHeaderLabels(["Topic", "Exact count"])
+        self.counts = QTableWidget(1, 3)
+        self.counts.setHorizontalHeaderLabels(["Topic", "Easy", "Hard"])
         self.counts.horizontalHeader().setStretchLastSection(True)
         self.counts.setMaximumHeight(130)
         body.addWidget(self.counts)
@@ -56,15 +55,9 @@ class ExamTab(QWidget):
         row.addWidget(remove)
         body.addLayout(row)
         row = QHBoxLayout()
-        self.easy, self.hard, self.avoid = QSpinBox(), QSpinBox(), QSpinBox()
-        self.minutes = QDoubleSpinBox()
-        self.minutes.setRange(.01, 1e6)
-        self.minutes.setValue(45)
-        for label, field in (("Easy count", self.easy), ("Hard count", self.hard),
-                             ("Minutes (exact)", self.minutes), ("Avoid last N exams", self.avoid)):
-            if isinstance(field, QSpinBox):
-                field.setRange(0, 1000000)
-            row.addWidget(self.host.Field(label, field))
+        self.avoid = QSpinBox()
+        self.avoid.setRange(0, 1000000)
+        row.addWidget(self.host.Field("Avoid last N exams", self.avoid))
         body.addLayout(row)
         row = QHBoxLayout()
         build = self.host.Button("Propose selection", "primary")
@@ -87,8 +80,12 @@ class ExamTab(QWidget):
         self.stack.addWidget(self.issue)
         self.counts.itemChanged.connect(self.invalidate)
         self.counts.model().rowsRemoved.connect(self.invalidate)
-        for field in (self.easy, self.hard, self.minutes, self.avoid):
-            field.valueChanged.connect(self.invalidate)
+        self.avoid.valueChanged.connect(self.invalidate)
+
+    @staticmethod
+    def topic_of(item):
+        # Replaced when topics.json is wired in.
+        return item.topic
 
     def open_issued(self):
         self.stack.setCurrentWidget(self.issue)
@@ -111,17 +108,17 @@ class ExamTab(QWidget):
     def blueprint(self):
         counts = {}
         for row in range(self.counts.rowCount()):
-            name, count = (self.counts.item(row, col) for col in (0, 1))
+            name, *cells = (self.counts.item(row, col) for col in range(3))
+            texts = [c.text().strip() if c else "" for c in cells]
             if not name or not name.text().strip():
-                if count and count.text().strip():
+                if any(texts):
                     raise ValueError("Each count needs a topic name.")
                 continue
             name = name.text().strip()
             if name in counts:
                 raise ValueError("Use one count row per topic.")
-            counts[name] = int(count.text()) if count else 0
-        return Blueprint(counts, {"easy": self.easy.value(), "hard": self.hard.value()},
-                         self.minutes.value(), self.avoid.value())
+            counts[name] = dict(zip(("easy", "hard"), (int(t or 0) for t in texts)))
+        return Blueprint(counts, self.avoid.value())
 
     def propose(self):
         if not self.window.may_leave():
@@ -137,6 +134,7 @@ class ExamTab(QWidget):
         self.report.setPlainText("Preparing selection…")
         bank = self.window.bank
         seed = randbits(64)
+        topic_of = self.topic_of
 
         def work():
             items, errors = bank.load()
@@ -151,7 +149,7 @@ class ExamTab(QWidget):
                             previous.append([i['id'] for i in manifest['items']])
                     except (OSError, ValueError, KeyError, TypeError) as exc:
                         history_errors.append(f"Could not read exam history {path.name}: {exc}")
-            return assemble(items, blueprint, seed=seed, rules=rules, previous_exams=previous), history_errors
+            return assemble(items, blueprint, seed=seed, topic_of=topic_of, rules=rules, previous_exams=previous), history_errors
 
         def done(data):
             self.selection, history_errors = data
@@ -172,11 +170,10 @@ class ExamTab(QWidget):
         row = self.results.currentRow()
         if self.selection is None or not 0 <= row < len(self.selection.items):
             return
-        selected = {i.id for i in self.selection.items}
-        pool = [i for i in self.selection.candidates if i.id not in selected]
+        pool = list(self.selection.alternatives(self.selection.items[row].id))
         labels = [f"{i.id} · {i.stem}" for i in pool]
         if not labels:
-            self.window.error("No unselected eligible replacements.")
+            self.window.error("No unselected eligible replacement in the same topic and difficulty.")
             return
         label, ok = QInputDialog.getItem(self, "Swap question", "Replacement (all blueprint constraints still apply)", labels, 0, False)
         if ok:

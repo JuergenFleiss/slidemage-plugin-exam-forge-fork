@@ -11,7 +11,6 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
-from math import isfinite
 
 from .bank import Bank, ConflictError
 from .elp import ElpRules, check_elp
@@ -27,29 +26,34 @@ class ExcludedItem:
     reasons: tuple[str, ...]
 
 
+_DIFFICULTIES = ("easy", "hard")
+_NO_TOPIC = "Question has no topic; link it to a slide in a topic."
+
+
 @dataclass(frozen=True)
 class Blueprint:
-    """Counts and difficulty mix are exact item counts; time fills the budget."""
+    """Exact easy and hard counts per topic; minutes follow from ElpRules."""
 
-    counts: Mapping[str, int]
-    difficulty_mix: Mapping[str, int]
-    minutes: float
+    counts: Mapping[str, Mapping[str, int]]
     avoid_last: int = 0
 
     def __post_init__(self):
-        for counts in (self.counts, self.difficulty_mix):
-            if any(not isinstance(k, str) or not k or type(v) is not int or v < 0
-                   for k, v in counts.items()):
-                raise ValueError("Blueprint counts need names and nonnegative integers")
-        if set(self.difficulty_mix) - {"easy", "hard"}:
-            raise ValueError("Difficulty mix uses easy and hard")
-        if (isinstance(self.minutes, bool) or not isinstance(self.minutes, (int, float))
-                or not isfinite(self.minutes) or self.minutes <= 0):
-            raise ValueError("Time budget must be positive and finite")
+        counts = {}
+        for name, cell in self.counts.items():
+            if (not isinstance(name, str) or not name or set(cell) - set(_DIFFICULTIES)
+                    or any(type(v) is not int or v < 0 for v in cell.values())):
+                raise ValueError("Blueprint counts need topic names and nonnegative easy/hard integers")
+            counts[name] = {d: cell.get(d, 0) for d in _DIFFICULTIES}
         if type(self.avoid_last) is not int or self.avoid_last < 0:
             raise ValueError("avoid_last must be a nonnegative integer")
-        object.__setattr__(self, "counts", dict(self.counts))
-        object.__setattr__(self, "difficulty_mix", dict(self.difficulty_mix))
+        object.__setattr__(self, "counts", counts)
+
+    def as_dict(self) -> dict:
+        return {"counts": {t: dict(c) for t, c in self.counts.items()}, "avoid_last": self.avoid_last}
+
+    @property
+    def total(self) -> int:
+        return sum(sum(c.values()) for c in self.counts.values())
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,7 @@ class Assembly:
     items: tuple[Item, ...]
     candidates: tuple[Item, ...]
     excluded: tuple[ExcludedItem, ...]
+    topic_of: Callable[[Item], str]
     problems: tuple[str, ...] = ()
 
     @property
@@ -75,104 +80,103 @@ class Assembly:
     def total_points(self) -> int:
         return sum(getattr(self.rules, i.difficulty).points for i in self.items)
 
+    def alternatives(self, item_id: str) -> tuple[Item, ...]:
+        """Unselected candidates in the same topic and difficulty as a selected item."""
+        current = next((i for i in self.items if i.id == item_id), None)
+        if current is None:
+            return ()
+        selected = {i.id for i in self.items}
+        cell = (self.topic_of(current), current.difficulty)
+        return tuple(c for c in self.candidates if c.id not in selected
+                     and (self.topic_of(c), c.difficulty) == cell)
 
-def _selection_problems(items: Sequence[Item], blueprint: Blueprint, rules: ElpRules) -> list[str]:
-    problems = []
-    groups = Counter(i.topic for i in items)
-    if groups != Counter(blueprint.counts):
-        problems.append("Selection does not meet the topic counts.")
-    mix = Counter(i.difficulty for i in items)
-    if mix != Counter(blueprint.difficulty_mix):
-        problems.append("Selection does not meet the difficulty mix.")
-    minutes = sum((Decimal(str(getattr(rules, i.difficulty).minutes)) for i in items), Decimal(0))
-    if minutes != Decimal(str(blueprint.minutes)):
-        problems.append(f"Planned time is {minutes} minutes; the budget requires {blueprint.minutes}.")
-    return problems
+
+def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams,
+            avoid_last: int, wanted: Callable[[str, str], bool] | None = None):
+    """Split items into eligible candidates and explained exclusions, ordered by ID."""
+    if len({i.id for i in items}) != len(items):
+        raise ValueError("Supply one current revision per item ID")
+    recent = {id_ for exam in previous_exams[-avoid_last:] for id_ in exam} if avoid_last else set()
+    candidates, excluded = [], []
+    for item in sorted(items, key=lambda i: i.id):
+        topic, reasons = topic_of(item), []
+        if item.status != "reviewed":
+            reasons.append("Item is not reviewed.")
+        if item.use != "elp":
+            reasons.append("Item is not an ELP question.")
+        reasons.extend(check_elp(item))
+        if item.difficulty not in _DIFFICULTIES:
+            reasons.append("Item has no supported difficulty class.")
+        if not topic:
+            reasons.append(_NO_TOPIC)
+        elif wanted and item.difficulty in _DIFFICULTIES and not wanted(topic, item.difficulty):
+            reasons.append("Item is outside the requested topic counts.")
+        if item.id in recent:
+            reasons.append(f"Item was used in the last {avoid_last} exams.")
+        if reasons:
+            excluded.append(ExcludedItem(item, tuple(reasons)))
+        else:
+            candidates.append(item)
+    return candidates, excluded
+
+
+def available(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams=(),
+              avoid_last: int = 0) -> dict[str, dict[str, int]]:
+    """Eligible counts per topic and difficulty, as assemble would see them."""
+    result: dict[str, dict[str, int]] = {}
+    for item in _screen(items, topic_of, previous_exams, avoid_last)[0]:
+        result.setdefault(topic_of(item), dict.fromkeys(_DIFFICULTIES, 0))[item.difficulty] += 1
+    return result
+
+
+def waiting_elp_drafts(items: Sequence[Item], topic_of: Callable[[Item], str]) -> dict[str, int]:
+    """ELP items still in draft, counted per topic."""
+    return dict(Counter(t for i in items if i.use == "elp" and i.status == "draft"
+                        if (t := topic_of(i))))
 
 
 def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
-             rules: ElpRules = _DEFAULT_RULES,
+             topic_of: Callable[[Item], str], rules: ElpRules = _DEFAULT_RULES,
              previous_exams: Sequence[Sequence[str]] = ()) -> Assembly:
     """Select reviewed ELP items, with no relaxed constraints or partial result.
 
     Pass current revisions. History is oldest first and
     contains stable item IDs: reuse avoidance covers all revisions. Input order
     does not affect a seeded selection. source_changed remains a separate flag.
+    Each (topic, difficulty) cell is filled exactly from the items topic_of puts there.
     """
     if type(seed) is not int:
         raise ValueError("Seed must be an integer")
-    if len({i.id for i in items}) != len(items):
-        raise ValueError("Supply one current revision per item ID")
-    recent = {id_ for exam in previous_exams[-blueprint.avoid_last:] for id_ in exam} if blueprint.avoid_last else set()
-    candidates, excluded = [], []
-    for item in sorted(items, key=lambda i: i.id):
-        reasons = []
-        if item.status != "reviewed":
-            reasons.append("Item is not reviewed.")
-        if item.use != "elp":
-            reasons.append("Item is not an ELP question.")
-        reasons.extend(check_elp(item))
-        if item.difficulty not in ("easy", "hard"):
-            reasons.append("Item has no supported difficulty class.")
-        if not blueprint.counts.get(item.topic, 0):
-            reasons.append("Item is outside the requested topic counts.")
-        if item.id in recent:
-            reasons.append(f"Item was used in the last {blueprint.avoid_last} exams.")
-        if reasons:
-            excluded.append(ExcludedItem(item, tuple(reasons)))
-        else:
-            candidates.append(item)
-
-    result = Assembly(blueprint, rules, seed, (), tuple(candidates), tuple(excluded))
-    problems = []
-    if not sum(blueprint.counts.values()):
-        problems.append("The blueprint requests no items.")
-    if sum(blueprint.counts.values()) != sum(blueprint.difficulty_mix.values()):
-        problems.append("Topic counts and difficulty counts have different totals.")
-    planned = sum((Decimal(str(getattr(rules, d).minutes)) * n
-                   for d, n in blueprint.difficulty_mix.items()), Decimal(0))
-    if planned != Decimal(str(blueprint.minutes)):
-        problems.append(f"Difficulty mix plans {planned} minutes; the budget requires {blueprint.minutes}.")
-
-    # With two difficulty classes each group's feasible easy count is an
-    # interval. Respect their joint bounds before drawing any random samples.
-    groups = []
-    for name, count in sorted(blueprint.counts.items()):
-        easy = [i for i in candidates if i.topic == name and i.difficulty == "easy"]
-        hard = [i for i in candidates if i.topic == name and i.difficulty == "hard"]
-        low, high = max(0, count - len(hard)), min(count, len(easy))
-        if low > high:
-            problems.append(f"Topic {name!r} needs {count} items; only {len(easy) + len(hard)} are eligible.")
-        groups.append((count, easy, hard, low, high))
-    remaining = blueprint.difficulty_mix.get("easy", 0)
-    if not sum(g[3] for g in groups) <= remaining <= sum(g[4] for g in groups):
-        problems.append("Eligible items cannot satisfy the difficulty mix within the topic counts.")
+    candidates, excluded = _screen(items, topic_of, previous_exams, blueprint.avoid_last,
+                                   lambda t, d: blueprint.counts.get(t, {}).get(d, 0) > 0)
+    result = Assembly(blueprint, rules, seed, (), tuple(candidates), tuple(excluded), topic_of)
+    problems = [] if blueprint.total else ["The blueprint requests no items."]
+    cells = []
+    for name, cell in sorted(blueprint.counts.items()):
+        for difficulty in _DIFFICULTIES:
+            pool = [i for i in candidates if topic_of(i) == name and i.difficulty == difficulty]
+            if cell[difficulty] > len(pool):
+                n, have = cell[difficulty], len(pool)
+                problems.append(f"Topic {name!r} needs {n} {difficulty} question{'s' * (n != 1)}; "
+                                f"only {have} {'is' if have == 1 else 'are'} eligible.")
+            if cell[difficulty]:
+                cells.append((cell[difficulty], pool))
     if problems:
         return replace(result, problems=tuple(problems))
-    rng, chosen = random.Random(seed), []
-    for index, (count, easy, hard, low, high) in enumerate(groups):
-        rest = groups[index + 1:]
-        lower = max(low, remaining - sum(g[4] for g in rest))
-        upper = min(high, remaining - sum(g[3] for g in rest))
-        take = rng.randint(lower, upper)
-        chosen.extend(rng.sample(easy, take))
-        chosen.extend(rng.sample(hard, count - take))
-        remaining -= take
+    rng = random.Random(seed)
+    chosen = [i for n, pool in cells for i in rng.sample(pool, n)]
     return replace(result, items=tuple(sorted(chosen, key=lambda i: i.id)))
 
 
 def swap(selection: Assembly, outgoing_id: str, incoming_id: str) -> Assembly:
-    """Swap only within the eligible pool and preserve every blueprint constraint."""
+    """Swap only within the same topic and difficulty, from the eligible pool."""
     if not selection.feasible:
         raise ValueError("Cannot swap an infeasible selection")
-    selected = {i.id for i in selection.items}
-    pool = {i.id: i for i in selection.candidates}
-    if outgoing_id not in selected or incoming_id in selected or incoming_id not in pool:
-        raise ValueError("Swap needs a selected item and an unselected eligible replacement")
+    pool = {i.id: i for i in selection.alternatives(outgoing_id)}
+    if incoming_id not in pool:
+        raise ValueError("Swap needs a selected item and an unselected eligible replacement "
+                         "of the same topic and difficulty")
     items = tuple(pool[incoming_id] if i.id == outgoing_id else i for i in selection.items)
-    problems = _selection_problems(items, selection.blueprint, selection.rules)
-    if problems:
-        raise ValueError(" ".join(problems))
     return replace(selection, items=items)
 
 

@@ -1,7 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Second issuing step: immutable manifest, entry documents and corrections."""
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -76,11 +75,12 @@ class IssueView(QWidget):
         stem = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ-") + uuid4().hex[:8]
         path = bank.folder / (stem + ".manifest.json")
         self.window.set_busy(True)
-        blueprint = {**asdict(selection.blueprint), "seed": selection.seed}
+        blueprint = {**selection.blueprint.as_dict(), "seed": selection.seed}
 
         def work():
             manifest = freeze(self.host, fresh_deck(deck), bank,
-                              [(i.id, i.revision) for i in selection.items], blueprint, selection.rules)
+                              [(i.id, i.revision) for i in selection.items], blueprint, selection.rules,
+                              topic_of=selection.topic_of)
             manifest.write(path)
             return Manifest.read(path)
 
