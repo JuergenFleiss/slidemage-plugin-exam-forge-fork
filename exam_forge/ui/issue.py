@@ -52,6 +52,7 @@ class IssueView(QWidget):
         super().__init__()
         self.exam, self.window, self.host = exam, exam.window, exam.host
         self.manifest = self.manifest_path = self.journal_path = None
+        self.saved = {}
         layout = QVBoxLayout(self)
         self.title = QLabel("Exam frozen")
         font = self.title.font()
@@ -111,6 +112,7 @@ class IssueView(QWidget):
 
     def reset(self):
         self.manifest = self.manifest_path = self.journal_path = None
+        self.saved = {}
         self.summary.clear()
         self.file_name.clear()
         for button in (self.exam_button, self.key_button, self.corrections_button):
@@ -149,7 +151,7 @@ class IssueView(QWidget):
         self.host.run_in_background(work, done)
 
     def show_manifest(self, manifest, path):
-        self.manifest, self.manifest_path = manifest, Path(path)
+        self.manifest, self.manifest_path, self.saved = manifest, Path(path), {}
         self.journal_path = self.manifest_path.with_suffix(".corrections.jsonl")
         when = issued_at(path)
         self.summary.setText(manifest_totals(manifest.data()) + (f" · issued {when}" if when else ""))
@@ -188,11 +190,19 @@ class IssueView(QWidget):
         if not chosen:
             return
         path = Path(chosen if chosen.lower().endswith(".html") else chosen + ".html").resolve()
+        if self.saved.get(1 - which) == path:
+            self.window.error("Exam and private key need separate files.")
+            return
         manifest = self.manifest
 
         def work():
             path.write_text(export_elp_documents(manifest)[which], encoding="utf-8")
-        self.window.work(work, lambda _: self.window.notice.setText(f"Saved {'private key' if which else 'exam'}: {path}"))
+
+        def done(_):
+            if self.manifest is manifest:
+                self.saved[which] = path
+            self.window.notice.setText(f"Saved {'private key' if which else 'exam'}: {path}")
+        self.window.work(work, done)
 
     def corrections(self):
         if self.manifest is not None:

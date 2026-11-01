@@ -557,3 +557,23 @@ def test_zero_avoid_last_does_not_read_manifest_history(phase, monkeypatch):
     host.drain()
     assert exam.selection and exam.selection.feasible
     assert not exam.history_note.text()
+
+
+@pytest.mark.parametrize("first", [0, 1])
+def test_exam_and_key_cannot_share_a_file(phase, monkeypatch, first):
+    host, _, _, window, _, _, _ = phase()
+    view = propose_approve(host, window)
+    errors = []
+    monkeypatch.setattr(window, "error", errors.append)
+    shared, other = host.root / "shared.html", host.root / "other.html"
+    pick = iter([shared, shared, other])
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a: (str(next(pick)), ""))
+    view.documents(first)
+    host.drain()
+    written = shared.read_bytes()
+    view.documents(1 - first)
+    host.drain()
+    assert errors == ["Exam and private key need separate files."] and shared.read_bytes() == written
+    view.documents(1 - first)
+    host.drain()
+    assert other.exists() and len(errors) == 1

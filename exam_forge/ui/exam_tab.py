@@ -385,7 +385,7 @@ class ExamTab(QWidget):
             items, errors = bank.load()
             if errors:
                 raise ValueError("\n".join(map(str, errors)))
-            previous = errors = []
+            previous, errors = [], []
             if blueprint.avoid_last:
                 previous, errors = history or read_history(bank)
             selection = assemble(items, blueprint, seed=seed, topic_of=topic_of, rules=rules,
