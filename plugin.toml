@@ -1,8 +1,8 @@
 id = "exam-forge"
 name = "Exam Forge"
-version = "0.5.0"
+version = "0.5.1"
 api_version = 1
-requires_slidemage = ">=9.6"
+requires_slidemage = ">=0.13.13"
 summary = "Create and manage exam questions for a SlideMage deck."
 author = "Jürgen Fleiß"
 homepage = "https://github.com/JuergenFleiss/slidemage-plugin-exam-forge"

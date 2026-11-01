@@ -59,3 +59,8 @@ v0.5.0 (2026-10-30, bulk AI drafting): Generate multiple drafts in one request.
 
 NEW: Bulk AI drafting.
 - Generate 1–30 drafts from selected slides, each linked to its identified source; invalid, truncated or incorrectly sized replies are refused in full.
+
+v0.5.1 (2026-11-01, SlideMage version scheme): Requires SlideMage 0.13.13, the release with Host.ai_chat(), under its new version numbering.
+
+NEW: Exam Forge follows SlideMage's new version numbers.
+- It now asks for SlideMage 0.13.13 or later.
