@@ -146,8 +146,27 @@ class FakeHost:
         return QPushButton(text)
 
     def Chip(self, text, tone="neutral"):
-        from PySide6.QtWidgets import QLabel
-        return QLabel(text)
+        from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+
+        class Chip(QWidget):
+            """The host Chip's API: a widget with set_text and set_tone, not a QLabel."""
+
+            def __init__(self):
+                super().__init__()
+                self.tone = tone
+                self.label = QLabel(text, self)
+                QHBoxLayout(self).addWidget(self.label)
+
+            def text(self):
+                return self.label.text()
+
+            def set_text(self, value):
+                self.label.setText(value)
+
+            def set_tone(self, value):
+                self.tone = value
+
+        return Chip()
 
 
 class FakeSettings:

@@ -635,10 +635,10 @@ def test_palette_change_rerenders_topic_dots_and_accents(lab):
     assert not any(topic_color(topics[0].color, False) in d for d in dots())
     pick(window.slide_list, "b")
     chip = next(l for l in live_labels(window.slide_list) if l.text() == "Changed")
-    assert "#c4b5fd" in chip.styleSheet() and "#c4b5fd" in window.changed_label.styleSheet()
+    assert "#c4b5fd" in chip.parentWidget().styleSheet() and "#c4b5fd" in window.changed_label.styleSheet()
     pick(window.slide_list, "a")
     amber = next(l for l in live_labels(window.slide_list) if l.text() == "1 AI draft")
-    assert "#fbbf24" in amber.styleSheet()
+    assert "#fbbf24" in amber.parentWidget().styleSheet()
     sheets = [w.styleSheet() for w in window.findChildren(QLabel)]
     assert not any("background" in s for s in sheets) and "background" not in window.styleSheet()
 

@@ -80,8 +80,8 @@ def reviewed_issues(item):
 
 def set_chip(chip, text=None, tone=None):
     if text is not None:
-        getattr(chip, "set_text", chip.setText)(text)
-    if tone is not None and hasattr(chip, "set_tone"):
+        chip.set_text(text)
+    if tone is not None:
         chip.set_tone(tone)
 
 
