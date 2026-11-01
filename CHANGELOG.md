@@ -64,3 +64,13 @@ v0.5.1 (2026-11-01, SlideMage version scheme): Requires SlideMage 0.13.13, the r
 
 NEW: Exam Forge follows SlideMage's new version numbers.
 - It now asks for SlideMage 0.13.13 or later.
+
+v0.6.0 (2026-11-01, topics and redesigned window): Group slides into topics, review changed slides and build exams with easy and hard counts per topic.
+
+NEW: Questions and Exam tabs built around slides and topics.
+- Topics replace the free-text topic. A topic is a group of slides stored in topics.json; each slide is in at most one topic, and a question's topic is the topic of its first linked slide. Existing topics are migrated automatically on first open and conflicts are reported once.
+- The Questions tab lists topics, slides and the questions for a slide, with Needs attention and Unlinked questions. Check slides and Export to Moodle replace the earlier button names.
+- Review changes compares old and new slide text. Still correct keeps the question's status with a new baseline; Update with AI sends that question with its answer key and the current slide text, and records a permanent AI-assisted edit.
+- Draft with AI pre-ticks the slide it was opened from and no longer proposes a topic. Marking a question reviewed requires a linked slide.
+- The Exam tab has three steps with easy and hard counts per topic; minutes and points follow from the counts. Approval is blocked while a picked question has a changed slide. Exam copy and private key are saved separately and cannot share a file.
+- Bank file format is now version 2 and stores a text snapshot of each linked slide, also in issued manifests. Version 1 files stay readable and are upgraded when next written; older plugin versions cannot read upgraded files. Issued manifests from older versions still open.
