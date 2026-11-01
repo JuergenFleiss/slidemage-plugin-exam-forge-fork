@@ -75,10 +75,6 @@ class BankTab:
         self.build_editor(host, split)
         split.setSizes([330, 790])
         self.editor.setEnabled(False)
-        self.source_tag.hide()
-        self.ai_tag.hide()
-        self.draft_tag.hide()
-        self.source_banner.hide()
         return page
 
     def refresh_ai_support(self):

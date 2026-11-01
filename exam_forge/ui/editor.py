@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Question editor for the bank window."""
 from dataclasses import replace
+from functools import partial
+from html import escape
 from pathlib import Path
 from uuid import uuid4
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImageReader, QPalette
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QFileDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -17,18 +20,32 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QScrollArea,
-    QTableWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ..bank import BankError
 from ..elp import check_elp
 from ..model import Item, Option, check_phase1
-from .source_picker import SourcePicker
+from ..sources import check_item, link_slide, rebaseline_links
+from ..topics import topic_color, topic_of
+from .work import fresh_deck
+
+REVISION_MAX, ELP_COUNT = 8, 5
+HINTS = {"revision": "Revision quiz: exactly one correct answer",
+         "elp": "ELP exam: exactly five answers, one to four correct"}
+TA_WARNING = "Shared stem, exclusions or fixed option order. This appears in the exam file; do not put answers here."
+
+
+def is_dark(widget):
+    return widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
 
 
 def accent_color(widget, amber=False):
-    dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    dark = is_dark(widget)
     return (("#fbbf24" if dark else "#8a5000") if amber
             else ("#c4b5fd" if dark else "#7040ac"))
 
@@ -39,106 +56,291 @@ def accent(widget, amber=False):
     widget.setStyleSheet(f"color: {accent_color(widget, amber)};")
 
 
+def reviewed_issues(item):
+    """What still stops a question from being marked reviewed, in the footer's wording."""
+    issues = []
+    if not item.stem.strip():
+        issues.append("write the question")
+    if len(item.options) < 2:
+        issues.append("add at least two answers")
+    elif any(not option.text.strip() for option in item.options):
+        issues.append("fill in every answer")
+    if item.use == "elp":
+        for error in check_elp(item):
+            issues.append("have exactly five answers" if "five" in error else "mark one to four correct answers")
+    else:
+        if len(item.options) > REVISION_MAX:
+            issues.append("keep at most eight answers")
+        if check_phase1(item):
+            issues.append("mark exactly one correct answer")
+    if not item.sources:
+        issues.append("link a slide")
+    return issues
+
+
+def set_chip(chip, text=None, tone=None):
+    if text is not None:
+        getattr(chip, "set_text", chip.setText)(text)
+    if tone is not None and hasattr(chip, "set_tone"):
+        chip.set_tone(tone)
+
+
+class Switch(QWidget):
+    """Two-option switch. A value outside the options shows as unselected but is kept."""
+    changed = Signal()
+
+    def __init__(self, host, options, clearable=False):
+        super().__init__()
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        self.clearable, self.value, self.buttons = clearable, "" if clearable else options[0][1], {}
+        for label, value in options:
+            button = host.Button(label, compact=True)
+            button.setCheckable(True)
+            button.clicked.connect(partial(self.pick, value))
+            self.buttons[value] = button
+            row.addWidget(button)
+        row.addStretch()
+        self.sync()
+
+    def sync(self):
+        for value, button in self.buttons.items():
+            button.setChecked(value == self.value)
+
+    def currentData(self):
+        return self.value
+
+    def setCurrentData(self, value):
+        value = value or ""
+        changed = value != self.value
+        self.value = value
+        self.sync()
+        if changed:
+            self.changed.emit()
+
+    def pick(self, value, *_):
+        self.setCurrentData("" if self.clearable and value == self.value else value)
+        self.sync()
+
+
+class Fold(QWidget):
+    def __init__(self, title):
+        super().__init__()
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        self.header = QToolButton()
+        self.header.setText(title)
+        self.header.setCheckable(True)
+        self.header.setAutoRaise(True)
+        self.header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.header.setArrowType(Qt.ArrowType.RightArrow)
+        self.header.toggled.connect(self.set_open)
+        self.content = QWidget()
+        self.content.hide()
+        self.box = QVBoxLayout(self.content)
+        self.box.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(self.header)
+        column.addWidget(self.content)
+
+    def set_open(self, on):
+        self.header.setChecked(on)
+        self.content.setVisible(on)
+        self.header.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+
+
+class AnswerRow(QWidget):
+    changed = Signal()
+    ticked = Signal(object)
+    removed = Signal(object)
+
+    def __init__(self, host, option):
+        super().__init__()
+        self.option_id = option.id
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        top = QHBoxLayout()
+        self.tick = QPushButton()
+        self.tick.setFlat(True)
+        self.tick.setFixedSize(30, 30)
+        self.tick.clicked.connect(lambda: self.ticked.emit(self))
+        self.set_correct(option.correct)
+        self.text = QPlainTextEdit(option.text)
+        self.text.setTabChangesFocus(True)
+        self.text.setFixedHeight(52)
+        self.text.setPlaceholderText("Answer")
+        self.remove = host.Button("✕", compact=True)
+        self.remove.setToolTip("Remove answer")
+        self.remove.clicked.connect(lambda: self.removed.emit(self))
+        for widget, stretch in ((self.tick, 0), (self.text, 1), (self.remove, 0)):
+            top.addWidget(widget, stretch)
+        column.addLayout(top)
+        self.why = QPlainTextEdit(option.rationale)
+        self.why.setTabChangesFocus(True)
+        self.why.setFixedHeight(36)
+        self.why.setPlaceholderText("Why it is right or wrong · only in the private key")
+        low = QHBoxLayout()
+        low.setContentsMargins(36, 0, 0, 0)
+        low.addWidget(self.why)
+        column.addLayout(low)
+        self.text.textChanged.connect(self.changed)
+        self.why.textChanged.connect(self.changed)
+
+    def correct(self):
+        return self.tick.isChecked()
+
+    def set_correct(self, on):
+        self.tick.setCheckable(True)
+        self.tick.setChecked(on)
+        self.tick.setText("●" if on else "○")
+
+    def option(self):
+        return Option(self.option_id, self.text.toPlainText(), self.correct(), self.why.toPlainText())
+
+
 class ItemEditor:
     def build_editor(self, host, split):
+        self._loading = False
+        self.labels, self.labels_tried, self.context_gen, self.context_key = {}, set(), 0, None
+        self.rows = []
+        self.last_link_context = ("instructor", host.deck_language(self.deck))
+        self.link_grid_buttons = []
+        self.editor = host.Page()
+        self.editor.body.setContentsMargins(0, 0, 0, 0)
+        self.editor.body.setSpacing(0)
+        split.addWidget(self.editor)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        split.addWidget(scroll)
-        self.editor = host.Page()
-        scroll.setWidget(self.editor)
-        body = self.editor.body
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.editor.body.addWidget(scroll, 1)
+        content = host.Page()
+        scroll.setWidget(content)
+        body = content.body
         body.setContentsMargins(14, 10, 14, 10)
-        self.heading = QLabel("Pick a question or create a new one.")
-        self.heading.setWordWrap(True)
-        body.addWidget(self.heading)
+        self.back_button = host.Button("", compact=True)
+        self.back_button.setFlat(True)
+        self.back_button.clicked.connect(self.back)
+        self.back_button.hide()
+        body.addWidget(self.back_button, 0, Qt.AlignmentFlag.AlignLeft)
         tags = QHBoxLayout()
-        self.source_tag = host.Chip("Source changed")
-        self.ai_tag = host.Chip("AI-assisted")
+        self.status_chip = host.Chip("Draft")
+        self.rev_chip = host.Chip("rev 1", "muted")
+        self.ai_tag = host.Chip("AI-assisted", "muted")
         self.draft_tag = host.Chip("AI draft")
         accent(self.draft_tag, True)
-        accent(self.source_tag)
-        accent(self.ai_tag, True)
-        tags.addWidget(self.source_tag)
-        tags.addWidget(self.ai_tag)
-        tags.addWidget(self.draft_tag)
+        for chip in (self.draft_tag, self.ai_tag, self.status_chip, self.rev_chip):
+            tags.addWidget(chip)
         tags.addStretch()
         body.addLayout(tags)
-        self.source_banner = QLabel("A source changed or could not be checked. Check the question and its answers.")
+        self.source_banner = QLabel("A linked slide changed after this question was written.")
         self.source_banner.setWordWrap(True)
         accent(self.source_banner)
-        body.addWidget(self.source_banner)
+        self.compare_button = host.Button("Compare", compact=True)
+        self.compare_button.clicked.connect(lambda: self.review_changes(self.current))
+        self.still_button = host.Button("Still correct", compact=True)
+        self.still_button.clicked.connect(self.still_correct)
+        self.source_bar = QWidget()
+        bar = QHBoxLayout(self.source_bar)
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.addWidget(self.source_banner, 1)
+        bar.addWidget(self.compare_button)
+        bar.addWidget(self.still_button)
+        body.addWidget(self.source_bar)
         self.stem = QPlainTextEdit()
-        self.stem.setPlaceholderText(r"Plain text; inline math: \( ... \)")
+        self.stem.setPlaceholderText(r"\( … \)")
         self.stem.setMaximumHeight(135)
-        body.addWidget(host.Field("Question text", self.stem))
+        body.addWidget(host.Field("Question", self.stem))
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Answers"))
+        self.hint = QLabel()
+        head.addStretch()
+        head.addWidget(self.hint)
+        body.addLayout(head)
+        self.answers = QVBoxLayout()
+        body.addLayout(self.answers)
+        self.add_button = host.Button("+ Add answer", compact=True)
+        self.add_button.clicked.connect(lambda: self.add_option())
+        body.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.use = Switch(host, (("Revision quiz", "revision"), ("ELP exam", "elp")))
+        self.difficulty = Switch(host, (("Easy", "easy"), ("Hard", "hard")), clearable=True)
+        row = QHBoxLayout()
+        row.addWidget(host.Field("Used for", self.use))
+        row.addWidget(host.Field("Difficulty", self.difficulty))
+        body.addLayout(row)
+        self.objective = QLineEdit()
+        body.addWidget(host.Field("Learning objective", self.objective))
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Linked slides"))
+        head.addStretch()
+        self.topic_label = QLabel()
+        self.topic_label.setTextFormat(Qt.TextFormat.RichText)
+        head.addWidget(self.topic_label)
+        body.addLayout(head)
+        self.link_box = QVBoxLayout()
+        body.addLayout(self.link_box)
+        self.link_button = host.Button("+ Link another slide", compact=True)
+        self.link_button.clicked.connect(self.toggle_link_grid)
+        body.addWidget(self.link_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.link_grid = QWidget()
+        self.link_grid_layout = QGridLayout(self.link_grid)
+        self.link_grid_layout.setContentsMargins(0, 0, 0, 0)
+        self.link_grid.hide()
+        body.addWidget(self.link_grid)
+        self.note_fold = Fold("Note for teaching assistants")
         self.assistant_note = QPlainTextEdit()
         self.assistant_note.setMaximumHeight(85)
-        self.assistant_note.setPlaceholderText("Shared stem, exclusions or fixed option order. This appears in the exam file; do not put answers here.")
-        body.addWidget(host.Field("Teaching assistant note · appears in the exam file", self.assistant_note))
-        self.options = QTableWidget(0, 3)
-        self.options.setHorizontalHeaderLabels(["Correct", "Answer", "Rationale"])
-        self.options.horizontalHeader().setStretchLastSection(True)
-        self.options.setColumnWidth(0, 65)
-        self.options.setColumnWidth(1, 230)
-        self.options.setMinimumHeight(195)
-        body.addWidget(host.Field("Answer options · revision: one correct; ELP: five options, one to four correct", self.options))
-        row = QHBoxLayout()
-        add = host.Button("Add option", compact=True)
-        add.clicked.connect(lambda: self.add_option())
-        remove = host.Button("Remove option", compact=True)
-        remove.clicked.connect(lambda: self.options.removeRow(self.options.currentRow()))
-        row.addWidget(add)
-        row.addWidget(remove)
-        row.addStretch()
-        body.addLayout(row)
-        self.objective, self.topic, self.difficulty = QLineEdit(), QLineEdit(), QLineEdit()
-        self.use = QComboBox()
-        self.use.addItem("Revision quiz", "revision")
-        self.use.addItem("ELP exam", "elp")
-        for label, field in (("Learning objective", self.objective), ("Topic", self.topic),
-                             ("Difficulty", self.difficulty), ("Use", self.use)):
-            body.addWidget(host.Field(label, field))
-        self.source_list = QListWidget()
-        self.source_list.setMaximumHeight(90)
-        body.addWidget(host.Field("Source slides · view and language", self.source_list))
-        row = QHBoxLayout()
-        for text, action in (("Add slide…", self.pick_source), ("Open slide", self.open_source),
-                             ("Remove source", self.remove_source)):
-            button = host.Button(text, compact=True)
-            button.clicked.connect(action)
-            row.addWidget(button)
-        body.addLayout(row)
+        self.assistant_note.setPlaceholderText(TA_WARNING)
+        warning = QLabel(TA_WARNING)
+        warning.setWordWrap(True)
+        self.note_fold.box.addWidget(warning)
+        self.note_fold.box.addWidget(self.assistant_note)
+        body.addWidget(self.note_fold)
+        self.media_fold = Fold("Images (appended to the question)")
         self.media_list = QListWidget()
         self.media_list.setMaximumHeight(85)
-        body.addWidget(host.Field("Images (appended to the question)", self.media_list))
+        self.media_fold.box.addWidget(self.media_list)
         row = QHBoxLayout()
         for text, action in (("Attach image…", self.attach_image), ("Edit alt text…", self.edit_alt),
                              ("Remove image", self.remove_image)):
             button = host.Button(text, compact=True)
             button.clicked.connect(action)
             row.addWidget(button)
-        body.addLayout(row)
-        row = QHBoxLayout()
-        self.approve_button = host.Button("Mark reviewed", "primary")
-        self.approve_button.clicked.connect(lambda: self.change_status("reviewed"))
-        self.retire_button = host.Button("Retire question")
+        row.addStretch()
+        self.media_fold.box.addLayout(row)
+        body.addWidget(self.media_fold)
+        body.addStretch()
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        self.editor.body.addWidget(line)
+        footer = QHBoxLayout()
+        footer.setContentsMargins(14, 8, 14, 8)
+        self.status_line = QLabel()
+        self.status_line.setWordWrap(True)
+        footer.addWidget(self.status_line, 1)
+        self.retire_button = host.Button("Retire")
         self.retire_button.clicked.connect(lambda: self.change_status("retired"))
-        self.restore_button = host.Button("Return to draft")
+        self.restore_button = host.Button("Restore as draft")
         self.restore_button.clicked.connect(lambda: self.change_status("draft"))
         self.save_button = host.Button("Save draft")
         self.save_button.clicked.connect(self.save)
-        for button in (self.approve_button, self.retire_button, self.restore_button, self.save_button):
-            row.addWidget(button)
-        body.addLayout(row)
-        body.addStretch()
+        self.approve_button = host.Button("Mark reviewed", "primary")
+        self.approve_button.clicked.connect(lambda: self.change_status("reviewed"))
+        for button in (self.retire_button, self.restore_button, self.save_button, self.approve_button):
+            footer.addWidget(button)
+        self.editor.body.addLayout(footer)
+        for signal in (self.stem.textChanged, self.objective.textChanged, self.assistant_note.textChanged,
+                       self.difficulty.changed):
+            signal.connect(self.touch)
+        self.use.changed.connect(self.use_changed)
+        for chip in (self.ai_tag, self.draft_tag, self.source_bar):
+            chip.hide()
+
+    # -- state ---------------------------------------------------------------------------------------------
+
     def candidate(self):
-        options = []
-        for row in range(self.options.rowCount()):
-            correct = self.options.cellWidget(row, 0)
-            options.append(Option(correct.property("option_id"), self.options.cellWidget(row, 1).toPlainText(),
-                                  correct.isChecked(), self.options.cellWidget(row, 2).toPlainText()))
-        return replace(self.current, stem=self.stem.toPlainText(), options=tuple(options),
-                       objective=self.objective.text(), topic=self.topic.text(), difficulty=self.difficulty.text(),
+        return replace(self.current, stem=self.stem.toPlainText(), options=tuple(r.option() for r in self.rows),
+                       objective=self.objective.text(), difficulty=self.difficulty.currentData(),
                        use=self.use.currentData(), sources=self.links, media=self.attachments,
                        assistant_note=self.assistant_note.toPlainText())
 
@@ -158,57 +360,182 @@ class ItemEditor:
             return self.save()
         return answer == QMessageBox.StandardButton.Discard
 
+    def leave_editor(self):
+        """Shell hook: the back link was pressed and may_leave agreed."""
+
+    def review_changes(self, item):
+        """Shell hook: Compare was pressed."""
+
+    def set_back_label(self, text):
+        self.back_button.setText(text)
+        self.back_button.setVisible(bool(text))
+
+    def back(self):
+        if self.may_leave():
+            self.leave_editor()
+
+    def touch(self, *_):
+        if self._loading or self.current is None:
+            return
+        self.refresh_answers()
+        self.refresh_footer()
+        self.update_topic()
+
     def populate(self, item, new=False):
+        self._loading = True
         self.current, self.new_item = item, new
         self.links, self.attachments = item.sources, item.media
         self.stem.setPlainText(item.stem)
         self.assistant_note.setPlainText(item.assistant_note)
-        self.options.setRowCount(0)
+        self.note_fold.set_open(bool(item.assistant_note))
+        self.media_fold.set_open(bool(item.media))
+        for row in self.rows:
+            row.setParent(None)
+            row.deleteLater()
+        self.rows = []
         for option in item.options:
             self.add_option(option)
         self.objective.setText(item.objective)
-        self.topic.setText(item.topic)
-        self.difficulty.setText(item.difficulty)
-        self.use.setCurrentIndex(self.use.findData(item.use))
+        self.use.setCurrentData(item.use)
+        self.difficulty.setCurrentData(item.difficulty)
+        self._loading = False
+        if item.sources:
+            self.last_link_context = (item.sources[-1].view, item.sources[-1].language)
         self.editor.setEnabled(True)
+        self.close_link_grid()
         self.update_header(item)
-        self.render_links()
+        self.draw_links()
         self.render_media()
+        self.refresh_answers()
         self.baseline = self.candidate()
+        self.refresh_footer()
+        if not item.source_changed and {s.slide_id for s in item.sources} - self.labels.keys():
+            self.load_context()
 
     def update_header(self, item):
-        self.heading.setText(f"Question {item.id} · Revision {item.revision} · {item.status.title()}\n"
-                             "Saving edits creates a new draft revision.")
-        self.source_tag.setVisible(item.source_changed)
+        ai_edit = bool(item.ai_edit_route)
+        provenance = (f"{item.ai_edit_route} · {item.ai_edit_model}" if ai_edit
+                      else f"{item.origin.route} · {item.origin.model}")
+        draft = item.status == "draft"
+        self.ai_tag.setToolTip(provenance)
+        self.draft_tag.setToolTip(provenance)
+        self.ai_tag.setVisible(ai_edit or (item.origin.kind == "ai" and not draft))
+        self.draft_tag.setVisible(item.origin.kind == "ai" and draft)
+        tone = {"draft": "neutral", "reviewed": "ok", "retired": "muted"}[item.status]
+        set_chip(self.status_chip, "New question" if self.new_item else item.status.title(), tone)
+        set_chip(self.rev_chip, f"rev {item.revision}")
+        self.rev_chip.setVisible(not self.new_item)
+        key = (item.id, item.revision, item.source_changed)
+        if key != self.context_key:
+            self.context_key = key
+            if item.source_changed:
+                self.set_banner(None)
+                self.load_context()
+        self.source_bar.setVisible(item.source_changed)
         self.source_banner.setVisible(item.source_changed)
-        self.ai_tag.setVisible(item.origin.kind == "ai")
-        self.draft_tag.setVisible(item.origin.kind == "ai" and item.status == "draft")
-        self.ai_tag.setToolTip(f"{item.origin.route} · {item.origin.model}")
-        self.approve_button.setEnabled(item.status != "retired")
-        self.approve_button.setText("Review again" if item.status == "reviewed" else "Mark reviewed")
-        self.retire_button.setEnabled(item.status == "reviewed")
-        self.restore_button.setEnabled(item.status == "retired")
+        self.compare_button.setVisible(item.source_changed)
+        self.still_button.setVisible(item.source_changed)
+        self.refresh_footer()
+
+    def set_banner(self, position):
+        self.source_banner.setText(f"Slide {position} changed after this question was written." if position
+                                   else "A linked slide changed after this question was written.")
+
+    def refresh_footer(self):
+        item = self.current
+        buttons = (self.retire_button, self.restore_button, self.save_button, self.approve_button)
+        if item is None:
+            self.status_line.setText("")
+            for button in buttons:
+                button.setEnabled(False)
+            return
+        dirty, issues = self.dirty(), reviewed_issues(self.candidate())
+        status = item.status
+        if status == "retired":
+            issues = []
+        if issues and (dirty or status == "draft"):
+            text = "Before marking reviewed: " + " · ".join(issues)
+        elif dirty:
+            text = "Unsaved edits" if self.new_item else "Unsaved edits · saving creates a new draft revision"
+        elif status == "draft":
+            text = "Draft · saved"
+        elif status == "reviewed":
+            text = "Reviewed · ready to use"
+        else:
+            text = "Retired · restore it as a draft to edit or review again"
+        shown = bool(issues and (dirty or status == "draft"))
+        self.status_line.setText(text)
+        self.status_line.setStyleSheet(f"color: {topic_color('red', is_dark(self))};" if shown else "")
+        reviewed_clean = status == "reviewed" and not dirty and not self.new_item
+        self.retire_button.setVisible(reviewed_clean)
+        self.retire_button.setEnabled(reviewed_clean)
+        self.restore_button.setVisible(status == "retired")
+        self.restore_button.setEnabled(status == "retired")
+        self.save_button.setEnabled(dirty)
+        self.approve_button.setText("Reviewed" if reviewed_clean else "Mark reviewed")
+        self.approve_button.setEnabled(status != "retired" and not issues and not reviewed_clean)
+
+    def restyle_editor(self):
+        # Children get the new palette after the window's event, so read it from the window.
+        self.draft_tag.setStyleSheet(f"color: {accent_color(self, True)};")
+        self.source_banner.setStyleSheet(f"color: {accent_color(self)};")
+        if self.current is not None:
+            self.refresh_footer()
+            self.update_topic()
+
+    # -- answers -------------------------------------------------------------------------------------------
+
+    def cap(self):
+        return ELP_COUNT if self.use.currentData() == "elp" else REVISION_MAX
 
     def add_option(self, option=None):
-        option = option or Option(uuid4().hex, "")
-        row = self.options.rowCount()
-        self.options.insertRow(row)
-        check = QCheckBox()
-        check.setAccessibleName(f"Option {row + 1} is correct")
-        check.setProperty("option_id", option.id)
-        check.setChecked(option.correct)
-        self.options.setCellWidget(row, 0, check)
-        for column, text in ((1, option.text), (2, option.rationale)):
-            field = QPlainTextEdit(text)
-            field.setTabChangesFocus(True)
-            self.options.setCellWidget(row, column, field)
-        self.options.setRowHeight(row, 72)
+        row = AnswerRow(self.host, option or Option(uuid4().hex, ""))
+        row.changed.connect(self.touch)
+        row.ticked.connect(self.tick)
+        row.removed.connect(self.remove_option)
+        self.rows.append(row)
+        self.answers.addWidget(row)
+        self.touch()
+        return row
+
+    def remove_option(self, row):
+        self.rows.remove(row)
+        row.setParent(None)
+        row.deleteLater()
+        self.touch()
+
+    def tick(self, row):
+        if self.use.currentData() == "revision":
+            for other in self.rows:
+                other.set_correct(other is row)
+        else:
+            row.set_correct(row.tick.isChecked())
+        self.touch()
+
+    def use_changed(self):
+        if self._loading:
+            return
+        if self.use.currentData() == "elp":
+            self._loading = True
+            while len(self.rows) < ELP_COUNT:
+                self.add_option()
+            self._loading = False
+        self.touch()
+
+    def refresh_answers(self):
+        use = self.use.currentData()
+        self.hint.setText(HINTS[use])
+        self.add_button.setEnabled(len(self.rows) < self.cap())
+        for number, row in enumerate(self.rows, 1):
+            row.tick.setAccessibleName(f"Option {number} is correct")
 
     def new_question(self, *_):
         if not self.may_leave():
             return False
         self.populate(Item(uuid4().hex, 1, options=(Option(uuid4().hex, ""), Option(uuid4().hex, ""))), True)
         return True
+
+    # -- lifecycle -----------------------------------------------------------------------------------------
 
     def save(self, *_):
         if self.current is None or self.busy:
@@ -235,11 +562,9 @@ class ItemEditor:
         if target == "draft" and self.current.status == "draft":
             return
         if target == "reviewed":
-            errors = check_elp(self.current) if self.current.use == "elp" else check_phase1(self.current)
-            if not self.current.stem.strip() or len(self.current.options) < 2 or any(not o.text.strip() for o in self.current.options):
-                errors.append("A question needs text and at least two nonempty answers.")
-            if errors:
-                self.error("\n".join(errors))
+            issues = reviewed_issues(self.current)
+            if issues:
+                self.error("Before marking reviewed: " + " · ".join(issues))
                 return
             if self.current.status == "reviewed":
                 try:
@@ -273,37 +598,110 @@ class ItemEditor:
 
         self.check_sources(then=proceed, item_ids=[item.id])
 
-    def render_links(self):
-        self.source_list.clear()
-        self.source_list.addItems([f"{s.slide_id} · {s.version or 'current'} · {s.view} · {s.language}" for s in self.links])
-
-    def pick_source(self):
-        from .work import fresh_deck
-        deck = self.deck
-        self.set_busy(True)
-
-        def ready(snapshot, error):
-            self.set_busy(False)
-            if error:
-                self.error(error)
+    def still_correct(self):
+        """Accept the slides as they are now; the status is kept and the flag cleared."""
+        if self.current is None or self.new_item or self.busy:
+            return
+        if self.dirty():
+            if not self.may_leave():
                 return
-            picker = SourcePicker(self.host, snapshot, self)
-            if picker.exec() and picker.link not in self.links:
-                self.links += (picker.link,)
-                self.render_links()
-        self.host.run_in_background(lambda: fresh_deck(deck), ready)
+            if self.dirty():  # Discarded: show the stored question again.
+                self.populate(self.current)
+        item, host, deck, bank = self.current, self.host, self.deck, self.bank
 
-    def remove_source(self):
-        row = self.source_list.currentRow()
-        self.links = tuple(s for i, s in enumerate(self.links) if i != row)
+        def work():
+            return bank.rebaseline(item.id, item.revision, rebaseline_links(host, fresh_deck(deck), item))
+
+        def done(updated):
+            self.populate(updated)
+            self.reload()
+            self.notice.setText("Kept · matches the current slide.")
+        self.work(work, done)
+
+    # -- linked slides -------------------------------------------------------------------------------------
+
+    def slide_label(self, link):
+        position, title = self.labels.get(link.slide_id, (None, ""))
+        return f"Slide {position} · {title}" if position else f"Slide {link.slide_id}"
+
+    def draw_links(self):
+        while self.link_box.count():
+            widget = self.link_box.takeAt(0).widget()
+            widget.setParent(None)
+            widget.deleteLater()
+        for index, link in enumerate(self.links):
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            name = self.host.Button(self.slide_label(link), compact=True)
+            name.setToolTip(f"{link.slide_id} · {link.view} · {link.language} · open in SlideMage")
+            name.clicked.connect(partial(self.open_source, link))
+            remove = self.host.Button("✕", compact=True)
+            remove.setToolTip("Remove link")
+            remove.clicked.connect(partial(self.remove_source, index))
+            line.addWidget(name)
+            line.addWidget(remove)
+            line.addStretch()
+            self.link_box.addWidget(row)
+        self.update_topic()
+
+    def render_links(self):
+        self.draw_links()
+        missing = {s.slide_id for s in self.links} - self.labels.keys() - self.labels_tried
+        if missing and self.current is not None:
+            self.load_context()
+        self.touch()
+
+    def update_topic(self):
+        topic = topic_of(self.candidate(), self.topics) if self.current is not None else None
+        if topic is None:
+            self.topic_label.setText("No topic")
+        else:
+            dot = f"<span style='color:{topic_color(topic.color, is_dark(self))}'>●</span>"
+            self.topic_label.setText(f"Topic from first slide: {dot} {escape(topic.name)}")
+
+    def load_context(self):
+        """Resolve slide titles and the changed slide's position on the worker."""
+        item, links, host, deck = self.current, self.links, self.host, self.deck
+        self.context_gen += 1
+        generation = self.context_gen
+        if item is None or not links:
+            return
+        self.labels_tried |= {s.slide_id for s in links}
+        wanted = item.source_changed and not self.new_item
+
+        def work():
+            snapshot, decks, labels = fresh_deck(deck), {}, {}
+            for link in links:
+                context = (link.view, link.language)
+                if context not in decks:
+                    decks[context] = host.deck_slides(snapshot, *context)
+                refs = [r for r in decks[context] if r.id == link.slide_id]
+                refs = [r for r in refs if (r.version or "") == link.version] or refs
+                if refs:
+                    labels[link.slide_id] = (refs[0].position, refs[0].title or refs[0].id_slug)
+            position = None
+            if wanted:
+                first = next((c.source for c in check_item(host, snapshot, item).sources if c.status != "unchanged"), None)
+                position = labels.get(first.slide_id, (None,))[0] if first else None
+            return labels, position
+
+        def done(result, error):
+            if error or generation != self.context_gen:
+                return
+            labels, position = result
+            self.labels.update(labels)
+            self.draw_links()
+            self.set_banner(position)
+        host.run_in_background(work, done)
+
+    def remove_source(self, index, *_):
+        self.links = tuple(s for i, s in enumerate(self.links) if i != index)
         self.render_links()
 
-    def open_source(self):
-        row = self.source_list.currentRow()
-        if not 0 <= row < len(self.links):
-            return
+    def open_source(self, link, *_):
         from .work import fresh_deck
-        link, deck = self.links[row], self.deck
+        deck = self.deck
 
         def work():
             return self.host.deck_slides(fresh_deck(deck), link.view, link.language)
@@ -321,12 +719,60 @@ class ItemEditor:
                 except (OSError, ValueError, RuntimeError) as exc:
                     self.error(exc)
             else:
-                self.error("Source slide is missing or ambiguous. Use Add slide to choose it.")
+                self.error("Source slide is missing or ambiguous. Link it again from the grid.")
         self.host.run_in_background(work, done)
+
+    def close_link_grid(self):
+        self.link_grid.hide()
+        self.link_grid_buttons = []
+        while self.link_grid_layout.count():
+            widget = self.link_grid_layout.takeAt(0).widget()
+            widget.setParent(None)
+            widget.deleteLater()
+
+    def toggle_link_grid(self):
+        if self.link_grid.isVisibleTo(self.editor):
+            self.close_link_grid()
+            return
+        deck, host = self.deck, self.host
+        view, language = self.last_link_context
+
+        def work():
+            return host.deck_slides(fresh_deck(deck), view, language)
+
+        def done(refs):
+            self.close_link_grid()
+            linked = {s.slide_id for s in self.links}
+            for index, ref in enumerate(refs):
+                button = host.Button(f"{ref.position} · {ref.title or ref.id_slug}", compact=True)
+                button.setEnabled(ref.id not in linked)
+                button.clicked.connect(partial(self.link_slide_ref, ref, view))
+                self.link_grid_buttons.append(button)
+                self.link_grid_layout.addWidget(button, index // 2, index % 2)
+            if not refs:
+                self.link_grid_layout.addWidget(QLabel("No slides found for this view and language."), 0, 0)
+            self.link_grid.show()
+        self.work(work, done)
+
+    def link_slide_ref(self, ref, view, *_):
+        host = self.host
+
+        def done(link):
+            self.close_link_grid()
+            if any(s.slide_id == link.slide_id for s in self.links):
+                return
+            self.labels[ref.id] = (ref.position, ref.title or ref.id_slug)
+            self.last_link_context = (view, link.language)
+            self.links += (link,)
+            self.render_links()
+        self.work(lambda: link_slide(host, ref, view), done)
+
+    # -- images --------------------------------------------------------------------------------------------
 
     def render_media(self):
         self.media_list.clear()
         self.media_list.addItems([f"{m.name[:16]}… · {m.alt or 'No alt text'}" for m in self.attachments])
+        self.touch()
 
     def attach_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "Attach image", "", "Images (*.png *.jpg *.jpeg *.gif *.webp *.svg)")
@@ -343,6 +789,7 @@ class ItemEditor:
                 self.error("This image is already attached. Edit its alternative text instead.")
                 return
             self.attachments += (media,)
+            self.media_fold.set_open(True)
             self.render_media()
         except (OSError, BankError, ValueError) as exc:
             self.error(exc)
@@ -359,4 +806,3 @@ class ItemEditor:
         row = self.media_list.currentRow()
         self.attachments = tuple(m for i, m in enumerate(self.attachments) if i != row)
         self.render_media()
-

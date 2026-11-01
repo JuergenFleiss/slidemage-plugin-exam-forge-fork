@@ -138,10 +138,9 @@ class BankWindow(BankTab, ItemEditor, QWidget):
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == QEvent.Type.PaletteChange and hasattr(self, "source_banner"):
-            for widget in (self.source_tag, self.source_filter, self.source_banner):
-                accent(widget)
-            for widget in (self.ai_tag, self.ai_filter, self.draft_tag):
-                accent(widget, True)
+            accent(self.source_filter)
+            accent(self.ai_filter, True)
+            self.restyle_editor()
             self.filter_items()
 
     def closeEvent(self, event):
