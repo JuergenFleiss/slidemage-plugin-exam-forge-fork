@@ -74,3 +74,8 @@ NEW: Questions and Exam tabs built around slides and topics.
 - Draft with AI pre-ticks the slide it was opened from and no longer proposes a topic. Marking a question reviewed requires a linked slide.
 - The Exam tab has three steps with easy and hard counts per topic; minutes and points follow from the counts. Approval is blocked while a picked question has a changed slide. Exam copy and private key are saved separately and cannot share a file.
 - Bank file format is now version 2 and stores a text snapshot of each linked slide, also in issued manifests. Version 1 files stay readable and are upgraded when next written; older plugin versions cannot read upgraded files. Issued manifests from older versions still open.
+
+v0.6.1 (2026-11-01, version fix): SlideMage 0.13.13 to 0.13.16 do not have the plugin calls Exam Forge needs; those calls ship in 0.13.17.
+
+NEW: Exam Forge now asks for SlideMage 0.13.17 or newer.
+- On older versions SlideMage now says a newer version is needed, instead of Exam Forge failing when a call is missing.
