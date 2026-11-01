@@ -446,3 +446,21 @@ def test_export_warns_about_newly_changed_source(env, tmp_path, monkeypatch):
     host.drain()
     assert notices and item.stem in notices[0] and "s1" in notices[0]
     assert bank.get(item.id).source_changed and not path.exists()
+
+
+def test_first_open_migrates_legacy_topics_once_and_saving_drops_the_proposal(env):
+    from exam_forge.topics import TopicStore, add_topic
+    host, deck, bank, _, window = env
+    link = link_slide(host, source(host, deck), "instructor")
+    item = bank.create(Item("legacy", 1, stem="Q", topic="Probability", sources=(link,)))
+    TopicStore(bank.folder).path.unlink()
+    window.load_topics()
+    assert [(t.name, t.slides) for t in window.topics] == [("Probability", (link.slide_id,))]
+    assert window.topic_name_of(item) == "Probability"
+    first = window.topics
+    window.load_topics()
+    assert window.topics == first
+    window.exam_tab.selection = object()
+    assert window.save_topics(add_topic(window.topics, "Bayes"))
+    assert window.exam_tab.selection is None
+    assert [t.name for t in TopicStore(bank.folder).load()] == ["Probability", "Bayes"]

@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from ..bank import BankError
+from ..topics import TopicStore, migrate, topic_name
 from .bank_tab import BankTab
 from .editor import ItemEditor, accent
 from .exam_tab import ExamTab
@@ -21,6 +23,7 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         self.current = self.baseline = None
         self.new_item = False
         self.items = []
+        self.topics = ()
         self.links = self.attachments = ()
         self.busy = False
         self.idle_callbacks = []
@@ -46,6 +49,7 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         self.tabs.addTab(self.build_bank_tab(), "Bank")
         self.exam_tab = ExamTab(self)
         self.tabs.addTab(self.exam_tab, "Exam")
+        self.load_topics()
         self.reload()
         self.check_sources()
 
@@ -57,7 +61,45 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         self.new_item = False
         self.editor.setEnabled(False)
         self.exam_tab.reset()
+        self.load_topics()
         self.reload()
+
+    def load_topics(self):
+        """Read topics.json; on a bank's first open, create it from legacy question topics."""
+        store = TopicStore(self.bank.folder)
+        try:
+            if store.exists():
+                self.topics = store.load()
+                return
+            items, errors = self.bank.load()
+            # An unreadable question could hold a topic, so migrate only from a complete bank.
+            if errors:
+                self.topics = ()
+                return
+            self.topics, notes = migrate(items)
+            store.save(self.topics)
+            if notes:
+                self.notice.setText(" ".join(notes))
+        except (OSError, BankError, ValueError) as exc:
+            self.topics = ()
+            self.error(exc)
+
+    def save_topics(self, topics):
+        """Persist topics. A proposed exam was resolved with the old ones, so it is dropped."""
+        try:
+            TopicStore(self.bank.folder).save(topics)
+        except (OSError, ValueError) as exc:
+            self.error(exc)
+            return False
+        self.topics = tuple(topics)
+        self.exam_tab.invalidate()
+        return True
+
+    def topic_name_of(self, item):
+        return topic_name(item, self.topics)
+
+    def open_question(self, item_id):
+        """Show a question in the editor. Replaced when the Questions tab arrives."""
 
     def error(self, error):
         self.notice.setText(str(error))
