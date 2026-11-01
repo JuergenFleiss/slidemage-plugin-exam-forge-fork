@@ -37,6 +37,8 @@ class Topic:
             raise ValueError("topic needs a name")
         if self.color not in PALETTE:
             raise ValueError("unknown topic colour")
+        if any(not isinstance(slide, str) or not slide for slide in self.slides):
+            raise ValueError("invalid slide id in topic")
         if len(set(self.slides)) != len(self.slides):
             raise ValueError("duplicate slide in topic")
 

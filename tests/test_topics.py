@@ -121,3 +121,8 @@ def test_migrate_unlinked():
     assert migrate(()) == ((), ())
     topics, notes = migrate((item("T", "s"),))
     assert topics[0].slides == ("s",) and notes == ()
+
+
+def test_non_string_slide_id_is_refused():
+    with pytest.raises(ValueError):
+        Topic("t", "Name", PALETTE[0], (1,))
