@@ -115,7 +115,7 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
 def export_elp_documents(manifest: Manifest) -> tuple[str, str]:
     """Return (exam_html, key_html), to write as UTF-8; no I/O or live bank reads.
 
-    Expects a G5 schema-1 snapshot. Unknown difficulty classes, missing frozen
+    Expects a G5 schema-1 or schema-2 snapshot; unknown item keys are ignored. Unknown difficulty classes, missing frozen
     scoring rows and unavailable/unsupported media fail rather than being omitted.
     Neither the blueprint nor private provenance is copied into the documents.
     """

@@ -57,7 +57,7 @@ def sample(tmp_path, rules=None):
         bank.set_status(item.id, 1, 'reviewed')
     # Reverse lexical ID order deliberately; the renderer must not sort either list.
     manifest = freeze(None, None, bank, [(i.id, 2) for i in items],
-                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, rules or ElpRules())
+                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, rules or ElpRules(), topic_of=lambda i: i.topic)
     return manifest, bank, png
 
 

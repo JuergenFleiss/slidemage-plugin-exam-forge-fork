@@ -94,8 +94,7 @@ def phase(app, tmp_path, monkeypatch):
         exam = window.exam_tab
         exam.counts.setItem(0, 0, QTableWidgetItem("Arithmetic"))
         exam.counts.setItem(0, 1, QTableWidgetItem("1"))
-        exam.easy.setValue(1)
-        exam.minutes.setValue(2.5)
+        exam.counts.setItem(0, 2, QTableWidgetItem("0"))
         paths = iter([str(root / "exam.html"), str(root / "key.html")])
         monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a: (next(paths), ""))
         return host, deck, bank, window, ref, None, warnings
@@ -174,8 +173,6 @@ def test_infeasible_blueprint_is_reported_without_relaxing(phase):
     host, _, _, window, _, _, _ = phase()
     exam = window.exam_tab
     exam.counts.item(0, 1).setText("2")
-    exam.easy.setValue(2)
-    exam.minutes.setValue(5)
     exam.propose()
     host.drain()
     assert not exam.selection.feasible and not exam.selection.items

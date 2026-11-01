@@ -11,13 +11,14 @@ import base64
 import json
 import os
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .bank import Bank, ConflictError
 from .elp import SCORING_FLOOR, ElpRules, check_elp, scoring_table
+from .model import Item
 from .sources import ItemCheck, check_item
 
 
@@ -37,7 +38,7 @@ class Manifest:
 
     def __post_init__(self) -> None:
         data = json.loads(self.encoded)
-        if not isinstance(data, dict) or data.get("schema_version") != 1:
+        if not isinstance(data, dict) or data.get("schema_version") not in (1, 2):
             raise ValueError("unsupported manifest schema")
 
     def data(self) -> dict:
@@ -66,12 +67,14 @@ class Manifest:
 
 
 def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
-           blueprint: dict, rules: ElpRules) -> Manifest:
+           blueprint: dict, rules: ElpRules,
+           *, topic_of: Callable[[Item], str]) -> Manifest:
     """Check and freeze selected current reviewed revisions, preserving their order.
 
     ChangedSourcesError carries every failing ItemCheck. Other failures abort the
     entire issue. Blueprint must contain JSON values; no caller-owned mutable
-    object or bank media is retained in the returned snapshot.
+    object or bank media is retained in the returned snapshot. Each item snapshot
+    stores the resolved topic name, so later topic changes do not alter it.
     """
     selections = tuple(selections)
     if not selections or len({item_id for item_id, _ in selections}) != len(selections):
@@ -100,9 +103,9 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
         if bank.get(item.id) != item:
             raise ConflictError(f"question changed during freeze: {item.id}")
     data = {
-        "schema_version": 1,
+        "schema_version": 2,
         "bank_id": bank.id,
-        "items": [asdict(item) for item in items],
+        "items": [{**asdict(item), "topic": topic_of(item)} for item in items],
         "media_base64": attachments,
         "blueprint": blueprint,
         "scoring": {"rules": asdict(rules), "floor": SCORING_FLOOR,
