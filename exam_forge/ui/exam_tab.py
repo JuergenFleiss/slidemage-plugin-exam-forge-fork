@@ -1,191 +1,572 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Blueprint and selection; all selection rules live in modules."""
+"""Exam tab in three steps: counts, review and swap, then freeze and save."""
+from dataclasses import replace
+from decimal import Decimal
 from secrets import randbits
 
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QListWidget,
-    QMessageBox,
-    QPlainTextEdit,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ..assembly import Blueprint, assemble, check_approval, swap
+from ..assembly import (
+    Blueprint,
+    assemble,
+    available,
+    check_approval,
+    swap,
+    waiting_elp_drafts,
+)
 from ..elp import ElpRules
 from ..manifest import Manifest
+from ..topics import topic_color, topic_name
+from .editor import accent_color
 from .issue import IssueView
-from .work import changed_details, fresh_deck
+from .work import fresh_deck
+
+STEPS = ("Counts", "Review & swap", "Freeze & save")
+_DIFFICULTIES = ("easy", "hard")
+
+
+def red_color(widget):
+    dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
+    return "#fca5a5" if dark else "#a8231a"
+
+
+def muted(text=""):
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setEnabled(False)
+    return label
+
+
+def clear(layout):
+    while layout.count():
+        child = layout.takeAt(0)
+        if child.widget():
+            child.widget().deleteLater()
+        elif child.layout():
+            clear(child.layout())
+
+
+def number(value):
+    return f"{value:g}"
+
+
+def plural(n, word):
+    return f"{n} {word}{'s' * (n != 1)}"
+
+
+def read_history(bank):
+    """Earlier exams' item IDs, oldest first, and a message for each unreadable manifest."""
+    previous, errors = [], []
+    for path in sorted(bank.folder.glob("*.manifest.json")):
+        try:
+            data = Manifest.read(path).data()
+            if data["bank_id"] == bank.id:
+                previous.append([i["id"] for i in data["items"]])
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            errors.append(f"Could not read exam history {path.name}: {exc}")
+    return previous, errors
+
+
+def slide_labels(host, deck, items):
+    """Item ID -> 'Slide N' from the deck's refs for the item's first link, else the slide ID."""
+    wanted = {}
+    for item in items:
+        if item.sources:
+            link = item.sources[0]
+            wanted.setdefault((link.view, link.language), []).append((item.id, link.slide_id))
+    labels = {}
+    for (view, language), pairs in wanted.items():
+        try:
+            refs = {}
+            for ref in host.deck_slides(deck, view, language):
+                refs.setdefault(ref.id, ref)
+        except (OSError, ValueError):
+            refs = {}
+        for item_id, slide_id in pairs:
+            ref = refs.get(slide_id)
+            labels[item_id] = f"Slide {ref.position}" if ref and ref.position else f"Slide {slide_id}"
+    return labels
 
 
 class ExamTab(QWidget):
     def __init__(self, window):
         super().__init__()
         self.window, self.host = window, window.host
-        self.selection = self.approved = None
+        self.rules = ElpRules()
+        self.selection = self.pick_topics = None
+        self.labels, self.counts, self.cells, self.rows = {}, {}, {}, {}
+        self.avail, self.history, self.token = {}, None, 0
         layout = QVBoxLayout(self)
+        self.steps = QHBoxLayout()
+        self.step_labels = [QLabel() for _ in STEPS]
+        for label in self.step_labels:
+            self.steps.addWidget(label)
+        self.steps.addStretch()
+        layout.addLayout(self.steps)
         self.stack = QStackedWidget()
-        layout.addWidget(self.stack)
-        self.setup = QWidget()
-        self.stack.addWidget(self.setup)
-        body = QVBoxLayout(self.setup)
-        heading = QHBoxLayout()
-        heading.addWidget(QLabel("1 · Blueprint and selection"))
+        layout.addWidget(self.stack, 1)
+        self.setup, self.review = self.page(), self.page()
+        self.issue = IssueView(self)
+        for page in (self.setup, self.review):
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            scroll.setWidget(page)
+            self.stack.addWidget(scroll)
+        self.stack.addWidget(self.issue)
+        self.build_setup(self.setup.body)
+        self.build_review(self.review.body)
+        self.set_step(0)
+        self.render_counts()
+
+    def tint(self, widget, kind):
+        """Text colour only, taken from this tab's palette so rebuilt widgets match the theme."""
+        color = red_color(self) if kind == "red" else accent_color(self, kind == "amber")
+        widget.setStyleSheet(f"color: {color};")
+
+    def page(self):
+        page = self.host.Page()
+        page.body.setContentsMargins(4, 8, 4, 8)
+        return page
+
+    # Step 1
+
+    def build_setup(self, body):
+        head = QHBoxLayout()
+        title = QVBoxLayout()
+        heading = QLabel("New ELP exam")
+        font = heading.font()
+        font.setBold(True)
+        font.setPointSize(font.pointSize() + 4)
+        heading.setFont(font)
+        title.addWidget(heading)
+        r = self.rules
+        title.addWidget(muted(f"Picks only reviewed ELP questions. Easy = {r.easy.points} points, "
+                              f"{number(r.easy.minutes)} min · Hard = {r.hard.points} points, "
+                              f"{number(r.hard.minutes)} min."))
+        head.addLayout(title, 1)
         issued = self.host.Button("Open issued manifest…")
         issued.clicked.connect(self.open_issued)
-        heading.addWidget(issued)
-        body.addLayout(heading)
-        self.counts = QTableWidget(1, 3)
-        self.counts.setHorizontalHeaderLabels(["Topic", "Easy", "Hard"])
-        self.counts.horizontalHeader().setStretchLastSection(True)
-        self.counts.setMaximumHeight(130)
-        body.addWidget(self.counts)
-        row = QHBoxLayout()
-        add = self.host.Button("Add count row")
-        add.clicked.connect(lambda: self.counts.insertRow(self.counts.rowCount()))
-        row.addWidget(add)
-        remove = self.host.Button("Remove count row")
-        remove.clicked.connect(lambda: self.counts.removeRow(self.counts.currentRow()))
-        row.addWidget(remove)
-        body.addLayout(row)
-        row = QHBoxLayout()
+        head.addWidget(issued, 0, Qt.AlignmentFlag.AlignTop)
+        body.addLayout(head)
+        self.rows_box = QVBoxLayout()
+        body.addLayout(self.rows_box)
+        avoid = QHBoxLayout()
+        avoid.addWidget(QLabel("Skip questions used in the last"))
         self.avoid = QSpinBox()
-        self.avoid.setRange(0, 1000000)
-        row.addWidget(self.host.Field("Avoid last N exams", self.avoid))
-        body.addLayout(row)
-        row = QHBoxLayout()
-        build = self.host.Button("Propose selection", "primary")
-        build.clicked.connect(self.propose)
-        row.addWidget(build)
-        replace_button = self.host.Button("Swap selected question…")
-        replace_button.clicked.connect(self.swap_selected)
-        row.addWidget(replace_button)
-        self.approve_button = self.host.Button("Approve selection…")
-        self.approve_button.clicked.connect(self.approve)
-        self.approve_button.setEnabled(False)
-        row.addWidget(self.approve_button)
-        body.addLayout(row)
-        self.results = QListWidget()
-        body.addWidget(self.results, 1)
-        self.report = QPlainTextEdit()
-        self.report.setReadOnly(True)
-        body.addWidget(self.report, 1)
-        self.issue = IssueView(self)
-        self.stack.addWidget(self.issue)
-        self.counts.itemChanged.connect(self.invalidate)
-        self.counts.model().rowsRemoved.connect(self.invalidate)
-        self.avoid.valueChanged.connect(self.invalidate)
+        self.avoid.setRange(0, 1000)
+        self.avoid.valueChanged.connect(self.avoid_changed)
+        avoid.addWidget(self.avoid)
+        self.avoid_unit = QLabel("exams")
+        avoid.addWidget(self.avoid_unit)
+        avoid.addStretch()
+        body.addLayout(avoid)
+        self.history_note = QLabel()
+        self.history_note.setWordWrap(True)
+        body.addWidget(self.history_note)
+        self.untopiced = muted()
+        body.addWidget(self.untopiced)
+        grid = QGridLayout()
+        self.totals = {}
+        for column, (key, caption) in enumerate((("questions", "questions"), ("points", "points"),
+                                                 ("minutes", "minutes"))):
+            value = QLabel("0")
+            font = value.font()
+            font.setBold(True)
+            font.setPointSize(font.pointSize() + 8)
+            value.setFont(font)
+            self.totals[key] = value
+            grid.addWidget(value, 0, column)
+            grid.addWidget(muted(caption), 1, column)
+        body.addLayout(grid)
+        self.reason = QLabel()
+        self.reason.setWordWrap(True)
+        body.addWidget(self.reason)
+        self.propose_button = self.host.Button("Propose exam", "primary")
+        self.propose_button.clicked.connect(lambda: self.propose())
+        body.addWidget(self.propose_button)
+        body.addWidget(muted("A random pick that matches these counts exactly. "
+                             "You can swap single questions in the next step."))
+        body.addStretch()
 
-    @staticmethod
-    def topic_of(item):
-        # Replaced when topics.json is wired in.
-        return item.topic
+    def render_counts(self):
+        topics = self.window.topics
+        self.counts = {t.name: self.counts.get(t.name, dict.fromkeys(_DIFFICULTIES, 0)) for t in topics}
+        clear(self.rows_box)
+        self.cells = {}
+        if not topics:
+            self.rows_box.addWidget(muted("No topics yet. Create topics and link questions to "
+                                          "slides in the Questions tab."))
+        else:
+            grid = QGridLayout()
+            grid.setColumnStretch(0, 1)
+            for column, text in enumerate(("Topic", "Easy", "Hard")):
+                grid.addWidget(muted(text), 0, column)
+            dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+            for row, topic in enumerate(topics, 1):
+                cell = self.cells[topic.name] = {}
+                info = QVBoxLayout()
+                name = QHBoxLayout()
+                dot = QLabel("●")
+                dot.setStyleSheet(f"color: {topic_color(topic.color, dark)};")
+                name.addWidget(dot)
+                name.addWidget(QLabel(topic.name), 1)
+                info.addLayout(name)
+                cell["avail"], cell["draft"] = muted(), QLabel()
+                cell["draft"].setWordWrap(True)
+                self.tint(cell["draft"], "amber")
+                info.addWidget(cell["avail"])
+                info.addWidget(cell["draft"])
+                grid.addLayout(info, row, 0)
+                for column, difficulty in enumerate(_DIFFICULTIES, 1):
+                    stepper = QVBoxLayout()
+                    spin = cell[difficulty] = QSpinBox()
+                    spin.setRange(0, 999)
+                    spin.setValue(self.counts[topic.name][difficulty])
+                    spin.valueChanged.connect(
+                        lambda value, n=topic.name, d=difficulty: self.count_changed(n, d, value))
+                    over = cell[difficulty + "_over"] = QLabel()
+                    self.tint(over, "red")
+                    stepper.addWidget(spin)
+                    stepper.addWidget(over)
+                    stepper.addStretch()
+                    grid.addLayout(stepper, row, column)
+            self.rows_box.addLayout(grid)
+        self.compute_avail()
 
-    def open_issued(self):
-        self.stack.setCurrentWidget(self.issue)
-        self.issue.open_manifest()
+    def compute_avail(self):
+        topics, items = self.window.topics, self.window.items
+        of = lambda item: topic_name(item, topics)  # noqa: E731
+        avoid = self.avoid.value()
+        previous = self.history[0] if self.history and avoid else []
+        self.avail = available(items, of, previous, avoid)
+        waiting = waiting_elp_drafts(items, of)
+        for name, cell in self.cells.items():
+            have = self.avail.get(name, {})
+            cell["avail"].setText(f"{have.get('easy', 0)} easy · {have.get('hard', 0)} hard reviewed")
+            n = waiting.get(name, 0)
+            cell["draft"].setText(f"{plural(n, 'ELP draft')} waiting for review" if n else "")
+            cell["draft"].setVisible(bool(n))
+        lost = sum(1 for i in items if i.use == "elp" and i.status == "reviewed" and not of(i))
+        self.untopiced.setText(f"{plural(lost, 'reviewed ELP question')} {'has' if lost == 1 else 'have'}"
+                               " no topic and can't be used." if lost else "")
+        self.untopiced.setVisible(bool(lost))
+        errors = self.history[1] if self.history and avoid else []
+        self.history_note.setText("\n".join(errors))
+        self.tint(self.history_note, "red")
+        self.update_counts()
 
-    def reset(self):
-        self.invalidate()
-        self.results.clear()
-        self.report.clear()
-        self.issue.reset()
-        self.stack.setCurrentIndex(0)
+    def update_counts(self):
+        short, easy, hard = [], 0, 0
+        for name, cell in self.cells.items():
+            counts = self.counts[name]
+            easy, hard = easy + counts["easy"], hard + counts["hard"]
+            for difficulty in _DIFFICULTIES:
+                have = self.avail.get(name, {}).get(difficulty, 0)
+                over = counts[difficulty] > have
+                cell[difficulty + "_over"].setText(f"Only {have} available" if over else "")
+                cell[difficulty + "_over"].setVisible(over)
+                if over:
+                    short.append(f"{name} ({difficulty})")
+        r = self.rules
+        minutes = easy * Decimal(str(r.easy.minutes)) + hard * Decimal(str(r.hard.minutes))
+        for key, value in (("questions", easy + hard), ("points", easy * r.easy.points + hard * r.hard.points),
+                           ("minutes", number(float(minutes)))):
+            self.totals[key].setText(str(value))
+        reason = ("Not enough reviewed questions for " + ", ".join(short) + ". Lower the counts first."
+                  if short else "" if easy + hard or not self.cells else "Choose at least one question.")
+        self.reason.setText(reason)
+        self.tint(self.reason, "red")
+        self.propose_button.setEnabled(bool(easy + hard) and not short)
 
-    def invalidate(self, *_):
-        self.selection = self.approved = None
-        self.approve_button.setEnabled(False)
-        if hasattr(self, "issue") and self.issue.manifest is None:
-            self.issue.reset()
-            self.stack.setCurrentWidget(self.setup)
+    def count_changed(self, name, difficulty, value):
+        self.counts[name][difficulty] = value
+        self.update_counts()
+
+    def avoid_changed(self, value):
+        self.avoid_unit.setText("exam" if value == 1 else "exams")
+        if value and self.history is None:
+            self.load_history()
+        self.compute_avail()
+
+    def load_history(self):
+        bank, self.token = self.window.bank, self.token + 1
+        token = self.token
+
+        def done(result, error):
+            if token != self.token:
+                return
+            if error:
+                self.window.error(error)
+            else:
+                self.history = result
+                self.compute_avail()
+        self.host.run_in_background(lambda: read_history(bank), done)
+
+    def refresh(self):
+        """Re-render the counts from the window's questions and topics; history is read again."""
+        self.history, self.token = None, self.token + 1
+        self.render_counts()
+        if self.avoid.value():
+            self.load_history()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh()
+        self.sync_flags()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange and hasattr(self, "groups"):
+            self.render_counts()
+            self.render_review()
+            self.issue.restyle()
+
+    def set_step(self, step):
+        self.stack.setCurrentIndex(step)
+        for i, (label, text) in enumerate(zip(self.step_labels, STEPS)):
+            label.setText(f"{'✓' if i < step else i + 1} {text}")
+            font = label.font()
+            font.setBold(i == step)
+            label.setFont(font)
+            label.setEnabled(i <= step)
 
     def blueprint(self):
-        counts = {}
-        for row in range(self.counts.rowCount()):
-            name, *cells = (self.counts.item(row, col) for col in range(3))
-            texts = [c.text().strip() if c else "" for c in cells]
-            if not name or not name.text().strip():
-                if any(texts):
-                    raise ValueError("Each count needs a topic name.")
-                continue
-            name = name.text().strip()
-            if name in counts:
-                raise ValueError("Use one count row per topic.")
-            counts[name] = dict(zip(("easy", "hard"), (int(t or 0) for t in texts)))
+        counts = {n: dict(c) for n, c in self.counts.items() if any(c.values())}
         return Blueprint(counts, self.avoid.value())
 
-    def propose(self):
+    def reset(self):
+        self.selection = self.pick_topics = None
+        self.counts, self.history, self.token = {}, None, self.token + 1
+        self.avoid.blockSignals(True)
+        self.avoid.setValue(0)
+        self.avoid.blockSignals(False)
+        self.issue.reset()
+        self.set_step(0)
+        self.render_counts()
+
+    def invalidate(self, *_):
+        """Topics or questions changed under a proposal: discard it, back to the counts."""
+        self.selection = self.pick_topics = None
+        if self.issue.manifest is None:
+            self.set_step(0)
+            self.render_counts()
+
+    def open_issued(self):
+        self.issue.open_manifest()
+
+    def propose(self, blueprint=None, topics=None):
         if not self.window.may_leave():
             return
         try:
-            blueprint = self.blueprint()
-            rules = ElpRules()
+            blueprint = blueprint or self.blueprint()
         except ValueError as exc:
             self.window.error(exc)
             return
-        self.invalidate()
-        self.results.clear()
-        self.report.setPlainText("Preparing selection…")
-        bank = self.window.bank
-        seed = randbits(64)
-        topic_of = self.topic_of
+        topics = topics if topics is not None else self.window.topics
+        bank, deck, host, rules = self.window.bank, self.window.deck, self.host, self.rules
+        history, seed = self.history, randbits(64)
+        topic_of = lambda item: topic_name(item, topics)  # noqa: E731
 
         def work():
             items, errors = bank.load()
             if errors:
                 raise ValueError("\n".join(map(str, errors)))
-            previous, history_errors = [], []
+            previous = errors = []
             if blueprint.avoid_last:
-                for path in sorted(bank.folder.glob("*.manifest.json")):
-                    try:
-                        manifest = Manifest.read(path).data()
-                        if manifest['bank_id'] == bank.id:
-                            previous.append([i['id'] for i in manifest['items']])
-                    except (OSError, ValueError, KeyError, TypeError) as exc:
-                        history_errors.append(f"Could not read exam history {path.name}: {exc}")
-            return assemble(items, blueprint, seed=seed, topic_of=topic_of, rules=rules, previous_exams=previous), history_errors
+                previous, errors = history or read_history(bank)
+            selection = assemble(items, blueprint, seed=seed, topic_of=topic_of, rules=rules,
+                                 previous_exams=previous)
+            return selection, (previous, errors), slide_labels(host, fresh_deck(deck), selection.candidates)
 
         def done(data):
-            self.selection, history_errors = data
-            exclusions = "\n".join(f"{r.item.id}: {' '.join(r.reasons)}" for r in self.selection.excluded) or "None"
-            self.report.setPlainText("\n".join(history_errors) + "\n\nBlueprint exclusions\n" + exclusions +
-                "\n\n" + ("\n".join(self.selection.problems) if not self.selection.feasible else
-                f"{self.selection.total_points} points · {self.selection.total_minutes} minutes · seed {seed}"))
-            self.render_selection()
+            selection, history, self.labels = data
+            if blueprint.avoid_last:
+                self.history = history
+                self.compute_avail()
+                if history[1]:
+                    self.window.notice.setText("\n".join(history[1]))
+            if not selection.feasible:
+                self.reason.setText("\n".join(selection.problems))
+                self.tint(self.reason, "red")
+                return
+            self.selection, self.pick_topics = selection, topics
+            self.render_review()
+            self.set_step(1)
         self.window.work(work, done)
 
-    def render_selection(self):
-        self.results.clear()
-        if self.selection:
-            self.results.addItems([f"{i.id} r{i.revision} · {i.stem}" for i in self.selection.items])
-        self.approve_button.setEnabled(bool(self.selection and self.selection.feasible))
+    # Step 2
 
-    def swap_selected(self):
-        row = self.results.currentRow()
-        if self.selection is None or not 0 <= row < len(self.selection.items):
+    def build_review(self, body):
+        head = QHBoxLayout()
+        self.pick_summary = QLabel()
+        font = self.pick_summary.font()
+        font.setBold(True)
+        self.pick_summary.setFont(font)
+        head.addWidget(self.pick_summary)
+        self.seed_label = QLabel()
+        self.seed_label.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.seed_label.setEnabled(False)
+        head.addWidget(self.seed_label)
+        head.addStretch()
+        self.back_button = self.host.Button("Change counts", "ghost")
+        self.back_button.clicked.connect(lambda: self.set_step(0))
+        self.again_button = self.host.Button("New pick")
+        self.again_button.clicked.connect(self.new_pick)
+        self.approve_button = self.host.Button("Approve and freeze", "primary")
+        self.approve_button.clicked.connect(self.approve)
+        for button in (self.back_button, self.again_button, self.approve_button):
+            head.addWidget(button)
+        body.addLayout(head)
+        self.blocked = QLabel()
+        self.blocked.setWordWrap(True)
+        body.addWidget(self.blocked)
+        self.groups = QVBoxLayout()
+        body.addLayout(self.groups)
+        body.addStretch()
+
+    def changed_ids(self):
+        return [i.id for i in self.selection.items if i.source_changed] if self.selection else []
+
+    def render_review(self):
+        clear(self.groups)
+        self.rows = {}
+        selection = self.selection
+        if selection is None:
             return
-        pool = list(self.selection.alternatives(self.selection.items[row].id))
+        minutes = number(selection.total_minutes)
+        self.pick_summary.setText(f"{plural(len(selection.items), 'question')} · "
+                                  f"{selection.total_points} points · {minutes} min")
+        self.seed_label.setText(f"seed {selection.seed}")
+        changed = self.changed_ids()
+        n = len(changed)
+        self.blocked.setText(
+            f"{n} picked question{' is' if n == 1 else 's are'} linked to a changed slide. "
+            "Review or swap before freezing." if n else "")
+        self.blocked.setVisible(bool(n))
+        self.tint(self.blocked, "violet")
+        self.approve_button.setEnabled(not n)
+        topics = self.pick_topics
+        by_topic = {}
+        for item in selection.items:
+            by_topic.setdefault(selection.topic_of(item), []).append(item)
+        order = [t.name for t in topics if t.name in by_topic] + [n for n in by_topic
+                                                                  if n not in {t.name for t in topics}]
+        colors = {t.name: t.color for t in topics}
+        dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        count = 0
+        for name in order:
+            head = QHBoxLayout()
+            if name in colors:
+                dot = QLabel("●")
+                dot.setStyleSheet(f"color: {topic_color(colors[name], dark)};")
+                head.addWidget(dot)
+            title = QLabel(name)
+            font = title.font()
+            font.setBold(True)
+            title.setFont(font)
+            head.addWidget(title)
+            head.addWidget(muted(plural(len(by_topic[name]), "question")))
+            head.addStretch()
+            self.groups.addLayout(head)
+            for item in by_topic[name]:
+                count += 1
+                self.groups.addLayout(self.row(count, item))
+
+    def row(self, number_, item):
+        line = QHBoxLayout()
+        index = QLabel(str(number_))
+        index.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        index.setEnabled(False)
+        line.addWidget(index, 0, Qt.AlignmentFlag.AlignTop)
+        text = QVBoxLayout()
+        stem = QLabel(item.stem)
+        stem.setWordWrap(True)
+        text.addWidget(stem)
+        meta = QHBoxLayout()
+        rule = getattr(self.rules, item.difficulty)
+        chip = self.host.Chip(f"{item.difficulty.capitalize()} · {rule.points} pts")
+        meta.addWidget(chip)
+        meta.addWidget(muted(self.labels.get(item.id) or
+                             (f"Slide {item.sources[0].slide_id}" if item.sources else "No slide")))
+        row = self.rows[item.id] = {"stem": stem, "chip": chip, "changed": None, "review": None}
+        if item.source_changed:
+            row["changed"] = self.host.Chip("Slide changed")
+            self.tint(row["changed"], "violet")
+            meta.addWidget(row["changed"])
+        meta.addStretch()
+        text.addLayout(meta)
+        line.addLayout(text, 1)
+        if item.source_changed:
+            row["review"] = self.host.Button("Review", compact=True)
+            row["review"].clicked.connect(lambda _=False, i=item.id: self.window.open_question(i))
+            line.addWidget(row["review"], 0, Qt.AlignmentFlag.AlignTop)
+        row["swap"] = self.host.Button("Swap", compact=True)
+        row["swap"].setEnabled(bool(self.selection.alternatives(item.id)))
+        row["swap"].clicked.connect(lambda _=False, i=item.id: self.swap_item(i))
+        line.addWidget(row["swap"], 0, Qt.AlignmentFlag.AlignTop)
+        return line
+
+    def new_pick(self):
+        if self.selection:
+            self.propose(self.selection.blueprint, self.pick_topics)
+
+    def swap_item(self, item_id):
+        if self.selection is None:
+            return
+        pool = list(self.selection.alternatives(item_id))
         labels = [f"{i.id} · {i.stem}" for i in pool]
         if not labels:
-            self.window.error("No unselected eligible replacement in the same topic and difficulty.")
             return
-        label, ok = QInputDialog.getItem(self, "Swap question", "Replacement (all blueprint constraints still apply)", labels, 0, False)
+        label, ok = QInputDialog.getItem(self, "Swap question", "Replacement (same topic and difficulty)",
+                                         labels, 0, False)
         if ok:
             try:
-                self.selection = swap(self.selection, self.selection.items[row].id, pool[labels.index(label)].id)
-                self.approved = None
-                self.render_selection()
+                self.selection = swap(self.selection, item_id, pool[labels.index(label)].id)
             except ValueError as exc:
                 self.window.error(exc)
+                return
+            self.render_review()
+
+    def sync_flags(self):
+        """Back on the tab: pick up source checks made elsewhere, keeping the selection otherwise."""
+        selection, bank = self.selection, self.window.bank
+        if selection is None or self.stack.currentIndex() != 1:
+            return
+
+        def work():
+            return {i.id: bank.get(i.id).source_changed for i in selection.items}
+
+        def done(flags, error):
+            if error:
+                self.window.error(error)
+            elif self.selection is selection:
+                self.mark_changed(flags)
+        self.host.run_in_background(work, done)
+
+    def mark_changed(self, flags):
+        """flags: item ID -> source_changed. Re-render when any selected flag differs."""
+        items = tuple(replace(i, source_changed=flags.get(i.id, i.source_changed))
+                      for i in self.selection.items)
+        if items != self.selection.items:
+            self.selection = replace(self.selection, items=items)
+            self.render_review()
 
     def approve(self):
-        if self.selection is None or self.window.busy:
+        if self.selection is None or self.window.busy or self.changed_ids():
             return
         selection, bank, deck = self.selection, self.window.bank, self.window.deck
         self.window.set_busy(True)
@@ -194,14 +575,11 @@ class ExamTab(QWidget):
             self.window.set_busy(False)
             if error:
                 self.window.error(error)
-                return
-            details = changed_details(report.changed)
-            text = "Approve this selection?" + ("\n\nSource changed:\n" + details if details else "\nAll selected sources were checked.")
-            if QMessageBox.question(self, "Approve selection", text) != QMessageBox.StandardButton.Yes:
-                return
-            self.approved = report.approve(accept_changed=bool(report.changed))
-            self.issue.prepare(self.approved)
-            self.stack.setCurrentWidget(self.issue)
+            elif report.changed:
+                self.selection = report.selection
+                self.render_review()
+            else:
+                self.issue.freeze(report.selection)
 
         def prepared(snapshot, error):
             if error:
@@ -209,3 +587,8 @@ class ExamTab(QWidget):
             else:
                 check_approval(self.host, snapshot, bank, selection, checked)
         self.host.run_in_background(lambda: fresh_deck(deck), prepared)
+
+    def frozen(self):
+        """A manifest was issued or opened: show it; later exams see it in their history."""
+        self.history, self.selection = None, None
+        self.set_step(2)

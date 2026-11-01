@@ -1,16 +1,18 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Second issuing step: immutable manifest, entry documents and corrections."""
+"""Third step: freeze the approved exam, save its documents, record corrections."""
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -18,7 +20,31 @@ from PySide6.QtWidgets import (
 from ..elp_document import export_elp_documents
 from ..manifest import ChangedSourcesError, Manifest, freeze
 from .corrections import open_corrections
-from .work import changed_details, fresh_deck
+from .editor import accent_color
+from .work import fresh_deck
+
+
+def issued_at(path):
+    """Local issue time from the manifest file name, or an empty string."""
+    try:
+        stamp = datetime.strptime(Path(path).name.split("-")[0], "%Y%m%dT%H%M%S%fZ")
+        return stamp.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return ""
+
+
+def manifest_totals(data):
+    """'N questions · P points · M min' from the frozen items and rules, as far as they say."""
+    items = data["items"]
+    text = f"{len(items)} question{'s' * (len(items) != 1)}"
+    rules = data.get("scoring", {}).get("rules", {})
+    try:
+        rows = [rules[i["difficulty"]] for i in items]
+        points = sum(r["points"] for r in rows)
+        minutes = float(sum((Decimal(str(r["minutes"])) for r in rows), Decimal(0)))
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return text
+    return f"{text} · {points} points · {minutes:g} min"
 
 
 class IssueView(QWidget):
@@ -26,52 +52,78 @@ class IssueView(QWidget):
         super().__init__()
         self.exam, self.window, self.host = exam, exam.window, exam.host
         self.manifest = self.manifest_path = self.journal_path = None
-        self.selection = None
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("2 · Issue and frozen manifest"))
-        self.summary = QPlainTextEdit()
-        self.summary.setReadOnly(True)
-        layout.addWidget(self.summary, 1)
-        self.paths = QLabel()
-        self.paths.setWordWrap(True)
-        layout.addWidget(self.paths)
+        self.title = QLabel("Exam frozen")
+        font = self.title.font()
+        font.setBold(True)
+        font.setPointSize(font.pointSize() + 4)
+        self.title.setFont(font)
+        layout.addWidget(self.title)
+        self.summary = QLabel()
+        layout.addWidget(self.summary)
+        self.file_name = QLabel()
+        self.file_name.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        layout.addWidget(self.file_name)
+        note = QLabel("Saved in your private bank folder. Later edits to questions do not change this exam.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        cards = QHBoxLayout()
+        self.exam_button = self.host.Button("Save exam HTML…")
+        self.exam_button.clicked.connect(lambda: self.documents(0))
+        self.key_button = self.host.Button("Save key HTML…")
+        self.key_button.clicked.connect(lambda: self.documents(1))
+        self.key_title = QLabel("🔒 Private key")
+        self.key_text = QLabel("Answers, rationales and the scoring sheet. Keep this file private.")
+        cards.addWidget(self.card(QLabel("Exam copy"), QLabel("Questions and answer options for "
+                                                              "students. No answers."), self.exam_button))
+        cards.addWidget(self.card(self.key_title, self.key_text, self.key_button))
+        layout.addLayout(cards)
         row = QHBoxLayout()
-        self.freeze_button = self.host.Button("Freeze approved exam", "primary")
-        self.freeze_button.clicked.connect(self.freeze)
-        self.documents_button = self.host.Button("Save exam and key documents…")
-        self.documents_button.clicked.connect(self.documents)
-        self.corrections_button = self.host.Button("Corrections…")
+        self.corrections_button = self.host.Button("Record a correction…")
         self.corrections_button.clicked.connect(self.corrections)
-        for button in (self.freeze_button, self.documents_button, self.corrections_button):
-            row.addWidget(button)
+        row.addWidget(self.corrections_button)
+        row.addStretch()
+        another = self.host.Button("Start another exam")
+        another.clicked.connect(self.another)
+        row.addWidget(another)
         layout.addLayout(row)
-        row = QHBoxLayout()
-        back = self.host.Button("Back to selection")
-        back.clicked.connect(lambda: exam.stack.setCurrentIndex(0))
-        row.addWidget(back)
-        layout.addLayout(row)
+        layout.addStretch()
+        self.restyle()
         self.reset()
+
+    def card(self, title, text, button):
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        box = QVBoxLayout(frame)
+        font = title.font()
+        font.setBold(True)
+        title.setFont(font)
+        text.setWordWrap(True)
+        box.addWidget(title)
+        box.addWidget(text)
+        box.addWidget(button)
+        box.addStretch()
+        return frame
+
+    def restyle(self):
+        for label in (self.key_title, self.key_text):
+            label.setStyleSheet(f"color: {accent_color(self.exam, True)};")
 
     def reset(self):
-        self.manifest = self.manifest_path = self.journal_path = self.selection = None
+        self.manifest = self.manifest_path = self.journal_path = None
         self.summary.clear()
-        self.paths.clear()
-        self.freeze_button.setEnabled(False)
-        self.documents_button.setEnabled(False)
-        self.corrections_button.setEnabled(False)
+        self.file_name.clear()
+        for button in (self.exam_button, self.key_button, self.corrections_button):
+            button.setEnabled(False)
 
-    def prepare(self, selection):
+    def another(self):
         self.reset()
-        self.selection = selection
-        self.freeze_button.setEnabled(True)
-        self.summary.setPlainText(f"Approved, not issued · {selection.total_points} points · {selection.total_minutes} minutes\n\n" +
-            "\n".join(f"{i.id} r{i.revision}: {i.stem}" for i in selection.items))
-        self.paths.setText("Freezing creates a new private manifest and a separate correction journal in the bank folder.")
+        self.exam.set_step(0)
 
-    def freeze(self):
-        if self.selection is None or self.manifest is not None or self.window.busy:
+    def freeze(self, selection):
+        if self.manifest is not None or self.window.busy:
             return
-        selection, bank, deck = self.selection, self.window.bank, self.window.deck
+        bank, deck = self.window.bank, self.window.deck
         stem = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ-") + uuid4().hex[:8]
         path = bank.folder / (stem + ".manifest.json")
         self.window.set_busy(True)
@@ -87,27 +139,24 @@ class IssueView(QWidget):
         def done(manifest, error):
             self.window.set_busy(False)
             if isinstance(error, ChangedSourcesError):
-                details = changed_details(error.checks)
-                self.summary.setPlainText("Issue stopped: source changed.\n" + details)
-                self.window.error("Issue stopped. Review changed sources before issuing:\n" + details)
+                self.exam.selection = selection
+                self.exam.mark_changed({c.item.id: True for c in error.checks})
+                self.exam.set_step(1)
             elif error:
                 self.window.error(error)
             else:
                 self.show_manifest(manifest, path)
-                self.documents()
         self.host.run_in_background(work, done)
 
     def show_manifest(self, manifest, path):
         self.manifest, self.manifest_path = manifest, Path(path)
         self.journal_path = self.manifest_path.with_suffix(".corrections.jsonl")
-        data = manifest.data()
-        self.summary.setPlainText("Issued · immutable manifest\n\n" + "\n".join(
-            f"{i['id']} r{i['revision']}: {i['stem']}" for i in data['items']) +
-            "\n\nFrozen blueprint\n" + str(data['blueprint']) + "\n\nFrozen rules\n" + str(data['scoring']['rules']))
-        self.paths.setText(f"Manifest: {path}\nCorrection journal: {self.journal_path}")
-        self.freeze_button.setEnabled(False)
-        self.documents_button.setEnabled(True)
-        self.corrections_button.setEnabled(True)
+        when = issued_at(path)
+        self.summary.setText(manifest_totals(manifest.data()) + (f" · issued {when}" if when else ""))
+        self.file_name.setText(self.manifest_path.name)
+        for button in (self.exam_button, self.key_button, self.corrections_button):
+            button.setEnabled(True)
+        self.exam.frozen()
 
     def open_manifest(self):
         bank = self.window.bank
@@ -126,29 +175,24 @@ class IssueView(QWidget):
             return manifest
         self.window.work(work, lambda manifest: self.show_manifest(manifest, path))
 
-    def documents(self):
+    def documents(self, which):
+        """Save the exam copy (0) or the private key and scoring sheet (1)."""
         if self.manifest is None:
             return
-        if QMessageBox.warning(self, "Private answer key", "The key file holds answers, rationales and scoring rules. Save it in a private location. Continue?",
+        if which and QMessageBox.warning(self, "Private answer key", "The key file holds answers, rationales and scoring rules. Save it in a private location. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
-        exam_path, _ = QFileDialog.getSaveFileName(self, "Save exam entry copy", str(self.window.bank.folder / "exam.html"), "HTML (*.html)")
-        if not exam_path:
+        title, name = (("Save private key and scoring sheet", "key.html") if which
+                       else ("Save exam entry copy", "exam.html"))
+        chosen, _ = QFileDialog.getSaveFileName(self, title, str(self.window.bank.folder / name), "HTML (*.html)")
+        if not chosen:
             return
-        key_path, _ = QFileDialog.getSaveFileName(self, "Save private key and scoring sheet", str(self.window.bank.folder / "key.html"), "HTML (*.html)")
-        if not key_path:
-            return
-        paths = [Path(p if p.lower().endswith(".html") else p + ".html").resolve() for p in (exam_path, key_path)]
-        if paths[0] == paths[1]:
-            self.window.error("Exam and private key need separate files.")
-            return
+        path = Path(chosen if chosen.lower().endswith(".html") else chosen + ".html").resolve()
         manifest = self.manifest
 
         def work():
-            documents = export_elp_documents(manifest)
-            for path, document in zip(paths, documents):
-                path.write_text(document, encoding="utf-8")
-        self.window.work(work, lambda _: self.window.notice.setText(f"Saved exam: {paths[0]}\nPrivate key: {paths[1]}"))
+            path.write_text(export_elp_documents(manifest)[which], encoding="utf-8")
+        self.window.work(work, lambda _: self.window.notice.setText(f"Saved {'private key' if which else 'exam'}: {path}"))
 
     def corrections(self):
         if self.manifest is not None:

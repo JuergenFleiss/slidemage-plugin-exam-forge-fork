@@ -7,20 +7,24 @@ from threading import get_ident
 
 import pytest
 from fake_host import FakeDeck
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QInputDialog,
     QMessageBox,
-    QTableWidgetItem,
 )
 from slidemage.plugin_api import SlideSource
 from test_ui import GuiHost, source
 
 import exam_forge
+from exam_forge.assembly import Blueprint
 from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
+from exam_forge.topics import add_topic, assign_slide
+from exam_forge.ui.editor import accent_color
+from exam_forge.ui.exam_tab import red_color
 from exam_forge.ui.corrections import _SHEETS
 
 
@@ -76,7 +80,6 @@ def phase(app, tmp_path, monkeypatch):
         for row in range(5):
             window.options.cellWidget(row, 1).setPlainText(str(row + 1))
         window.options.cellWidget(0, 0).setChecked(True)
-        window.topic.setText("Arithmetic")
         window.difficulty.setText("easy")
         window.use.setCurrentIndex(window.use.findData("elp"))
         from exam_forge.ui.source_picker import SourcePicker
@@ -91,10 +94,11 @@ def phase(app, tmp_path, monkeypatch):
         window.approve_button.click()
         host.drain()
         assert window.current.status == "reviewed"
-        exam = window.exam_tab
-        exam.counts.setItem(0, 0, QTableWidgetItem("Arithmetic"))
-        exam.counts.setItem(0, 1, QTableWidgetItem("1"))
-        exam.counts.setItem(0, 2, QTableWidgetItem("0"))
+        topics = add_topic((), "Arithmetic")
+        assert window.save_topics(assign_slide(topics, topics[0].id, "s1"))
+        window.reload()
+        window.exam_tab.refresh()
+        counts(window.exam_tab, 1, 0)
         paths = iter([str(root / "exam.html"), str(root / "key.html")])
         monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a: (next(paths), ""))
         return host, deck, bank, window, ref, None, warnings
@@ -110,94 +114,281 @@ def phase(app, tmp_path, monkeypatch):
     QApplication.processEvents()
 
 
-def propose_approve(host, window):
+def counts(exam, easy, hard, topic="Arithmetic"):
+    exam.cells[topic]["easy"].setValue(easy)
+    exam.cells[topic]["hard"].setValue(hard)
+
+
+def propose(host, window):
     exam = window.exam_tab
     window.tabs.setCurrentWidget(exam)
     exam.propose()
     host.drain()
-    assert exam.selection and exam.selection.feasible, exam.report.toPlainText()
+    assert exam.selection and exam.selection.feasible, exam.reason.text()
+    assert exam.stack.currentIndex() == 1
+    return exam
+
+
+def propose_approve(host, window):
+    exam = propose(host, window)
     exam.approve_button.click()
     host.drain()
-    assert exam.approved and exam.stack.currentWidget() is exam.issue
-    assert not exam.issue.manifest  # Approval is a separate step from issuing.
+    assert exam.stack.currentWidget() is exam.issue and exam.issue.manifest
     return exam.issue
 
 
 def issue(host, window):
     view = propose_approve(host, window)
-    view.freeze_button.click()
-    host.drain()
     assert view.manifest_path.exists()
+    view.documents(0)
+    host.drain()
+    view.documents(1)
+    host.drain()
     assert "Correct" in (host.root / "key.html").read_text()
     return view
+
+
+def add_reviewed(bank, window, item_id, **fields):
+    item = bank.create(replace(window.current, id=item_id, revision=1, status="draft", **fields))
+    bank.set_status(item.id, item.revision, "reviewed")
+    window.reload()
+    window.exam_tab.refresh()
+    return item
 
 
 def test_bank_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     host, deck, bank, window, _ref, _, warnings = phase()
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Bank", "Exam"]
-    # A swap is offered from the module's eligible candidates.
     current = window.current
-    other = bank.create(replace(current, id="replacement", revision=1, status="draft"))
-    bank.set_status(other.id, other.revision, "reviewed")
-    exam = window.exam_tab
-    exam.propose()
-    host.drain()
-    outgoing = exam.selection.items[0].id
-    exam.results.setCurrentRow(0)
+    add_reviewed(bank, window, "replacement")
+    exam = propose(host, window)
+    outgoing = exam.selection.items[0]
+    assert exam.rows[outgoing.id]["swap"].isEnabled()
     monkeypatch.setattr(QInputDialog, "getItem", lambda *a: (a[3][0], True))
-    exam.swap_selected()
-    assert exam.selection.items[0].id != outgoing
-    exam.approve()
-    host.drain()
-    view = propose_approve(host, window)
+    exam.swap_item(outgoing.id)
+    incoming = exam.selection.items[0]
+    assert incoming.id != outgoing.id and incoming.difficulty == outgoing.difficulty
+    assert exam.selection.topic_of(incoming) == exam.selection.topic_of(outgoing) == "Arithmetic"
+    assert incoming.id in exam.rows and outgoing.id not in exam.rows
     seed = exam.selection.seed
-    view.freeze()
+    exam.approve_button.click()
     host.drain()
+    view = exam.issue
     frozen = view.manifest.data()
     assert frozen["blueprint"]["seed"] == seed
     assert "by" not in frozen["blueprint"]
+    assert frozen["items"][0]["id"] == incoming.id
     assert frozen["scoring"]["rules"]["easy"] == {"points": 12, "minutes": 2.5}
     assert frozen["scoring"]["rules"]["hard"] == {"points": 24, "minutes": 5}
+    view.documents(0)
+    host.drain()
+    assert not warnings  # Only the private key carries the warning.
+    view.documents(1)
+    host.drain()
     exam_html = (host.root / "exam.html").read_text()
     assert "Teaching assistant note" in exam_html and current.assistant_note in exam_html
     assert "Correct —" not in exam_html and any("holds answers" in w for w in warnings)
     # UI reopen reads the issued snapshot, independent of the live bank.
-    path = exam.issue.manifest_path
+    path = view.manifest_path
+    exam.reset()
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: (str(path), ""))
     exam.open_issued()
     host.drain()
-    assert exam.issue.manifest.data() == Manifest.read(path).data()
+    assert exam.stack.currentWidget() is view
+    assert view.manifest.data() == Manifest.read(path).data()
+
+
+def test_frozen_manifest_stores_resolved_topic_names(phase):
+    host, _, _, window, _, _, _ = phase()
+    view = propose_approve(host, window)
+    assert window.current.topic == ""
+    assert [i["topic"] for i in view.manifest.data()["items"]] == ["Arithmetic"]
+    assert view.file_name.text() == view.manifest_path.name
+
+
+def test_summary_and_only_n_available_are_live(phase):
+    host, _, bank, window, _, _, _ = phase()
+    exam = window.exam_tab
+    cell = exam.cells["Arithmetic"]
+    assert cell["avail"].text() == "1 easy · 0 hard reviewed"
+    assert [exam.totals[k].text() for k in ("questions", "points", "minutes")] == ["1", "12", "2.5"]
+    assert exam.propose_button.isEnabled() and cell["easy_over"].text() == ""
+    counts(exam, 3, 0)
+    assert cell["easy_over"].text() == "Only 1 available" and not exam.propose_button.isEnabled()
+    assert "Arithmetic (easy)" in exam.reason.text()
+    counts(exam, 0, 0)
+    assert exam.reason.text() == "Choose at least one question." and not exam.propose_button.isEnabled()
+    add_reviewed(bank, window, "hard-one", difficulty="hard")
+    cell = exam.cells["Arithmetic"]
+    counts(exam, 1, 1)
+    assert cell["avail"].text() == "1 easy · 1 hard reviewed" and cell["hard_over"].text() == ""
+    assert [exam.totals[k].text() for k in ("questions", "points", "minutes")] == ["2", "36", "7.5"]
+    assert exam.propose_button.isEnabled()
+    exam.propose()
+    host.drain()
+    assert exam.pick_summary.text() == "2 questions · 36 points · 7.5 min"
+    assert {r["chip"].text() for r in exam.rows.values()} == {"Easy · 12 pts", "Hard · 24 pts"}
+    assert all(r["changed"] is None for r in exam.rows.values())
+    assert set(exam.labels.values()) == {"Slide 1"}
+    assert str(exam.selection.seed) in exam.seed_label.text()
+
+
+def test_zero_counts_are_left_out_of_the_blueprint(phase):
+    _, _, _, window, _, _, _ = phase()
+    exam = window.exam_tab
+    window.save_topics(add_topic(window.topics, "Empty"))
+    exam.refresh()
+    assert "Empty" in exam.cells and list(exam.blueprint().counts) == ["Arithmetic"]
+
+
+def test_no_topics_shows_empty_state(phase):
+    _, _, _, window, _, _, _ = phase()
+    exam = window.exam_tab
+    window.save_topics(())
+    assert not exam.cells and not exam.propose_button.isEnabled()
+    assert "Questions tab" in exam.rows_box.itemAt(0).widget().text()
+
+
+def test_questions_without_topic_are_counted_not_offered(phase):
+    _, _, bank, window, _, _, _ = phase()
+    exam = window.exam_tab
+    assert exam.untopiced.isHidden()
+    add_reviewed(bank, window, "orphan", sources=())
+    assert not exam.untopiced.isHidden()
+    assert exam.untopiced.text() == "1 reviewed ELP question has no topic and can't be used."
+    assert exam.cells["Arithmetic"]["avail"].text() == "1 easy · 0 hard reviewed"
+    add_reviewed(bank, window, "orphan2", sources=())
+    assert exam.untopiced.text().startswith("2 reviewed ELP questions have no topic")
+
+
+def test_waiting_elp_drafts_are_shown(phase):
+    _, _, bank, window, _, _, _ = phase()
+    exam = window.exam_tab
+    bank.create(replace(window.current, id="draft", revision=1, status="draft"))
+    window.reload()
+    exam.refresh()
+    assert exam.cells["Arithmetic"]["draft"].text() == "1 ELP draft waiting for review"
+
+
+def test_skip_last_changes_availability_live(phase):
+    host, _, bank, window, _, _, _ = phase()
+    exam = window.exam_tab
+    Manifest(json.dumps({"schema_version": 1, "bank_id": bank.id,
+                         "items": [{"id": window.current.id}]}).encode()).write(bank.folder / "old.manifest.json")
+    cell = exam.cells["Arithmetic"]
+    assert cell["avail"].text().startswith("1 easy")
+    exam.avoid.setValue(1)
+    host.drain()
+    assert cell["avail"].text() == "0 easy · 0 hard reviewed" and cell["easy_over"].text() == "Only 0 available"
+    assert not exam.propose_button.isEnabled()
+    exam.avoid.setValue(0)
+    assert cell["avail"].text().startswith("1 easy") and cell["easy_over"].text() == ""
 
 
 def test_infeasible_blueprint_is_reported_without_relaxing(phase):
     host, _, _, window, _, _, _ = phase()
     exam = window.exam_tab
-    exam.counts.item(0, 1).setText("2")
-    exam.propose()
+    exam.propose(Blueprint({"Arithmetic": {"easy": 2}}))  # Bypasses the disabled button.
     host.drain()
-    assert not exam.selection.feasible and not exam.selection.items
-    assert not exam.approve_button.isEnabled()
-    assert all(p in exam.report.toPlainText() for p in exam.selection.problems)
-    assert "Blueprint exclusions" in exam.report.toPlainText()
+    assert exam.selection is None and exam.stack.currentIndex() == 0
+    assert "needs 2 easy questions; only 1 is eligible" in exam.reason.text()
 
 
-def test_source_changed_after_approval_stops_freeze(phase, monkeypatch):
-    host, deck, bank, window, ref, _, _ = phase()
-    view = propose_approve(host, window)
-    host.sources[ref] = SlideSource(text="Overwritten source")
-    deck.path.write_text("Reread this fresh text before freeze")
-    view.freeze()
+def test_change_counts_keeps_counts_and_new_pick_changes_seed(phase):
+    host, _, bank, window, _, _, _ = phase()
+    exam = propose(host, window)
+    seed, blueprint = exam.selection.seed, exam.selection.blueprint
+    exam.again_button.click()
     host.drain()
-    assert view.manifest is None and not list(bank.folder.glob("*.manifest.json"))
-    assert ref.id in view.summary.toPlainText() and window.current.id in view.summary.toPlainText()
-    assert host.last_deck_text == "Reread this fresh text before freeze"
+    assert exam.stack.currentIndex() == 1 and exam.selection.seed != seed
+    assert exam.selection.blueprint == blueprint
+    exam.back_button.click()
+    assert exam.stack.currentIndex() == 0
+    assert exam.cells["Arithmetic"]["easy"].value() == 1 and exam.counts["Arithmetic"] == {"easy": 1, "hard": 0}
+
+
+def test_topic_save_discards_the_proposal(phase):
+    host, _, _, window, _, _, _ = phase()
+    exam = propose(host, window)
+    assert window.save_topics(add_topic(window.topics, "Geometry"))
+    assert exam.selection is None and exam.stack.currentIndex() == 0
+    assert "Geometry" in exam.cells and exam.cells["Arithmetic"]["easy"].value() == 1
+
+
+def test_swap_is_disabled_without_alternatives(phase):
+    host, _, bank, window, _, _, _ = phase()
+    exam = propose(host, window)
+    assert not exam.rows[window.current.id]["swap"].isEnabled()
+    assert not exam.selection.alternatives(window.current.id)
+
+
+def test_changed_source_blocks_approval_without_a_way_around(phase, monkeypatch):
+    host, _, bank, window, ref, _, _ = phase()
     questions = []
-    monkeypatch.setattr(QMessageBox, "question", lambda *a: questions.append(a[2]) or QMessageBox.StandardButton.Yes)
-    view = propose_approve(host, window)
-    assert any("Source changed" in q and ref.id in q and window.current.id in q for q in questions)
-    view.freeze()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: questions.append(a) or QMessageBox.StandardButton.Yes)
+    bank.set_source_changed(window.current.id, True, expected_sources=window.current.sources)
+    window.reload()
+    exam = propose(host, window)
+    row = exam.rows[window.current.id]
+    assert exam.blocked.text() == ("1 picked question is linked to a changed slide. "
+                                   "Review or swap before freezing.")
+    assert row["changed"] is not None and not exam.approve_button.isEnabled()
+    opened = []
+    window.open_question = opened.append
+    row["review"].click()
+    assert opened == [window.current.id]
+    exam.approve()  # Even called directly, nothing is frozen.
     host.drain()
-    assert not list(bank.folder.glob("*.manifest.json"))
+    assert exam.stack.currentIndex() == 1 and not list(bank.folder.glob("*.manifest.json")) and not questions
+
+
+def test_fresh_check_finding_a_change_blocks_and_updates_rows(phase, monkeypatch):
+    host, deck, bank, window, ref, _, _ = phase()
+    questions = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: questions.append(a) or QMessageBox.StandardButton.Yes)
+    exam = propose(host, window)
+    assert exam.approve_button.isEnabled() and exam.blocked.isHidden()
+    host.sources[ref] = SlideSource(text="Overwritten source")
+    deck.path.write_text("Reread this fresh text before approval")
+    exam.approve_button.click()
+    host.drain()
+    assert host.last_deck_text == "Reread this fresh text before approval"
+    assert exam.stack.currentIndex() == 1 and not list(bank.folder.glob("*.manifest.json"))
+    assert exam.blocked.text().startswith("1 picked question is linked to a changed slide.")
+    assert exam.rows[window.current.id]["changed"] is not None and not exam.approve_button.isEnabled()
+    assert not questions and not window.busy
+
+
+def test_source_changed_during_freeze_is_blocked_too(phase):
+    host, deck, bank, window, ref, _, _ = phase()
+    exam = propose(host, window)
+    host.sources[ref] = SlideSource(text="Overwritten source")
+    exam.issue.freeze(exam.selection)
+    host.drain()
+    assert exam.issue.manifest is None and not list(bank.folder.glob("*.manifest.json"))
+    assert exam.stack.currentIndex() == 1 and exam.blocked.text().startswith("1 picked question is linked")
+    assert not exam.approve_button.isEnabled() and not window.busy
+
+
+def test_conflict_at_approval_stays_on_review(phase, monkeypatch):
+    host, _, bank, window, _, _, _ = phase()
+    exam = propose(host, window)
+    bank.set_status(window.current.id, window.current.revision, "retired")
+    errors = []
+    monkeypatch.setattr(window, "error", errors.append)
+    exam.approve_button.click()
+    host.drain()
+    assert errors and exam.stack.currentIndex() == 1 and exam.issue.manifest is None
+
+
+def test_returning_to_the_tab_refreshes_changed_flags(phase):
+    host, _, bank, window, _, _, _ = phase()
+    exam = propose(host, window)
+    bank.set_source_changed(window.current.id, True, expected_sources=window.current.sources)
+    exam.sync_flags()
+    host.drain()
+    assert exam.rows[window.current.id]["changed"] is not None and exam.selection.items[0].source_changed
+    assert not exam.approve_button.isEnabled()
 
 
 def test_edit_after_issue_leaves_manifest_and_documents_alone(phase):
@@ -212,6 +403,71 @@ def test_edit_after_issue_leaves_manifest_and_documents_alone(phase):
     assert view.manifest_path.read_bytes() == before
     assert (host.root / "exam.html").read_bytes() == exam_before
     assert Manifest.read(view.manifest_path).data()['items'][0]['assistant_note'] != "New note"
+
+
+def test_start_another_exam_returns_to_counts(phase):
+    host, _, _, window, _, _, _ = phase()
+    view = propose_approve(host, window)
+    view.another()
+    assert window.exam_tab.stack.currentIndex() == 0 and view.manifest is None
+    assert window.exam_tab.cells["Arithmetic"]["easy"].value() == 1
+
+
+@pytest.mark.parametrize("v1", [True, False])
+def test_opening_a_manifest_lands_on_the_frozen_step(phase, monkeypatch, v1):
+    host, _, bank, window, _, _, _ = phase()
+    path = bank.folder / "20260102T030405000000Z-abcd1234.manifest.json"
+    if v1:
+        options = [{"id": str(i), "text": f"O{i}", "correct": i == 0, "rationale": ""} for i in range(5)]
+        Manifest(json.dumps({"schema_version": 1, "bank_id": bank.id, "media_base64": {},
+                             "blueprint": {"counts": {"x": 1}, "difficulty_mix": {"easy": 1}, "seed": 5},
+                             "items": [{"id": "q", "revision": 1, "stem": "Stem", "difficulty": "easy",
+                                        "topic": "x", "media": [], "assistant_note": "", "options": options}],
+                             "scoring": {"rules": {"easy": {"points": 12, "minutes": 2.5},
+                                                   "hard": {"points": 24, "minutes": 5}}, "floor": 0,
+                                         "tables": {}}}).encode()).write(path)
+    else:
+        path = propose_approve(host, window).manifest_path
+    exam = window.exam_tab
+    exam.reset()
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: (str(path), ""))
+    exam.open_issued()
+    host.drain()
+    assert exam.stack.currentWidget() is exam.issue
+    assert exam.issue.manifest_path == path and exam.issue.corrections_button.isEnabled()
+    assert exam.issue.summary.text().startswith("1 question · 12 points · 2.5 min")
+    assert exam.issue.file_name.text() == path.name
+    if v1:
+        assert "issued 2026-01-0" in exam.issue.summary.text()
+
+
+def test_totals_without_rules_show_only_the_count():
+    from exam_forge.ui.issue import manifest_totals
+    assert manifest_totals({"items": [{"difficulty": "easy"}, {"difficulty": "hard"}]}) == "2 questions"
+    rules = {"scoring": {"rules": {"easy": {"points": 12, "minutes": 2.5}}}}
+    assert manifest_totals({"items": [{}], **rules}) == "1 question"
+
+
+def test_dark_palette_uses_the_dark_accent_and_red_values(phase):
+    host, _, bank, window, _, _, _ = phase()
+    exam = window.exam_tab
+    bank.set_source_changed(window.current.id, True, expected_sources=window.current.sources)
+    bank.create(replace(window.current, id="draft", revision=1, status="draft"))
+    window.reload()
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
+    exam.setPalette(palette)
+    assert red_color(exam) == "#fca5a5" and accent_color(exam) == "#c4b5fd" and accent_color(exam, True) == "#fbbf24"
+    exam.refresh()
+    counts(exam, 2, 0)
+    assert "#fca5a5" in exam.cells["Arithmetic"]["easy_over"].styleSheet()
+    assert "#fbbf24" in exam.cells["Arithmetic"]["draft"].styleSheet()
+    counts(exam, 1, 0)
+    exam.propose()
+    host.drain()
+    assert "#c4b5fd" in exam.blocked.styleSheet()
+    assert "#c4b5fd" in exam.rows[window.current.id]["changed"].styleSheet()
+    assert "#fbbf24" in exam.issue.key_title.styleSheet()
 
 
 def test_correction_is_recorded_in_separate_sheet(phase):
@@ -266,8 +522,7 @@ def test_failed_correction_save_reenables_fields_and_keeps_input(phase, monkeypa
 def test_corrupt_manifest_is_reported_and_valid_history_still_applies(phase, corrupt):
     host, _, bank, window, _, _, _ = phase()
     question = window.current
-    replacement = bank.create(replace(question, id="replacement", revision=1, status="draft"))
-    bank.set_status(replacement.id, 1, "reviewed")
+    replacement = add_reviewed(bank, window, "replacement")
     Manifest(json.dumps({"schema_version": 1, "bank_id": bank.id,
                          "items": [{"id": question.id}]}).encode()).write(bank.folder / "valid.manifest.json")
     path = bank.folder / "corrupt.manifest.json"
@@ -276,12 +531,15 @@ def test_corrupt_manifest_is_reported_and_valid_history_still_applies(phase, cor
     path.write_text(json.dumps(corrupt) if isinstance(corrupt, dict) else corrupt)
     exam = window.exam_tab
     exam.avoid.setValue(1)
+    host.drain()
+    assert path.name in exam.history_note.text() and "Could not read exam history" in exam.history_note.text()
+    assert exam.cells["Arithmetic"]["avail"].text() == "1 easy · 0 hard reviewed"
     exam.propose()
     host.drain()
     assert exam.selection and exam.selection.feasible
     assert [i.id for i in exam.selection.items] == [replacement.id]
     assert any(row.item.id == question.id for row in exam.selection.excluded)
-    assert path.name in exam.report.toPlainText() and "Could not read exam history" in exam.report.toPlainText()
+    assert path.name in window.notice.text()
 
 
 def test_zero_avoid_last_does_not_read_manifest_history(phase, monkeypatch):
@@ -294,7 +552,8 @@ def test_zero_avoid_last_does_not_read_manifest_history(phase, monkeypatch):
     monkeypatch.setattr(Manifest, "read", unexpected_read)
     exam = window.exam_tab
     assert exam.avoid.value() == 0
+    exam.refresh()
     exam.propose()
     host.drain()
     assert exam.selection and exam.selection.feasible
-    assert "corrupt.manifest.json" not in exam.report.toPlainText()
+    assert not exam.history_note.text()
