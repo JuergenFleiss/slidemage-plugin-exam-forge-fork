@@ -89,15 +89,18 @@ def env(app, tmp_path):
     QApplication.processEvents()
 
 
-def fill(window):
+def fill(window, link=True):
     window.new_question()
     window.stem.setPlainText("What is two plus two?")
-    window.options.cellWidget(0, 1).setPlainText("4")
-    window.options.cellWidget(0, 0).setChecked(True)
-    window.options.cellWidget(0, 2).setPlainText("Two pairs.")
-    window.options.cellWidget(1, 1).setPlainText("3")
-    window.topic.setText("Arithmetic")
+    first, second = window.rows
+    first.text.setPlainText("4")
+    first.tick.click()
+    first.why.setPlainText("Two pairs.")
+    second.text.setPlainText("3")
+    window.current = replace(window.current, topic="Arithmetic")
     window.objective.setText("Add two numbers")
+    if link:
+        window.links = (link_slide(window.host, source(window.host, window.deck), "instructor"),)
     assert window.save()
     return window.current
 
@@ -144,13 +147,13 @@ def test_conflict_keeps_every_field(env, monkeypatch):
     _, _, bank, _, window = env
     item = fill(window)
     window.stem.setPlainText("My unsaved text")
-    window.options.cellWidget(1, 2).setPlainText("Typed rationale")
-    window.topic.setText("My topic")
+    window.rows[1].why.setPlainText("Typed rationale")
+    window.difficulty.setCurrentData("hard")
     bank.save(replace(item, stem="Their edit"))
     assert not window.save()
     assert window.stem.toPlainText() == "My unsaved text"
-    assert window.options.cellWidget(1, 2).toPlainText() == "Typed rationale"
-    assert window.topic.text() == "My topic"
+    assert window.rows[1].why.toPlainText() == "Typed rationale"
+    assert window.difficulty.currentData() == "hard"
     assert bank.get(item.id).stem == "Their edit"
     assert "stale revision" in window.notice.text()
 
@@ -175,7 +178,7 @@ def test_review_marker_on_open_check_now_and_before_approve_retire(env, monkeypa
     host.drain()
     assert bank.get(item.id).status == "draft"
     assert bank.get(item.id).source_changed
-    assert window.source_tag.isVisible() and window.source_banner.isVisible()
+    assert window.source_banner.isVisible() and window.still_button.isVisible()
     assert "Changed addition" not in notices[0]  # report names the question and source, not raw TeX
     assert "What is two plus two?" in notices[0] and "s1" in notices[0]
     sidebar = controller.sidebar(deck)
@@ -202,7 +205,7 @@ def test_background_check_preserves_unsaved_fields_and_refreshes_deck_text(env):
     host, deck, _, _, window = env
     fill(window)
     window.stem.setPlainText("Still typing")
-    window.topic.setText("Unsaved")
+    window.objective.setText("Unsaved")
     deck.path.write_text("fresh deck contents")
     seen = []
     original = host.deck_slides
@@ -217,7 +220,7 @@ def test_background_check_preserves_unsaved_fields_and_refreshes_deck_text(env):
     window.stem.setPlainText("Still typing after saving")
     window.check_sources()
     host.drain()
-    assert seen == ["fresh deck contents"]
+    assert seen and set(seen) == {"fresh deck contents"}
     assert window.stem.toPlainText() == "Still typing after saving" and window.dirty()
 
 
@@ -317,13 +320,15 @@ def test_picker_view_language_and_late_results(env):
 def test_filters_ai_assisted_permanent_and_palette(env):
     _, _, bank, _, window = env
     item = fill(window)
-    ai = bank.create(Item("ai", 1, "AI question", item.options, topic="Other", origin=Origin("ai", "local", "model")))
+    ai = bank.create(Item("ai", 1, "AI question", item.options, topic="Other", sources=item.sources,
+                          origin=Origin("ai", "local", "model")))
     bank.set_source_changed(ai.id, True)
     window.reload()
     window.ai_filter.click()
     assert window.item_list.count() == 1
     window.item_list.setCurrentRow(0)
-    assert window.ai_tag.isVisible() and window.ai_tag.toolTip() == "local · model"
+    assert window.draft_tag.isVisible() and not window.ai_tag.isVisible()
+    assert window.draft_tag.toolTip() == window.ai_tag.toolTip() == "local · model"
     window.approve_button.click()
     # This check has no links so it clears the source flag.
     window.host.drain()

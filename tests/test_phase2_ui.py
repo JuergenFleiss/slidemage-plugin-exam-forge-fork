@@ -71,14 +71,12 @@ def phase(app, tmp_path, monkeypatch):
         window.new_question()
         window.stem.setPlainText("Two plus two")
         window.assistant_note.setPlainText("Shared stem with next item; keep option order; exclude together.")
-        for _ in range(3):
-            window.add_option()
-        for row in range(5):
-            window.options.cellWidget(row, 1).setPlainText(str(row + 1))
-        window.options.cellWidget(0, 0).setChecked(True)
-        window.topic.setText("Arithmetic")
-        window.difficulty.setText("easy")
-        window.use.setCurrentIndex(window.use.findData("elp"))
+        window.use.setCurrentData("elp")
+        for number, row in enumerate(window.rows, 1):
+            row.text.setPlainText(str(number))
+        window.rows[0].tick.click()
+        window.current = replace(window.current, topic="Arithmetic")
+        window.difficulty.setCurrentData("easy")
         from exam_forge.ui.source_picker import SourcePicker
         picker = SourcePicker(host, deck, window)
         host.drain()
