@@ -236,7 +236,10 @@ class QuestionsTab:
         return next((t for t in self.topics if t.id == topic_id), None)
 
     def unlinked(self):
-        return [item for item in self.items if not item.sources]
+        # A retired question on a slide that left the deck is flagged nowhere else, yet can be restored.
+        known = {ref.id for ref in self.slides} if self.slides is not None else None
+        return [item for item in self.items if not item.sources or (
+            known is not None and item.status == "retired" and not known & set(slide_ids(item)))]
 
     def view_slides(self):
         refs = self.slides or []
@@ -750,7 +753,7 @@ class QuestionsTab:
                     self.current = replace(self.current, source_changed=latest.source_changed)
                     self.baseline = replace(self.baseline, source_changed=latest.source_changed)
                     self.update_header(self.current)
-            text = f"Source check complete · {sum(i.source_changed for i in self.items)} changed."
+            text = f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}."
             self.notice.setText(f"{text} {self.elp_text}".strip())
             self.elp_text = ""
             if then:

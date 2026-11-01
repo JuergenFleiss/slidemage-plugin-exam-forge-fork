@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Source fingerprints and checks, without Qt.
 
-Call check_bank on bank open and on Check now. Approve and freeze use the same
+Call check_bank on bank open and on Check slides. Approve and freeze use the same
 call with item_ids and wait for done before proceeding. Inspect both the report's
 errors and each source's status: missing and error are distinct from
 changed content, and all conservatively set source_changed.

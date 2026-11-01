@@ -22,7 +22,7 @@ Source checks run in the background on open, on **Check slides**, and before sta
 
 **Review changes** (from the banner on a changed slide, or **Compare** in the editor) shows the old and new slide text side by side and one row for each affected question. **Still correct** keeps the question's status and records a new revision with the current slide as its baseline. **Edit** opens the question. **Update with AI** asks the AI for a revised version, which arrives as a draft; the question keeps its author origin, and the revision is permanently marked **AI-assisted**. For links made before slide text was stored, the dialog shows only the current text, with "Earlier text not stored". **AI-assisted** provenance stays in every revision; **AI draft** applies while a question remains a draft.
 
-**Export to Moodle** exports reviewed revision-quiz questions matching the current list filters. It excludes ELP questions, drafts and retired questions. Images are read from the bank and verified against their SHA-256 hashes. Question and answer text is plain text; inline mathematics uses `\( ... \)`. In Moodle, import using the Moodle XML format with its MathJax filter enabled. **Moodle import has yet to be verified**, including media, mathematics and grading.
+**Export to Moodle** exports every reviewed revision-quiz question. It excludes ELP questions, drafts and retired questions. Images are read from the bank and verified against their SHA-256 hashes. Question and answer text is plain text; inline mathematics uses `\( ... \)`. In Moodle, import using the Moodle XML format with its MathJax filter enabled. **Moodle import has yet to be verified**, including media, mathematics and grading.
 
 ## ELP exams
 

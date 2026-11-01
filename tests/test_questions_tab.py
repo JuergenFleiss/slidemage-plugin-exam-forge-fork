@@ -18,7 +18,7 @@ from slidemage.plugin_api import Focus, SlideRef, SlideSource
 from test_ui import app, env  # noqa: F401 - shared real-window fixtures
 
 from exam_forge.folder import open_chosen_folder
-from exam_forge.model import Item, Option, Origin
+from exam_forge.model import Item, Option, Origin, SourceLink
 from exam_forge.sources import link_slide
 from exam_forge.topics import TopicStore, add_topic, assign_slide, topic_color
 
@@ -641,3 +641,15 @@ def test_palette_change_rerenders_topic_dots_and_accents(lab):
     assert "#fbbf24" in amber.styleSheet()
     sheets = [w.styleSheet() for w in window.findChildren(QLabel)]
     assert not any("background" in s for s in sheets) and "background" not in window.styleSheet()
+
+
+def test_retired_question_whose_slide_left_the_deck_stays_reachable(env):
+    _, _, bank, _, window = env
+    item = bank.create(Item("gone", 1, stem="Old", sources=(SourceLink("removed-slide"),)))
+    bank.set_status(item.id, 1, "reviewed")
+    bank.set_status(item.id, 2, "retired")
+    window.reload()
+    window.slides = []
+    assert [i.id for i in window.unlinked()] == ["gone"]
+    window.slides = None
+    assert window.unlinked() == []
