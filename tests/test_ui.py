@@ -268,7 +268,7 @@ def test_window_survives_switch_decks_close_and_reuse(env, tmp_path):
     open_chosen_folder(host, other, folder)
     second = controller.open(other)
     host.drain()
-    assert second is not window and second.parent() is None and window.parent() is None
+    assert second is not window and second.shell.parent() is None and window.shell.parent() is None
     assert window.isVisible() and not window.isModal()
     assert window.current.id == item.id
     window.close()

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Stefan Palan, Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""A small fake for the Host services used by Exam Forge; no Qt or SlideMage UI."""
+"""A small fake for the Host services used by Exam Forge. Its widgets are the host's real kit, so tests see what users get."""
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,28 +145,57 @@ class FakeHost:
         from PySide6.QtWidgets import QPushButton
         return QPushButton(text)
 
-    def Chip(self, text, tone="neutral"):
-        from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+    def Chip(self, text, tone="neutral", *, icon=None, elide=False, pressable=False):
+        return _kit().Chip(text, tone, icon, pressable=pressable, elide=elide)
 
-        class Chip(QWidget):
-            """The host Chip's API: a widget with set_text and set_tone, not a QLabel."""
+    def caption(self, text, tone=""):
+        return _kit().caption(text, tone)
 
-            def __init__(self):
-                super().__init__()
-                self.tone = tone
-                self.label = QLabel(text, self)
-                QHBoxLayout(self).addWidget(self.label)
+    def Surface(self):
+        return _kit().Surface()
 
-            def text(self):
-                return self.label.text()
+    def IconLabel(self, icon, size):
+        return _kit().IconLabel(icon, size)
 
-            def set_text(self, value):
-                self.label.setText(value)
+    def Window(self, title):
+        return _kit().ToolWindow(title)
 
-            def set_tone(self, value):
-                self.tone = value
+    def Card(self, raised=False):
+        return _kit().Card(raised=raised)
 
-        return Chip()
+    def SegmentedControl(self, items, current=None):
+        return _kit().SegmentedControl(items, current=current, roving=True)
+
+    def Badge(self, text, tone="neutral"):
+        return _kit().Badge(text, tone)
+
+    def RowButton(self, title, sub="", *, icon=None, chip=("", ""), selectable=False):
+        return _kit().RowButton(icon, title, sub, chip=chip, selectable=selectable, elide_title=True)
+
+    def PlainList(self):
+        return _kit().PlainList()
+
+    def Label(self, text, role="body"):
+        return _kit().text_label(text, role)
+
+    def ModalSheet(self, title, parent=None):
+        return _kit().ModalSheet(title, parent)
+
+    def toast(self, parent, text):
+        self.toasts = getattr(self, "toasts", []) + [text]
+
+    def theme(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(dark=False, font_sans="Roboto")
+
+    def on_theme_changed(self, callback):
+        self.theme_listeners = getattr(self, "theme_listeners", []) + [callback]
+        return lambda: None
+
+
+def _kit():
+    from slidemage.ui.kit import widgets
+    return widgets
 
 
 class FakeSettings:

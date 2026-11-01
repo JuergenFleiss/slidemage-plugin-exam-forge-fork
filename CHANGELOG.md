@@ -79,3 +79,12 @@ v0.6.1 (2026-11-01, version fix): SlideMage 0.13.13 to 0.13.16 do not have the p
 
 NEW: Exam Forge now asks for SlideMage 0.13.17 or newer.
 - On older versions SlideMage now says a newer version is needed, instead of Exam Forge failing when a call is missing.
+
+v0.7.0 (2026-11-01, plugin UI kit restyle): The window, its lists and its dialogs are built from SlideMage's own widgets (requires SlideMage 0.13.18). The window is a Host.Window, so SlideMage closes it with itself and unsaved work can stop that.
+
+NEW: Exam Forge looks like SlideMage, in light and dark.
+- Cards, switches, list rows with count badges and SlideMage's type scale replace the plain window, and the dialogs are SlideMage sheets.
+- Used for and Difficulty now show which option is on.
+- Slide titles show without LaTeX markup.
+- The Exam Forge box in the sidebar has an Open Exam Forge button.
+- Short messages such as a saved draft appear for a moment at the bottom of the window.

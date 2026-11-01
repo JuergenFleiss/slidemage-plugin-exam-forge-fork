@@ -4,23 +4,21 @@
 from PySide6.QtCore import QLockFile
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
-    QLabel,
     QMessageBox,
     QPlainTextEdit,
-    QVBoxLayout,
 )
 
 from ..manifest import append_correction, read_corrections
+from .sheet import Sheet
 
 _SHEETS = {}
 
 
-def open_corrections(host, manifest, path):
+def open_corrections(host, manifest, path, parent=None):
     path = path.resolve()
     sheet = _SHEETS.get(path)
     if sheet is None:
-        sheet = CorrectionSheet(host, manifest, path)
+        sheet = CorrectionSheet(host, manifest, path, parent)
         _SHEETS[path] = sheet  # Retain the sheet, including while a worker is writing.
     sheet.show()
     sheet.raise_()
@@ -29,14 +27,14 @@ def open_corrections(host, manifest, path):
     return sheet
 
 
-class CorrectionSheet(QDialog):
-    def __init__(self, host, manifest, path):
-        super().__init__()
+class CorrectionSheet(Sheet):
+    def __init__(self, host, manifest, path, parent=None):
+        super().__init__(host, "Exam Forge · Corrections", parent)
+        self.sheet.setModal(False)
         self.host, self.path, self.busy = host, path, False
-        self.setWindowTitle("Exam Forge · Corrections")
-        self.resize(700, 600)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(str(path)))
+        self.resize(700, 640)
+        layout = self.body
+        layout.addWidget(host.Label(str(path), "mono"))
         self.trail = QPlainTextEdit()
         self.trail.setReadOnly(True)
         layout.addWidget(self.trail, 1)
@@ -46,10 +44,9 @@ class CorrectionSheet(QDialog):
         self.change, self.reason = QPlainTextEdit(), QPlainTextEdit()
         layout.addWidget(host.Field("Change", self.change))
         layout.addWidget(host.Field("Reason", self.reason))
-        self.append = host.Button("Record correction", "primary")
+        self.append = self.add_button("Record correction", kind="primary")
         self.append.clicked.connect(self.record)
-        layout.addWidget(self.append)
-        self.message = QLabel()
+        self.message = host.caption("")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
 
@@ -83,7 +80,7 @@ class CorrectionSheet(QDialog):
         if not change.strip() or not reason.strip():
             self.message.setText("Change and reason are required.")
             return
-        if QMessageBox.question(self, "Record correction", f"Append this correction for {item}?\n\n{change}\nReason: {reason}") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self.sheet, "Record correction", f"Append this correction for {item}?\n\n{change}\nReason: {reason}") != QMessageBox.StandardButton.Yes:
             return
 
         def work():
@@ -103,9 +100,7 @@ class CorrectionSheet(QDialog):
             self.message.setText("Correction recorded. The issued manifest is unchanged.")
         self.run(work, done)
 
-    def closeEvent(self, event):
+    def may_close(self):
         if self.busy:
             self.message.setText("Wait for the journal operation to finish.")
-            event.ignore()
-        else:
-            event.accept()
+        return not self.busy

@@ -653,3 +653,62 @@ def test_retired_question_whose_slide_left_the_deck_stays_reachable(env):
     assert [i.id for i in window.unlinked()] == ["gone"]
     window.slides = None
     assert window.unlinked() == []
+
+
+# -- the host's widgets ------------------------------------------------------------------------------------------
+
+def test_the_window_is_a_host_window_that_guards_unsaved_work(lab, monkeypatch):
+    host, _, _, _, window, *_ = lab
+    window.show()
+    assert window.shell.objectName() == "kitToolWindow" and window.shell.isVisible()
+    assert window.windowTitle() == window.shell.windowTitle()
+    window.write_button.click()
+    host.drain()
+    window.stem.setPlainText("Unsaved")
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Cancel)
+    assert not window.shell.close() and window.shell.isVisible()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Discard)
+    assert window.shell.close() and not window.shell.isVisible()
+
+
+def test_the_tab_switch_shows_its_page(lab):
+    window = lab[4]
+    window.tabs.switch.buttons()[1].click()
+    assert window.tabs.currentWidget() is window.exam_tab
+    window.tabs.setCurrentIndex(0)
+    assert window.tabs.switch.current() == "Questions"
+
+
+def test_the_selected_rows_are_marked_and_stay_marked_in_the_editor(lab):
+    window = lab[4]
+    pick(window.slide_list, "a")
+    def selected(listw):
+        return [listw.item(i).data(KEY) for i in range(listw.count())
+                if getattr(listw.itemWidget(listw.item(i)), "selected", lambda: False)()]
+    assert selected(window.topic_list) == ["all"] and selected(window.slide_list) == ["a"]
+    window.card_opened(window.cards.item(0))
+    assert selected(window.topic_list) == ["all"] and selected(window.slide_list) == ["a"]
+
+
+def test_slide_titles_show_without_markup(env):
+    host, deck, *_, window = env
+    path = deck.path.with_name("t.tex")
+    path.write_text("t")
+    ref = SlideRef(id="t", id_slug="t-EN-x", path=path, language="en", title=r"A \\\\ B", title_text="A B", position=1,
+                   language_read="en")
+    host.sources[ref] = SlideSource(text="t")
+    host.slides[(deck.path, "instructor", "en")] = [ref]
+    window.load_slides()
+    host.drain()
+    assert "A B" in row_text(window.slide_list, "t") and "\\" not in row_text(window.slide_list, "t")
+
+
+def test_the_sidebar_opens_exam_forge(lab):
+    host, deck, _, controller, window, *_ = lab
+    window.close()
+    sidebar = controller.sidebar(deck)
+    button = next(b for b in sidebar.findChildren(type(window.write_button)) if b.text() == "Open Exam Forge")
+    button.click()
+    host.drain()
+    assert window.isVisible()
+

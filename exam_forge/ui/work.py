@@ -13,6 +13,15 @@ class DeckSnapshot:
     groups: tuple[str, ...]
 
 
+# A scroll area on a card: the stylesheet would paint the page colour on its viewport.
+SCROLL_STYLE = "QScrollArea, QScrollArea > QWidget { background: transparent; border: none; }"
+
+
+def slide_title(ref):
+    """A slide's title to show: without LaTeX markup."""
+    return ref.title_text or ref.title or ref.id_slug
+
+
 def fresh_deck(deck):
     return DeckSnapshot(deck.name, deck.path, deck.path.read_text(encoding="utf-8"), deck.groups)
 

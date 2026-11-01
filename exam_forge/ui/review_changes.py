@@ -6,7 +6,7 @@ from html import escape
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
+    QHBoxLayout, QListWidget, QListWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
 from slidemage.plugin_api import AiChatError
 
@@ -15,6 +15,7 @@ from ..diffing import word_diff
 from ..drafting import DraftReplyError, build_update_request, parse_update_reply
 from ..sources import _resolve, rebaseline_links
 from .editor import accent, accent_color
+from .sheet import Sheet
 from .work import fresh_deck
 
 NO_SNAPSHOT = "Earlier text not stored"
@@ -32,7 +33,7 @@ class _Row(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         top = QHBoxLayout()
-        self.stem = QLabel(item.stem or "(no question text)")
+        self.stem = host.Label(item.stem or "(no question text)")
         self.stem.setWordWrap(True)
         top.addWidget(self.stem, 1)
         self.chips = QHBoxLayout()
@@ -43,7 +44,7 @@ class _Row(QWidget):
         for button in (self.keep, self.edit, self.update):
             top.addWidget(button)
         layout.addLayout(top)
-        self.note = QLabel()
+        self.note = host.caption("")
         self.note.setWordWrap(True)
         self.note.hide()
         layout.addWidget(self.note)
@@ -53,11 +54,11 @@ class _Row(QWidget):
         self.note.setVisible(bool(text))
 
 
-class ReviewChangesDialog(QDialog):
+class ReviewChangesDialog(Sheet):
     edit_requested = Signal(str)
 
     def __init__(self, window, items, slide_id=None):
-        super().__init__(window)
+        super().__init__(window.host, "Review changes", window)
         self.shell, self.slide_id = window, slide_id
         self.host = host = window.host
         self.items = [item for item in items if item.status != "retired"]
@@ -73,14 +74,13 @@ class ReviewChangesDialog(QDialog):
 
         self.finished.connect(stop)
         self.destroyed.connect(stop)
-        self.setWindowTitle("Review changes")
-        self.resize(820, 640)
-        layout = QVBoxLayout(self)
+        self.resize(860, 680)
+        layout = self.body
         panes = QHBoxLayout()
         self.old_pane, self.new_pane = QTextBrowser(), QTextBrowser()
         for caption, pane in (("Earlier slide text", self.old_pane), ("Current slide text", self.new_pane)):
             column = QVBoxLayout()
-            column.addWidget(QLabel(caption))
+            column.addWidget(host.caption(caption))
             column.addWidget(pane)
             panes.addLayout(column)
         layout.addLayout(panes, 3)
@@ -97,12 +97,10 @@ class ReviewChangesDialog(QDialog):
             self.list.setItemWidget(entry, row)
             self.rows.append(row)
         layout.addWidget(self.list, 2)
-        self.message = QLabel()
+        self.message = host.caption("")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
-        done = host.Button("Done", "primary")
-        done.clicked.connect(self.accept)
-        layout.addWidget(done)
+        self.add_button("Done", kind="primary", role="accept")
         self.list.currentRowChanged.connect(self.show_row)
         self.sync()
         if self.rows:

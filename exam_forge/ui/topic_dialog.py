@@ -3,49 +3,53 @@
 """Create, rename, fill and delete a topic. Nothing is written until Done or Delete topic."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QScrollArea,
-    QVBoxLayout,
-    QWidget,
 )
 
 from ..topics import add_topic, assign_slide, delete_topic, rename_topic, topic_color
 from .editor import is_dark
+from .sheet import Sheet
+from .work import SCROLL_STYLE, slide_title
 
 
-class TopicDialog(QDialog):
+class TopicDialog(Sheet):
     def __init__(self, shell, topic=None):
-        super().__init__(shell)
+        super().__init__(shell.host, "Edit topic" if topic else "New topic", shell)
         self.shell, self.topic = shell, topic
         self.topic_id, self.created = topic.id if topic else None, False
         self.initial = set(topic.slides) if topic else set()
         self.buttons, self.dots = {}, {}
         host = shell.host
-        self.setWindowTitle("Edit topic" if topic else "New topic")
-        self.resize(560, 520)
-        layout = QVBoxLayout(self)
+        self.resize(640, 560)
+        layout = self.body
         self.name = QLineEdit(topic.name if topic else "")
         layout.addWidget(host.Field("Name", self.name))
-        layout.addWidget(QLabel("Slides in this topic. A slide belongs to one topic; ticking one takes it over."))
+        layout.addWidget(host.caption("Slides in this topic. A slide belongs to one topic; ticking one takes it over."))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        grid_host = QWidget()
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(SCROLL_STYLE)
+        grid_host = host.Surface()
         self.grid = QGridLayout(grid_host)
         scroll.setWidget(grid_host)
         layout.addWidget(scroll, 1)
         slides = shell.slides or []
         if not slides:
-            self.grid.addWidget(QLabel("No slides found in this deck yet."), 0, 0)
+            self.grid.addWidget(host.caption("No slides found in this deck yet."), 0, 0)
         for index, ref in enumerate(slides):
             cell = QHBoxLayout()
             dot = QLabel()
             dot.setTextFormat(Qt.TextFormat.RichText)
-            button = host.Button(f"{ref.position} · {ref.title or ref.id_slug}", compact=True)
+            title = f"{ref.position} · {slide_title(ref)}"
+            button = host.Button(title, compact=True)
+            button.setText(button.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, 240))
+            button.setToolTip(title)
             button.setCheckable(True)
             button.setChecked(ref.id in self.initial)
             button.toggled.connect(self.recolor)
@@ -54,23 +58,16 @@ class TopicDialog(QDialog):
             self.grid.addLayout(cell, index // 2, index % 2)
             self.buttons[ref.id], self.dots[ref.id] = button, dot
         self.grid.setRowStretch(self.grid.rowCount(), 1)
-        self.problem = QLabel()
+        self.problem = host.caption("")
         self.problem.setWordWrap(True)
         self.problem.hide()
         layout.addWidget(self.problem)
-        row = QHBoxLayout()
-        self.delete_button = host.Button("Delete topic")
+        self.delete_button = self.add_button("Delete topic")
         self.delete_button.setVisible(topic is not None)
         self.delete_button.clicked.connect(self.delete)
-        row.addWidget(self.delete_button)
-        row.addStretch()
-        cancel = host.Button("Cancel")
-        cancel.clicked.connect(self.reject)
-        self.done_button = host.Button("Done", "primary")
+        self.add_button("Cancel", role="reject")
+        self.done_button = self.add_button("Done", kind="primary")
         self.done_button.clicked.connect(self.finish)
-        row.addWidget(cancel)
-        row.addWidget(self.done_button)
-        layout.addLayout(row)
         self.recolor()
 
     def own_color(self):
@@ -119,7 +116,7 @@ class TopicDialog(QDialog):
             self.accept()
 
     def delete(self):
-        answer = QMessageBox.question(self, "Delete topic", f"Delete the topic \"{self.topic.name}\"? Its slides will have "
+        answer = QMessageBox.question(self.sheet, "Delete topic", f"Delete the topic \"{self.topic.name}\"? Its slides will have "
                                       "no topic. Questions are kept.", QMessageBox.StandardButton.Yes |
                                       QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer == QMessageBox.StandardButton.Yes and self.shell.save_topics(delete_topic(self.shell.topics, self.topic.id)):

@@ -32,7 +32,7 @@ from ..elp import check_elp
 from ..model import Item, Option, check_phase1
 from ..sources import check_item, link_slide, rebaseline_links
 from ..topics import topic_color, topic_of
-from .work import fresh_deck
+from .work import SCROLL_STYLE, fresh_deck, slide_title
 
 REVISION_MAX, ELP_COUNT = 8, 5
 HINTS = {"revision": "Revision quiz: exactly one correct answer",
@@ -93,20 +93,19 @@ class Switch(QWidget):
         super().__init__()
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(4)
-        self.clearable, self.value, self.buttons = clearable, "" if clearable else options[0][1], {}
-        for label, value in options:
-            button = host.Button(label, compact=True)
-            button.setCheckable(True)
-            button.clicked.connect(partial(self.pick, value))
-            self.buttons[value] = button
-            row.addWidget(button)
+        self.clearable, self.value = clearable, "" if clearable else options[0][1]
+        self.control = host.SegmentedControl([(value, label) for label, value in options])
+        self.buttons = dict(zip((value for _, value in options), self.control.buttons()))
+        self.control.changed.connect(self.pick)
+        row.addWidget(self.control)
         row.addStretch()
         self.sync()
 
     def sync(self):
-        for value, button in self.buttons.items():
-            button.setChecked(value == self.value)
+        if self.value in self.buttons:
+            self.control.set_current(self.value)
+        else:
+            self.control.clear_current()
 
     def currentData(self):
         return self.value
@@ -119,9 +118,13 @@ class Switch(QWidget):
         if changed:
             self.changed.emit()
 
-    def pick(self, value, *_):
+    def pick(self, value):
         self.setCurrentData("" if self.clearable and value == self.value else value)
         self.sync()
+
+
+class Box(QWidget):
+    """A container that shows what is behind it: the stylesheet paints the page colour on a plain QWidget only."""
 
 
 class Fold(QWidget):
@@ -136,7 +139,7 @@ class Fold(QWidget):
         self.header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.header.setArrowType(Qt.ArrowType.RightArrow)
         self.header.toggled.connect(self.set_open)
-        self.content = QWidget()
+        self.content = Box()
         self.content.hide()
         self.box = QVBoxLayout(self.content)
         self.box.setContentsMargins(0, 0, 0, 0)
@@ -164,11 +167,12 @@ class AnswerRow(QWidget):
         self.tick = QPushButton()
         self.tick.setFlat(True)
         self.tick.setFixedSize(30, 30)
+        self.tick.setStyleSheet("padding: 0; min-width: 30px; max-width: 30px;")  # The glyph needs the whole button.
         self.tick.clicked.connect(lambda: self.ticked.emit(self))
         self.set_correct(option.correct)
         self.text = QPlainTextEdit(option.text)
         self.text.setTabChangesFocus(True)
-        self.text.setFixedHeight(52)
+        self.text.setFixedHeight(self.text.fontMetrics().lineSpacing() * 2 + 22)
         self.text.setPlaceholderText("Answer")
         self.remove = host.Button("✕", compact=True)
         self.remove.setToolTip("Remove answer")
@@ -178,7 +182,8 @@ class AnswerRow(QWidget):
         column.addLayout(top)
         self.why = QPlainTextEdit(option.rationale)
         self.why.setTabChangesFocus(True)
-        self.why.setFixedHeight(36)
+        self.why.setFixedHeight(self.why.fontMetrics().lineSpacing() + 24)
+        self.why.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.why.setPlaceholderText("Why it is right or wrong · only in the private key")
         low = QHBoxLayout()
         low.setContentsMargins(36, 0, 0, 0)
@@ -208,12 +213,18 @@ class ItemEditor:
         self.link_grid_buttons = []
         self.editor = host.Page()
         self.editor.body.setContentsMargins(0, 0, 0, 0)
-        self.editor.body.setSpacing(0)
         split.addWidget(self.editor)
+        card = host.Card()
+        self.editor.body.addWidget(card)
+        outer = card.layout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.editor.body.addWidget(scroll, 1)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(SCROLL_STYLE)
+        outer.addWidget(scroll, 1)
         content = host.Page()
         scroll.setWidget(content)
         body = content.body
@@ -233,14 +244,14 @@ class ItemEditor:
             tags.addWidget(chip)
         tags.addStretch()
         body.addLayout(tags)
-        self.source_banner = QLabel("A linked slide changed after this question was written.")
+        self.source_banner = host.Label("A linked slide changed after this question was written.")
         self.source_banner.setWordWrap(True)
         accent(self.source_banner)
         self.compare_button = host.Button("Compare", compact=True)
         self.compare_button.clicked.connect(lambda: self.review_changes(self.current))
         self.still_button = host.Button("Still correct", compact=True)
         self.still_button.clicked.connect(self.still_correct)
-        self.source_bar = QWidget()
+        self.source_bar = Box()
         bar = QHBoxLayout(self.source_bar)
         bar.setContentsMargins(0, 0, 0, 0)
         bar.addWidget(self.source_banner, 1)
@@ -252,8 +263,8 @@ class ItemEditor:
         self.stem.setMaximumHeight(135)
         body.addWidget(host.Field("Question", self.stem))
         head = QHBoxLayout()
-        head.addWidget(QLabel("Answers"))
-        self.hint = QLabel()
+        head.addWidget(host.Label("Answers", "heading"))
+        self.hint = host.caption("")
         head.addStretch()
         head.addWidget(self.hint)
         body.addLayout(head)
@@ -271,9 +282,9 @@ class ItemEditor:
         self.objective = QLineEdit()
         body.addWidget(host.Field("Learning objective", self.objective))
         head = QHBoxLayout()
-        head.addWidget(QLabel("Linked slides"))
+        head.addWidget(host.Label("Linked slides", "heading"))
         head.addStretch()
-        self.topic_label = QLabel()
+        self.topic_label = host.caption("")
         self.topic_label.setTextFormat(Qt.TextFormat.RichText)
         head.addWidget(self.topic_label)
         body.addLayout(head)
@@ -282,7 +293,7 @@ class ItemEditor:
         self.link_button = host.Button("+ Link another slide", compact=True)
         self.link_button.clicked.connect(self.toggle_link_grid)
         body.addWidget(self.link_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self.link_grid = QWidget()
+        self.link_grid = Box()
         self.link_grid_layout = QGridLayout(self.link_grid)
         self.link_grid_layout.setContentsMargins(0, 0, 0, 0)
         self.link_grid.hide()
@@ -291,7 +302,7 @@ class ItemEditor:
         self.assistant_note = QPlainTextEdit()
         self.assistant_note.setMaximumHeight(85)
         self.assistant_note.setPlaceholderText(TA_WARNING)
-        warning = QLabel(TA_WARNING)
+        warning = host.caption(TA_WARNING)
         warning.setWordWrap(True)
         self.note_fold.box.addWidget(warning)
         self.note_fold.box.addWidget(self.assistant_note)
@@ -310,12 +321,9 @@ class ItemEditor:
         self.media_fold.box.addLayout(row)
         body.addWidget(self.media_fold)
         body.addStretch()
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        self.editor.body.addWidget(line)
         footer = QHBoxLayout()
         footer.setContentsMargins(14, 8, 14, 8)
-        self.status_line = QLabel()
+        self.status_line = host.Label("", "secondary")
         self.status_line.setWordWrap(True)
         footer.addWidget(self.status_line, 1)
         self.retire_button = host.Button("Retire")
@@ -328,7 +336,7 @@ class ItemEditor:
         self.approve_button.clicked.connect(lambda: self.change_status("reviewed"))
         for button in (self.retire_button, self.restore_button, self.save_button, self.approve_button):
             footer.addWidget(button)
-        self.editor.body.addLayout(footer)
+        outer.addLayout(footer)
         for signal in (self.stem.textChanged, self.objective.textChanged, self.assistant_note.textChanged,
                        self.difficulty.changed):
             signal.connect(self.touch)
@@ -360,6 +368,9 @@ class ItemEditor:
             return self.save()
         return answer == QMessageBox.StandardButton.Discard
 
+    def toast(self, text):
+        """Shell hook: tell the user something went well."""
+
     def leave_editor(self):
         """Shell hook: the back link was pressed and may_leave agreed."""
 
@@ -390,7 +401,8 @@ class ItemEditor:
         self.note_fold.set_open(bool(item.assistant_note))
         self.media_fold.set_open(bool(item.media))
         for row in self.rows:
-            row.setParent(None)
+            self.answers.removeWidget(row)
+            row.hide()
             row.deleteLater()
         self.rows = []
         for option in item.options:
@@ -500,7 +512,8 @@ class ItemEditor:
 
     def remove_option(self, row):
         self.rows.remove(row)
-        row.setParent(None)
+        self.answers.removeWidget(row)
+        row.hide()
         row.deleteLater()
         self.touch()
 
@@ -550,7 +563,7 @@ class ItemEditor:
             return False
         self.populate(saved)
         self.reload()
-        self.notice.setText(f"Saved revision {saved.revision} as Draft.")
+        self.toast(f"Saved revision {saved.revision} as Draft.")
         return True
 
     def change_status(self, target):
@@ -615,7 +628,7 @@ class ItemEditor:
         def done(updated):
             self.populate(updated)
             self.reload()
-            self.notice.setText("Kept · matches the current slide.")
+            self.toast("Kept · matches the current slide.")
         self.work(work, done)
 
     # -- linked slides -------------------------------------------------------------------------------------
@@ -627,10 +640,10 @@ class ItemEditor:
     def draw_links(self):
         while self.link_box.count():
             widget = self.link_box.takeAt(0).widget()
-            widget.setParent(None)
+            widget.hide()
             widget.deleteLater()
         for index, link in enumerate(self.links):
-            row = QWidget()
+            row = Box()
             line = QHBoxLayout(row)
             line.setContentsMargins(0, 0, 0, 0)
             name = self.host.Button(self.slide_label(link), compact=True)
@@ -679,7 +692,7 @@ class ItemEditor:
                 refs = [r for r in decks[context] if r.id == link.slide_id]
                 refs = [r for r in refs if (r.version or "") == link.version] or refs
                 if refs:
-                    labels[link.slide_id] = (refs[0].position, refs[0].title or refs[0].id_slug)
+                    labels[link.slide_id] = (refs[0].position, slide_title(refs[0]))
             position = None
             if wanted:
                 first = next((c.source for c in check_item(host, snapshot, item).sources if c.status != "unchanged"), None)
@@ -727,7 +740,7 @@ class ItemEditor:
         self.link_grid_buttons = []
         while self.link_grid_layout.count():
             widget = self.link_grid_layout.takeAt(0).widget()
-            widget.setParent(None)
+            widget.hide()
             widget.deleteLater()
 
     def toggle_link_grid(self):
@@ -744,13 +757,13 @@ class ItemEditor:
             self.close_link_grid()
             linked = {s.slide_id for s in self.links}
             for index, ref in enumerate(refs):
-                button = host.Button(f"{ref.position} · {ref.title or ref.id_slug}", compact=True)
+                button = host.Button(f"{ref.position} · {slide_title(ref)}", compact=True)
                 button.setEnabled(ref.id not in linked)
                 button.clicked.connect(partial(self.link_slide_ref, ref, view))
                 self.link_grid_buttons.append(button)
                 self.link_grid_layout.addWidget(button, index // 2, index % 2)
             if not refs:
-                self.link_grid_layout.addWidget(QLabel("No slides found for this view and language."), 0, 0)
+                self.link_grid_layout.addWidget(host.caption("No slides found for this view and language."), 0, 0)
             self.link_grid.show()
         self.work(work, done)
 
@@ -761,7 +774,7 @@ class ItemEditor:
             self.close_link_grid()
             if any(s.slide_id == link.slide_id for s in self.links):
                 return
-            self.labels[ref.id] = (ref.position, ref.title or ref.id_slug)
+            self.labels[ref.id] = (ref.position, slide_title(ref))
             self.last_link_context = (view, link.language)
             self.links += (link,)
             self.render_links()

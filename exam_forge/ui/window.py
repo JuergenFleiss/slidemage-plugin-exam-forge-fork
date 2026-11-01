@@ -4,8 +4,8 @@
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
-    QTabWidget,
+    QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -16,9 +16,33 @@ from .exam_tab import ExamTab
 from .questions_tab import QuestionsTab
 
 
+class Tabs(QStackedWidget):
+    """Pages behind the host's segmented switch."""
+
+    def __init__(self, host, pages):
+        super().__init__()
+        self.names = [name for name, _ in pages]
+        for _, page in pages:
+            self.addWidget(page)
+        self.switch = host.SegmentedControl([(name, name) for name in self.names])
+        self.switch.changed.connect(lambda name: super(Tabs, self).setCurrentIndex(self.names.index(name)))
+
+    def setCurrentIndex(self, index):
+        super().setCurrentIndex(index)
+        self.switch.set_current(self.names[index])
+
+    def setCurrentWidget(self, page):
+        self.setCurrentIndex(self.indexOf(page))
+
+    def tabText(self, index):
+        return self.names[index]
+
+
 class BankWindow(QuestionsTab, ItemEditor, QWidget):
+    """The content of a host window, which the host closes with SlideMage; show and close go to that window."""
+
     def __init__(self, host, deck, bank, changed):
-        super().__init__(None, Qt.WindowType.Window)
+        super().__init__()
         self.host, self.deck, self.bank, self.changed = host, deck, bank, changed
         self.current = self.baseline = None
         self.new_item = False
@@ -27,31 +51,39 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.links = self.attachments = ()
         self.busy = False
         self.idle_callbacks = []
-        self.setWindowTitle(f"Exam Forge · {deck.name}")
-        self.resize(1120, 790)
+        self.shell = host.Window(f"Exam Forge · {deck.name}")
+        self.shell.resize(1180, 800)
+        self.shell.body.setContentsMargins(0, 0, 0, 0)
+        self.shell.body.addWidget(self)
+        self.shell.installEventFilter(self)
         layout = QVBoxLayout(self)
-        top = QHBoxLayout()
-        top.addStretch()
+        layout.setContentsMargins(14, 12, 14, 8)
+        layout.setSpacing(8)
+        self.notice = host.caption("")
+        self.notice.setWordWrap(True)
         self.check_button = host.Button("Check slides")
         self.check_button.clicked.connect(self.check_sources)
-        top.addWidget(self.check_button)
         self.export_button = host.Button("Export to Moodle")
         self.export_button.clicked.connect(self.export)
+        questions = self.build_questions_tab()
+        self.exam_tab = ExamTab(self)
+        self.tabs = Tabs(host, (("Questions", questions), ("Exam", self.exam_tab)))
+        top = QHBoxLayout()
+        top.addWidget(self.tabs.switch)
+        top.addStretch()
+        top.addWidget(self.check_button)
         top.addWidget(self.export_button)
         layout.addLayout(top)
-        self.notice = QLabel()
-        self.notice.setWordWrap(True)
         layout.addWidget(self.notice)
-        self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
-        self.tabs.addTab(self.build_questions_tab(), "Questions")
-        self.exam_tab = ExamTab(self)
-        self.tabs.addTab(self.exam_tab, "Exam")
         foot = QHBoxLayout()
-        self.folder_label = QLabel(str(bank.folder))
+        self.folder_label = host.caption(str(bank.folder))
+        self.folder_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.checked_label = QLabel()
-        foot.addWidget(QLabel("🔒"))
+        self.folder_label.setWordWrap(False)
+        self.checked_label = host.caption("")
+        self.checked_label.setWordWrap(False)
+        foot.addWidget(host.IconLabel("lock", 14))
         foot.addWidget(self.folder_label, 1)
         foot.addWidget(self.checked_label)
         layout.addLayout(foot)
@@ -59,6 +91,38 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.reload()
         self.load_slides()
         self.check_sources()
+        host.on_theme_changed(lambda _tokens: self.retheme())
+
+    # The host window is what opens and closes.
+
+    def show(self):
+        self.shell.show()
+        self.topic_list.setFocus()  # Not the switch: its focus ring is for the keyboard.
+
+    def close(self):
+        return self.shell.close()
+
+    def raise_(self):
+        self.shell.raise_()
+
+    def activateWindow(self):
+        self.shell.activateWindow()
+
+    def resize(self, *size):
+        self.shell.resize(*size)
+
+    def windowTitle(self):
+        return self.shell.windowTitle()
+
+    def eventFilter(self, obj, event):
+        if obj is self.shell and event.type() == QEvent.Type.Close and not self.may_leave():
+            event.ignore()
+            return True
+        return super().eventFilter(obj, event)
+
+    def toast(self, text):
+        self.notice.setText(text)
+        self.host.toast(self.shell, text)
 
     def switch_bank(self, bank):
         # Replace the window's bank only when there is no worker using it.
@@ -143,16 +207,14 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
                 done(result)
         self.host.run_in_background(work, completed)
 
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange and hasattr(self, "topic_list"):
+    def retheme(self):
+        if hasattr(self, "topic_list"):
             self.tint(self.changed_label)
             self.tint(self.draft_button, True)
             self.restyle_editor()
             self.render()
 
-    def closeEvent(self, event):
-        if self.may_leave():
-            event.accept()
-        else:
-            event.ignore()
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange:
+            self.retheme()

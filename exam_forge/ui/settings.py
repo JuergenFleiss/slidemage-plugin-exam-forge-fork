@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exam Forge settings, built when the host opens Settings."""
-from PySide6.QtWidgets import QCheckBox, QLabel, QPlainTextEdit
+from PySide6.QtWidgets import QCheckBox, QPlainTextEdit
 
 from ..ai_support import ai_service
 from ..drafting import DEFAULT_GUIDANCE
@@ -11,7 +11,7 @@ def build_settings(host, on_change=lambda: None):
     page = host.Page()
     checkbox = QCheckBox("Enable AI support")
     checkbox.setChecked(bool(host.settings().get("ai_support", False)))
-    notice = QLabel()
+    notice = host.caption("")
     notice.setWordWrap(True)
     page.body.addWidget(checkbox)
     page.body.addWidget(notice)

@@ -6,7 +6,7 @@ from decimal import Decimal
 from secrets import randbits
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QFont, QFontDatabase, QPalette
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -32,7 +32,7 @@ from ..manifest import Manifest
 from ..topics import topic_color, topic_name
 from .editor import accent_color
 from .issue import IssueView
-from .work import fresh_deck
+from .work import SCROLL_STYLE, fresh_deck
 
 STEPS = ("Counts", "Review & swap", "Freeze & save")
 _DIFFICULTIES = ("easy", "hard")
@@ -41,13 +41,6 @@ _DIFFICULTIES = ("easy", "hard")
 def red_color(widget):
     dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
     return "#fca5a5" if dark else "#a8231a"
-
-
-def muted(text=""):
-    label = QLabel(text)
-    label.setWordWrap(True)
-    label.setEnabled(False)
-    return label
 
 
 def clear(layout):
@@ -111,7 +104,7 @@ class ExamTab(QWidget):
         self.avail, self.history, self.token = {}, None, 0
         layout = QVBoxLayout(self)
         self.steps = QHBoxLayout()
-        self.step_labels = [QLabel() for _ in STEPS]
+        self.step_labels = [self.host.Label("", "secondary") for _ in STEPS]
         for label in self.step_labels:
             self.steps.addWidget(label)
         self.steps.addStretch()
@@ -124,8 +117,11 @@ class ExamTab(QWidget):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            scroll.setStyleSheet(SCROLL_STYLE)
             scroll.setWidget(page)
-            self.stack.addWidget(scroll)
+            card = self.host.Card()
+            card.layout().addWidget(scroll)
+            self.stack.addWidget(card)
         self.stack.addWidget(self.issue)
         self.build_setup(self.setup.body)
         self.build_review(self.review.body)
@@ -137,6 +133,11 @@ class ExamTab(QWidget):
         color = red_color(self) if kind == "red" else accent_color(self, kind == "amber")
         widget.setStyleSheet(f"color: {color};")
 
+    def muted(self, text=""):
+        label = self.host.caption(text)
+        label.setWordWrap(True)
+        return label
+
     def page(self):
         page = self.host.Page()
         page.body.setContentsMargins(4, 8, 4, 8)
@@ -147,14 +148,10 @@ class ExamTab(QWidget):
     def build_setup(self, body):
         head = QHBoxLayout()
         title = QVBoxLayout()
-        heading = QLabel("New ELP exam")
-        font = heading.font()
-        font.setBold(True)
-        font.setPointSize(font.pointSize() + 4)
-        heading.setFont(font)
+        heading = self.host.Label("New ELP exam", "title")
         title.addWidget(heading)
         r = self.rules
-        title.addWidget(muted(f"Picks only reviewed ELP questions. Easy = {r.easy.points} points, "
+        title.addWidget(self.muted(f"Picks only reviewed ELP questions. Easy = {r.easy.points} points, "
                               f"{number(r.easy.minutes)} min · Hard = {r.hard.points} points, "
                               f"{number(r.hard.minutes)} min."))
         head.addLayout(title, 1)
@@ -165,32 +162,28 @@ class ExamTab(QWidget):
         self.rows_box = QVBoxLayout()
         body.addLayout(self.rows_box)
         avoid = QHBoxLayout()
-        avoid.addWidget(QLabel("Skip questions used in the last"))
+        avoid.addWidget(self.host.Label("Skip questions used in the last"))
         self.avoid = QSpinBox()
         self.avoid.setRange(0, 1000)
         self.avoid.valueChanged.connect(self.avoid_changed)
         avoid.addWidget(self.avoid)
-        self.avoid_unit = QLabel("exams")
+        self.avoid_unit = self.host.Label("exams")
         avoid.addWidget(self.avoid_unit)
         avoid.addStretch()
         body.addLayout(avoid)
         self.history_note = QLabel()
         self.history_note.setWordWrap(True)
         body.addWidget(self.history_note)
-        self.untopiced = muted()
+        self.untopiced = self.muted()
         body.addWidget(self.untopiced)
         grid = QGridLayout()
         self.totals = {}
         for column, (key, caption) in enumerate((("questions", "questions"), ("points", "points"),
                                                  ("minutes", "minutes"))):
-            value = QLabel("0")
-            font = value.font()
-            font.setBold(True)
-            font.setPointSize(font.pointSize() + 8)
-            value.setFont(font)
+            value = self.host.Label("0", "title")
             self.totals[key] = value
             grid.addWidget(value, 0, column)
-            grid.addWidget(muted(caption), 1, column)
+            grid.addWidget(self.muted(caption), 1, column)
         body.addLayout(grid)
         self.reason = QLabel()
         self.reason.setWordWrap(True)
@@ -198,7 +191,7 @@ class ExamTab(QWidget):
         self.propose_button = self.host.Button("Propose exam", "primary")
         self.propose_button.clicked.connect(lambda: self.propose())
         body.addWidget(self.propose_button)
-        body.addWidget(muted("A random pick that matches these counts exactly. "
+        body.addWidget(self.muted("A random pick that matches these counts exactly. "
                              "You can swap single questions in the next step."))
         body.addStretch()
 
@@ -208,13 +201,13 @@ class ExamTab(QWidget):
         clear(self.rows_box)
         self.cells = {}
         if not topics:
-            self.rows_box.addWidget(muted("No topics yet. Create topics and link questions to "
+            self.rows_box.addWidget(self.muted("No topics yet. Create topics and link questions to "
                                           "slides in the Questions tab."))
         else:
             grid = QGridLayout()
             grid.setColumnStretch(0, 1)
             for column, text in enumerate(("Topic", "Easy", "Hard")):
-                grid.addWidget(muted(text), 0, column)
+                grid.addWidget(self.muted(text), 0, column)
             dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
             for row, topic in enumerate(topics, 1):
                 cell = self.cells[topic.name] = {}
@@ -223,9 +216,9 @@ class ExamTab(QWidget):
                 dot = QLabel("●")
                 dot.setStyleSheet(f"color: {topic_color(topic.color, dark)};")
                 name.addWidget(dot)
-                name.addWidget(QLabel(topic.name), 1)
+                name.addWidget(self.host.Label(topic.name), 1)
                 info.addLayout(name)
-                cell["avail"], cell["draft"] = muted(), QLabel()
+                cell["avail"], cell["draft"] = self.muted(), QLabel()
                 cell["draft"].setWordWrap(True)
                 self.tint(cell["draft"], "amber")
                 info.addWidget(cell["avail"])
@@ -412,14 +405,9 @@ class ExamTab(QWidget):
 
     def build_review(self, body):
         head = QHBoxLayout()
-        self.pick_summary = QLabel()
-        font = self.pick_summary.font()
-        font.setBold(True)
-        self.pick_summary.setFont(font)
+        self.pick_summary = self.host.Label("", "heading")
         head.addWidget(self.pick_summary)
-        self.seed_label = QLabel()
-        self.seed_label.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-        self.seed_label.setEnabled(False)
+        self.seed_label = self.host.Label("", "mono")
         head.addWidget(self.seed_label)
         head.addStretch()
         self.back_button = self.host.Button("Change counts", "ghost")
@@ -474,12 +462,9 @@ class ExamTab(QWidget):
                 dot = QLabel("●")
                 dot.setStyleSheet(f"color: {topic_color(colors[name], dark)};")
                 head.addWidget(dot)
-            title = QLabel(name)
-            font = title.font()
-            font.setBold(True)
-            title.setFont(font)
+            title = self.host.Label(name, "heading")
             head.addWidget(title)
-            head.addWidget(muted(plural(len(by_topic[name]), "question")))
+            head.addWidget(self.muted(plural(len(by_topic[name]), "question")))
             head.addStretch()
             self.groups.addLayout(head)
             for item in by_topic[name]:
@@ -488,19 +473,17 @@ class ExamTab(QWidget):
 
     def row(self, number_, item):
         line = QHBoxLayout()
-        index = QLabel(str(number_))
-        index.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-        index.setEnabled(False)
+        index = self.host.Label(str(number_), "mono")
         line.addWidget(index, 0, Qt.AlignmentFlag.AlignTop)
         text = QVBoxLayout()
-        stem = QLabel(item.stem)
+        stem = self.host.Label(item.stem)
         stem.setWordWrap(True)
         text.addWidget(stem)
         meta = QHBoxLayout()
         rule = getattr(self.rules, item.difficulty)
         chip = self.host.Chip(f"{item.difficulty.capitalize()} · {rule.points} pts")
         meta.addWidget(chip)
-        meta.addWidget(muted(self.labels.get(item.id) or
+        meta.addWidget(self.muted(self.labels.get(item.id) or
                              (f"Slide {item.sources[0].slide_id}" if item.sources else "No slide")))
         row = self.rows[item.id] = {"stem": stem, "chip": chip, "changed": None, "review": None}
         if item.source_changed:

@@ -6,12 +6,9 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
     QHBoxLayout,
-    QLabel,
     QMessageBox,
     QVBoxLayout,
     QWidget,
@@ -54,18 +51,13 @@ class IssueView(QWidget):
         self.manifest = self.manifest_path = self.journal_path = None
         self.saved = {}
         layout = QVBoxLayout(self)
-        self.title = QLabel("Exam frozen")
-        font = self.title.font()
-        font.setBold(True)
-        font.setPointSize(font.pointSize() + 4)
-        self.title.setFont(font)
+        self.title = self.host.Label("Exam frozen", "title")
         layout.addWidget(self.title)
-        self.summary = QLabel()
+        self.summary = self.host.Label("", "secondary")
         layout.addWidget(self.summary)
-        self.file_name = QLabel()
-        self.file_name.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.file_name = self.host.Label("", "mono")
         layout.addWidget(self.file_name)
-        note = QLabel("Saved in your private bank folder. Later edits to questions do not change this exam.")
+        note = self.host.caption("Saved in your private bank folder. Later edits to questions do not change this exam.")
         note.setWordWrap(True)
         layout.addWidget(note)
         cards = QHBoxLayout()
@@ -73,10 +65,10 @@ class IssueView(QWidget):
         self.exam_button.clicked.connect(lambda: self.documents(0))
         self.key_button = self.host.Button("Save key HTML…")
         self.key_button.clicked.connect(lambda: self.documents(1))
-        self.key_title = QLabel("🔒 Private key")
-        self.key_text = QLabel("Answers, rationales and the scoring sheet. Keep this file private.")
-        cards.addWidget(self.card(QLabel("Exam copy"), QLabel("Questions and answer options for "
-                                                              "students. No answers."), self.exam_button))
+        self.key_title = self.host.Label("🔒 Private key", "heading")
+        self.key_text = self.host.Label("Answers, rationales and the scoring sheet. Keep this file private.")
+        cards.addWidget(self.card(self.host.Label("Exam copy", "heading"), self.host.Label(
+            "Questions and answer options for students. No answers."), self.exam_button))
         cards.addWidget(self.card(self.key_title, self.key_text, self.key_button))
         layout.addLayout(cards)
         row = QHBoxLayout()
@@ -93,12 +85,8 @@ class IssueView(QWidget):
         self.reset()
 
     def card(self, title, text, button):
-        frame = QFrame()
-        frame.setFrameShape(QFrame.Shape.StyledPanel)
-        box = QVBoxLayout(frame)
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
+        frame = self.host.Card()
+        box = frame.layout()
         text.setWordWrap(True)
         box.addWidget(title)
         box.addWidget(text)
@@ -201,9 +189,9 @@ class IssueView(QWidget):
         def done(_):
             if self.manifest is manifest:
                 self.saved[which] = path
-            self.window.notice.setText(f"Saved {'private key' if which else 'exam'}: {path}")
+            self.window.toast(f"Saved {'private key' if which else 'exam'}: {path}")
         self.window.work(work, done)
 
     def corrections(self):
         if self.manifest is not None:
-            self.correction_sheet = open_corrections(self.host, self.manifest, self.journal_path)
+            self.correction_sheet = open_corrections(self.host, self.manifest, self.journal_path, self.window)

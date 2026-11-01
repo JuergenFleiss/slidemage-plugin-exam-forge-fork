@@ -3,8 +3,8 @@
 """Slide chooser and one cancellable host AI request."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPlainTextEdit, QSpinBox, QVBoxLayout,
+    QCheckBox, QComboBox, QHBoxLayout, QListWidget,
+    QListWidgetItem, QPlainTextEdit, QSpinBox,
 )
 from slidemage.plugin_api import AiChatError
 
@@ -12,7 +12,8 @@ from ..ai_support import ai_service
 from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
 from ..model import SourceLink
 from ..sources import fingerprint
-from .work import fresh_deck
+from .sheet import Sheet
+from .work import fresh_deck, slide_title
 
 VIEWS = (("Instructor view", "instructor"), ("During course", "during-course"), ("After course", "after-course"))
 
@@ -25,9 +26,9 @@ def plural(n, word):
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
-class DraftDialog(QDialog):
+class DraftDialog(Sheet):
     def __init__(self, host, deck, bank, parent, *, topics=(), topic_id=None, preselect=None):
-        super().__init__(parent)
+        super().__init__(host, "Draft with AI", parent)
         self.host, self.deck = host, deck
         self.items = ()
         self.refs = []
@@ -47,14 +48,13 @@ class DraftDialog(QDialog):
 
         self.finished.connect(stop)
         self.destroyed.connect(stop)
-        self.setWindowTitle("Draft with AI")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(720, 640)
-        layout = QVBoxLayout(self)
+        self.resize(720, 660)
+        layout = self.body
         self.controls = host.Page()
         layout.addWidget(self.controls)
         head = QHBoxLayout()
-        head.addWidget(QLabel("Slides to draft from"))
+        head.addWidget(host.Label("Slides to draft from", "heading"))
         head.addStretch()
         self.show_all = QCheckBox("Show all slides")
         self.show_all.setVisible(bool(self.scope))
@@ -87,20 +87,15 @@ class DraftDialog(QDialog):
                              ("Read slides as", self.view), ("Language", self.language)):
             row.addWidget(host.Field(label, field))
         self.controls.body.addLayout(row)
-        self.note = QLabel()
+        self.note = host.caption("")
         self.note.setWordWrap(True)
         self.controls.body.addWidget(self.note)
-        self.message = QLabel()
+        self.message = host.Label("", "secondary")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
-        row = QHBoxLayout()
-        self.send = host.Button("Draft", "primary")
+        self.add_button("Cancel", role="reject")
+        self.send = self.add_button("Draft", kind="primary")
         self.send.clicked.connect(self.generate)
-        row.addWidget(self.send)
-        cancel = host.Button("Cancel")
-        cancel.clicked.connect(self.reject)
-        row.addWidget(cancel)
-        layout.addLayout(row)
         self.view.currentIndexChanged.connect(self.load)
         self.language.currentTextChanged.connect(self.load)
         self.count.valueChanged.connect(self.refresh)
@@ -138,7 +133,7 @@ class DraftDialog(QDialog):
         self.preview.clear()
         for i in shown:
             r = self.refs[i]
-            row = QListWidgetItem(f"Slide {r.position}: {r.title or r.id_slug} · {r.version or 'current'}"
+            row = QListWidgetItem(f"Slide {r.position}: {slide_title(r)} · {r.version or 'current'}"
                                   + (" · hidden" if r.hidden else ""))
             row.setFlags(row.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             row.setData(Qt.ItemDataRole.UserRole, i)
