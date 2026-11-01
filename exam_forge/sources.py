@@ -9,14 +9,15 @@ changed content, and all conservatively set source_changed.
 
 link_slide and check_item do disk I/O; a UI caller runs them in a worker too.
 Checks follow the deck's resolved slide, even when its version label changes.
-They never update a link's saved fingerprint: accepting a new baseline is an edit.
+They never update a link's saved fingerprint: accepting a new baseline is Bank.rebaseline,
+fed by rebaseline_links (also disk I/O, worker only).
 """
 from __future__ import annotations
 
 import hashlib
 import json
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -95,8 +96,45 @@ def link_slide(host: Host, ref: SlideRef, view: str) -> SourceLink:
         raise ValueError("a source link needs the requested reading language (de or en)")
     if view not in ("instructor", "during-course", "after-course"):
         raise ValueError(f"unknown view: {view}")
+    source = host.slide_source(ref)
     return SourceLink(slide_id=ref.id, version=ref.version or "", language=language,
-                      view=view, fingerprint=fingerprint(host.slide_source(ref)))
+                      view=view, fingerprint=fingerprint(source), text=source.text)
+
+
+class _Unresolved(ValueError):
+    def __init__(self, status: str, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def _resolve(refs: list[SlideRef], link: SourceLink) -> SlideRef:
+    candidates = [ref for ref in refs if ref.id == link.slide_id]
+    if not candidates:
+        raise _Unresolved("missing", f"Slide {link.slide_id} is missing from the deck.")
+    if len(candidates) > 1:
+        # A deck may use the same slide at several versions. Retain the
+        # linked version when it still disambiguates those calls. A sole
+        # ref, however, is followed regardless of its version label.
+        matching = [ref for ref in candidates if (ref.version or "") == link.version]
+        if matching:
+            candidates = matching
+        if len({(ref.path, ref.language_read or ref.language) for ref in candidates}) > 1:
+            raise _Unresolved("error", f"Slide {link.slide_id} has ambiguous deck versions.")
+    return candidates[0]
+
+
+def rebaseline_links(host: Host, deck: Deck, item: Item) -> tuple[SourceLink, ...]:
+    """Re-read each linked slide as the deck now resolves it; worker only (disk I/O)."""
+    decks: dict[tuple[str, str], list[SlideRef]] = {}
+    links = []
+    for link in item.sources:
+        context = (link.view, link.language)
+        if context not in decks:
+            decks[context] = host.deck_slides(deck, *context)
+        ref = _resolve(decks[context], link)
+        source = host.slide_source(ref)
+        links.append(replace(link, version=ref.version or "", fingerprint=fingerprint(source), text=source.text))
+    return tuple(links)
 
 
 class _Checker:
@@ -119,19 +157,10 @@ class _Checker:
         if isinstance(refs, Exception):
             return SourceCheck(link, "error", message=str(refs))
 
-        candidates = [ref for ref in refs if ref.id == link.slide_id]
-        if not candidates:
-            return SourceCheck(link, "missing", message=f"Slide {link.slide_id} is missing from the deck.")
-        if len(candidates) > 1:
-            # A deck may use the same slide at several versions. Retain the
-            # linked version when it still disambiguates those calls. A sole
-            # ref, however, is followed regardless of its version label.
-            matching = [ref for ref in candidates if (ref.version or "") == link.version]
-            if matching:
-                candidates = matching
-            if len({(ref.path, ref.language_read or ref.language) for ref in candidates}) > 1:
-                return SourceCheck(link, "error", message=f"Slide {link.slide_id} has ambiguous deck versions.")
-        ref = candidates[0]
+        try:
+            ref = _resolve(refs, link)
+        except _Unresolved as exc:
+            return SourceCheck(link, exc.status, message=str(exc))
         key = (ref.path, ref.language_read or ref.language)
         if key not in self.fingerprints:
             try:

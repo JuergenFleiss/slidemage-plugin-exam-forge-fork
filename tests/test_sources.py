@@ -14,7 +14,7 @@ from slidemage.plugin_api import MediaDescription, SlideRef, SlideSource
 
 from exam_forge.bank import Bank, ConflictError, CorruptFileError, SchemaError
 from exam_forge.model import Item
-from exam_forge.sources import check_bank, check_item, fingerprint, link_slide
+from exam_forge.sources import check_bank, check_item, fingerprint, link_slide, rebaseline_links
 
 
 class BackgroundHost(FakeHost):
@@ -383,3 +383,36 @@ def test_source_check_guard_applies_even_when_marker_would_be_unchanged(env, tmp
     bank.save(replace(item, sources=()))
     with pytest.raises(ConflictError, match="source links"):
         bank.set_source_changed(item.id, False, expected_sources=item.sources)
+
+
+def test_link_stores_text_and_reads_source_once(env):
+    env.host.source_reads.clear()
+    link = link_slide(env.host, env.ref, "instructor")
+    assert link.text == env.source.text and len(env.host.source_reads) == 1
+    assert link.fingerprint == fingerprint(env.source)
+
+
+def test_rebaseline_links_follow_current_slide(env):
+    item = question(env)
+    new_ref = replace(env.ref, version="2-0-0", path=env.ref.path.with_name("a-v2.tex"))
+    env.host.slides[(env.deck.path, "instructor", "en")] = [new_ref]
+    env.host.sources[new_ref] = replace(env.source, text="Updated")
+    (link,) = rebaseline_links(env.host, env.deck, item)
+    assert (link.slide_id, link.version, link.language, link.view) == ("a", "2-0-0", "en", "instructor")
+    assert link.text == "Updated" and link.fingerprint == fingerprint(env.host.sources[new_ref])
+    assert checked(env, replace(item, sources=(link,))).status == "unchanged"
+
+
+def test_rebaseline_links_disambiguate_by_version_and_refuse_missing_or_ambiguous(env):
+    item = question(env)
+    other = replace(env.ref, version="2-0-0", path=env.ref.path.with_name("a-v2.tex"))
+    env.host.sources[other] = replace(env.source, text="Other")
+    key = (env.deck.path, "instructor", "en")
+    env.host.slides[key] = [env.ref, other]
+    assert rebaseline_links(env.host, env.deck, item)[0].text == env.source.text
+    env.host.slides[key] = [replace(env.ref, version="3"), other]
+    with pytest.raises(ValueError, match="ambiguous"):
+        rebaseline_links(env.host, env.deck, item)
+    env.host.slides[key] = []
+    with pytest.raises(ValueError, match="missing"):
+        rebaseline_links(env.host, env.deck, item)

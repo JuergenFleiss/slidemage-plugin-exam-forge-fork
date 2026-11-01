@@ -149,7 +149,7 @@ class DraftDialog(QDialog):
             for ref, source in zip(refs, sources):
                 if isinstance(source, Exception):
                     raise source
-                link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source))
+                link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source), source.text)
                 slides.append(DraftSlide(link, source))
             return build_request(tuple(slides), use=use, guidance=guidance, count=count), tuple(s.link for s in slides)
 

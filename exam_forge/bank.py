@@ -15,7 +15,8 @@ from typing import Literal, get_type_hints
 
 from .model import Item, Media, Option, Origin, SourceLink
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_READABLE = (1, 2)
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 
@@ -60,7 +61,7 @@ def _read(path: Path) -> dict:
             raise ValueError("missing schema version")
         if data["schema_version"] > SCHEMA_VERSION:
             raise SchemaError(f"{path}: newer schema {data['schema_version']}")
-        if data["schema_version"] != SCHEMA_VERSION:
+        if data["schema_version"] not in _READABLE:
             raise ValueError("unsupported schema version")
         return data
     except (OSError, ValueError, TypeError) as exc:
@@ -157,6 +158,7 @@ class Bank:
         return self._document(item_id)[1]
 
     def _write_item(self, item_id: str, data: dict, revisions: list[Item], changed: bool) -> None:
+        data["schema_version"] = SCHEMA_VERSION
         data["source_changed"] = changed
         data["revisions"] = [_revision_data(row) for row in revisions]
         _atomic_write(self._path(item_id), data)
@@ -209,6 +211,8 @@ class Bank:
             raise ConflictError(f"stale revision for {item.id}")
         if item.origin != current.origin:
             raise ValueError("origin is permanent")
+        if current.ai_edit_route and not item.ai_edit_route:
+            raise ValueError("an AI-assisted item stays AI-assisted")
         item = replace(item, revision=current.revision + 1, status="draft",
                        source_changed=current.source_changed)
         revisions.append(item)
@@ -230,6 +234,23 @@ class Bank:
         updated = replace(current, revision=current.revision + 1, status=status)
         revisions.append(updated)
         self._write_item(item_id, data, revisions, current.source_changed)
+        return updated
+
+    def rebaseline(self, item_id: str, revision: int, sources: tuple[SourceLink, ...]) -> Item:
+        """Accept new source baselines ("Still correct"); status is kept, only sources change."""
+        index = self._index()
+        if item_id not in index["items"]:
+            raise ConflictError(f"item is missing: {item_id}")
+        data, revisions = self._document(item_id)
+        current = revisions[-1]
+        if type(revision) is not int or current.revision != revision:
+            raise ConflictError(f"stale revision for {item_id}")
+        sources = tuple(sources)
+        if [s.slide_id for s in sources] != [s.slide_id for s in current.sources]:
+            raise ValueError("a new baseline must keep the same slides in the same order")
+        updated = replace(current, revision=current.revision + 1, sources=sources, source_changed=False)
+        revisions.append(updated)
+        self._write_item(item_id, data, revisions, False)
         return updated
 
     def set_source_changed(self, item_id: str, changed: bool, *,
