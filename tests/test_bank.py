@@ -207,3 +207,87 @@ def test_missing_index_with_question_files_refuses_creation(bank):
     with pytest.raises(storage.BankError, match="bank.json is missing"):
         Bank(bank.folder, create=True)
     assert not (bank.folder / "bank.json").exists()
+
+
+V1_FILE = {"schema_version": 1, "source_changed": False, "revisions": [
+    {"id": "old", "revision": 1, "stem": "Q1", "options": [{"id": "a", "text": "A", "correct": True, "rationale": ""},
+                                                           {"id": "b", "text": "B", "correct": False, "rationale": ""}],
+     "objective": "", "topic": "t", "difficulty": "easy", "status": "draft", "use": "revision",
+     "sources": [{"slide_id": "s", "version": "1", "language": "en", "view": "instructor", "fingerprint": "f"}],
+     "origin": {"kind": "author", "route": "", "model": ""}, "media": [], "assistant_note": ""},
+    {"id": "old", "revision": 2, "stem": "Q2", "options": [], "objective": "", "topic": "t", "difficulty": "easy",
+     "status": "draft", "use": "revision", "sources": [],
+     "origin": {"kind": "author", "route": "", "model": ""}, "media": [], "assistant_note": ""}]}
+
+
+def test_v1_file_reads_without_rewrite_and_is_saved_as_v2(tmp_path):
+    bank = Bank(tmp_path, create=True)
+    index = json.loads((tmp_path / "bank.json").read_text())
+    assert index["schema_version"] == 2
+    index["schema_version"] = 1
+    index["items"].append("old")
+    (tmp_path / "bank.json").write_text(json.dumps(index))
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(V1_FILE))
+    before = (path.read_bytes(), (tmp_path / "bank.json").read_bytes())
+    bank = Bank(tmp_path)
+    first, second = bank.get("old", 1), bank.get("old")
+    assert bank.load() == ([second], [])
+    assert first.sources[0].text == "" and first.ai_edit_route == first.ai_edit_model == ""
+    assert (path.read_bytes(), (tmp_path / "bank.json").read_bytes()) == before
+    saved = bank.save(replace(second, stem="Q3"))
+    data = json.loads(path.read_text())
+    assert data["schema_version"] == 2 and len(data["revisions"]) == 3
+    assert [r["stem"] for r in data["revisions"]] == ["Q1", "Q2", "Q3"]
+    assert data["revisions"][0]["sources"][0]["fingerprint"] == "f"
+    assert bank.get("old", 1) == first and bank.get("old") == saved
+    assert json.loads((tmp_path / "bank.json").read_text())["schema_version"] == 1
+
+
+def test_new_bank_and_items_are_v2_and_text_round_trips(bank):
+    link = SourceLink("slide", "2", "en", "lecture", "hash", "Slide text")
+    item = bank.create(replace(question(), sources=(link,), ai_edit_route="r", ai_edit_model="m"))
+    assert json.loads((bank.folder / "bank.json").read_text())["schema_version"] == 2
+    assert json.loads((bank.folder / "q1.json").read_text())["schema_version"] == 2
+    assert Bank(bank.folder).get("q1") == item and item.sources[0].text == "Slide text"
+
+
+def test_ai_assisted_stays_visible_on_later_revisions(bank):
+    item = bank.create(question())
+    ai = bank.save(replace(item, ai_edit_route="route-a", ai_edit_model="m"))
+    with pytest.raises(ValueError, match="AI-assisted"):
+        bank.save(replace(ai, ai_edit_route="", ai_edit_model=""))
+    kept = bank.save(replace(ai, stem="Human edit"))
+    assert kept.ai_edit_route == "route-a"
+    replaced = bank.save(replace(kept, ai_edit_route="route-b", ai_edit_model="m2"))
+    assert (replaced.ai_edit_route, replaced.ai_edit_model) == ("route-b", "m2")
+    assert bank.get("q1", 1).ai_edit_route == ""
+    reviewed = bank.set_status("q1", replaced.revision, "reviewed")
+    assert reviewed.ai_edit_route == "route-b"
+
+
+@pytest.mark.parametrize("status", ["draft", "reviewed", "retired"])
+def test_rebaseline_keeps_status_and_clears_flag(bank, status):
+    item = bank.create(question())
+    current = item
+    for target in ("reviewed", "retired")[:("draft", "reviewed", "retired").index(status)]:
+        current = bank.set_status("q1", current.revision, target)
+    assert current.source_changed
+    links = (SourceLink("slide", "3", "en", "lecture", "new", "New text"),)
+    updated = bank.rebaseline("q1", current.revision, links)
+    assert updated == replace(current, revision=current.revision + 1, sources=links, source_changed=False)
+    assert updated.status == status and updated.origin == current.origin
+    assert bank.get("q1") == updated and bank.get("q1", current.revision) == replace(current, source_changed=False)
+
+
+def test_rebaseline_refusals(bank):
+    item = bank.create(question())
+    same = (SourceLink("slide", "9", "en", "lecture", "x"),)
+    with pytest.raises(ConflictError):
+        bank.rebaseline("q1", 5, same)
+    with pytest.raises(ConflictError):
+        bank.rebaseline("missing", 1, same)
+    for sources in ((), (SourceLink("other"),), same * 2):
+        with pytest.raises(ValueError, match="same slides"):
+            bank.rebaseline("q1", item.revision, sources)
+    assert bank.get("q1") == item

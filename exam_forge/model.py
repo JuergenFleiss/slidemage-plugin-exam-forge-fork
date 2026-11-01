@@ -23,6 +23,7 @@ class SourceLink:
     language: str = ""
     view: str = ""
     fingerprint: str = ""
+    text: str = ""  # Snapshot for comparing; not part of the fingerprint.
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,8 @@ class Item:
     origin: Origin = field(default_factory=Origin)
     media: tuple[Media, ...] = ()
     assistant_note: str = ""
+    ai_edit_route: str = ""  # Per revision; non-empty once an AI assisted an edit.
+    ai_edit_model: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", tuple(self.options))

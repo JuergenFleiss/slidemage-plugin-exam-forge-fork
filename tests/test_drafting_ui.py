@@ -272,6 +272,8 @@ def test_bulk_drafts_link_to_selected_slides(env):
     drafts, errors = bank.load()
     assert not errors and len(drafts) == 2
     assert [item.sources[0].slide_id for item in drafts] == [first.id, second.id]
+    assert [item.sources[0].text for item in drafts] == [host.sources[first].text, "Second slide"]
+    assert all(item.topic == "" for item in drafts)
     assert all(item.status == "draft" and item.origin.kind == "ai" and
                (item.origin.route, item.origin.model) == ("captured-route", "captured-model")
                for item in drafts)
