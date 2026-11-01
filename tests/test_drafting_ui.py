@@ -298,3 +298,110 @@ def test_bulk_wrong_count_or_slide_refused(env, rows):
     if len(rows) != 2:
         assert f"requested 2 questions but received {len(rows)}" in dialog.message.text()
     dialog.reject()
+
+
+def slides(host, deck, n=3, view="instructor"):
+    first = source(host, deck)
+    refs = [first] + [replace(first, id=f"s{i}", id_slug=f"s{i}", position=i) for i in range(2, n + 1)]
+    host.slides[(deck.path, view, "en")] = refs
+    for ref in refs[1:]:
+        host.sources[ref] = SlideSource(f"Text of {ref.id}")
+    return refs
+
+
+def ticks(dialog):
+    return [dialog.choices.item(i).checkState() == Qt.CheckState.Checked for i in range(dialog.choices.count())]
+
+
+def scoped(host, deck, window, *slide_ids, preselect=None, topic=True):
+    from exam_forge.topics import Topic
+    from exam_forge.ui.drafting import DraftDialog
+    topics = (Topic("t1", "Probability", "blue", tuple(slide_ids)),)
+    dialog = DraftDialog(host, deck, window.bank, window, topics=topics,
+                         topic_id="t1" if topic else None, preselect=preselect)
+    host.drain()
+    return dialog
+
+
+def test_grid_scopes_to_topic_ticks_only_the_opening_slide_and_widens(env):
+    host, deck, _, _, window = env
+    slides(host, deck)
+    dialog = scoped(host, deck, window, "s1", "s2", preselect="s2")
+    assert dialog.choices.count() == 2 and ticks(dialog) == [False, True]
+    dialog.show_all.setChecked(True)
+    assert dialog.choices.count() == 3 and ticks(dialog) == [False, True, False]
+    dialog.choices.item(2).setCheckState(Qt.CheckState.Checked)
+    dialog.show_all.setChecked(False)
+    assert ticks(dialog) == [False, True]
+    dialog.show_all.setChecked(True)
+    assert ticks(dialog) == [False, True, True]
+    dialog.reject()
+    outside = scoped(host, deck, window, "s1", preselect="s3")
+    assert outside.show_all.isChecked() and outside.choices.count() == 3
+    assert ticks(outside) == [False, False, True]
+    outside.reject()
+    everything = scoped(host, deck, window, topic=False)
+    assert everything.choices.count() == 3 and not any(ticks(everything))
+    everything.reject()
+    empty = scoped(host, deck, window)
+    assert empty.choices.count() == 3 and not any(ticks(empty))
+    empty.reject()
+
+
+def test_ticks_survive_reload_when_view_or_language_changes(env):
+    host, deck, _, _, window = env
+    refs = slides(host, deck)
+    host.slides[(deck.path, "after-course", "en")] = refs[:2]
+    host.slides[(deck.path, "instructor", "de")] = []
+    dialog = scoped(host, deck, window, preselect="s2", topic=False)
+    dialog.choices.item(2).setCheckState(Qt.CheckState.Checked)
+    dialog.view.setCurrentIndex(dialog.view.findData("after-course"))
+    host.drain()
+    assert ticks(dialog) == [False, True]  # s3 is absent from this view and is no longer ticked
+    dialog.view.setCurrentIndex(0)
+    host.drain()
+    assert ticks(dialog) == [False, True, False]
+    dialog.language.setCurrentText("de")
+    host.drain()
+    assert dialog.choices.count() == 0 and not dialog.send.isEnabled()
+    dialog.reject()
+
+
+def test_button_and_note_follow_ticks_and_count(env):
+    host, deck, _, _, window = env
+    slides(host, deck)
+    chat, _ = enable(host)
+    dialog = scoped(host, deck, window, topic=False)
+    assert dialog.send.text() == "Draft 1 question" and not dialog.send.isEnabled()
+    assert "Only the text of the 0 ticked slides is sent" in dialog.note.text()
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.count.setValue(4)
+    assert dialog.send.text() == "Draft 4 questions" and dialog.send.isEnabled()
+    assert "Only the text of the 1 ticked slide is sent" in dialog.note.text()
+    assert "Drafts arrive labelled AI draft and wait for your review." in dialog.note.text()
+    assert dialog.language.currentText() == "en"
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Unchecked)
+    assert not dialog.send.isEnabled()
+    dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
+    dialog.send.click()
+    assert dialog.send.text() == "Drafting…" and not dialog.send.isEnabled()
+    host.drain()
+    chat.done(None, AiChatError("nope"))
+    host.drain()
+    assert dialog.send.text() == "Draft 4 questions" and dialog.send.isEnabled()
+    dialog.reject()
+
+
+def test_only_ticked_slide_text_is_sent_from_a_scoped_grid(env):
+    host, deck, _, _, window = env
+    slides(host, deck)
+    chat, _ = enable(host)
+    dialog = scoped(host, deck, window, "s1", "s2", preselect="s2")
+    dialog.send.click()
+    host.drain()
+    request, = chat.requests
+    assert json.loads(request.text) == {"slides": [{"slide": 1, "text": "Text of s2"}]}
+    assert "Two plus two" not in request.text + request.instructions
+    chat.done(result(), None)
+    host.drain()
+    assert dialog.result() == dialog.DialogCode.Accepted and dialog.items[0].sources[0].slide_id == "s2"

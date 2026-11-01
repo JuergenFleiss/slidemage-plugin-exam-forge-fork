@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Small source chooser and one cancellable host AI request."""
+"""Slide chooser and one cancellable host AI request."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPlainTextEdit, QSpinBox, QVBoxLayout,
 )
 from slidemage.plugin_api import AiChatError
@@ -14,15 +14,25 @@ from ..model import SourceLink
 from ..sources import fingerprint
 from .work import fresh_deck
 
+VIEWS = (("Instructor view", "instructor"), ("During course", "during-course"), ("After course", "after-course"))
+
+
+def plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
 
 class DraftDialog(QDialog):
-    def __init__(self, host, deck, bank, parent):
+    def __init__(self, host, deck, bank, parent, *, topics=(), topic_id=None, preselect=None):
         super().__init__(parent)
         self.host, self.deck = host, deck
         self.items = ()
         self.refs = []
         self.sources = []
         self.generation = 0
+        self.loading = self.busy = False
+        topic = next((t for t in topics if t.id == topic_id), None)
+        self.scope = set(topic.slides) if topic else set()
+        self.ticked = {preselect} if preselect else set()
         self.state = state = {"active": True, "cancel": None}
 
         def stop(*_):
@@ -35,54 +45,111 @@ class DraftDialog(QDialog):
         self.destroyed.connect(stop)
         self.setWindowTitle("Draft with AI")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(720, 620)
+        self.resize(720, 640)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Tick teaching sources to send. No sources are selected initially."))
         self.controls = host.Page()
         layout.addWidget(self.controls)
-        row = QHBoxLayout()
-        self.view, self.language, self.use = QComboBox(), QComboBox(), QComboBox()
-        self.view.addItems(["instructor", "during-course", "after-course"])
-        self.language.addItems(["en", "de"])
-        self.use.addItem("Revision quiz", "revision")
-        self.use.addItem("ELP exam", "elp")
-        for label, field in (("View", self.view), ("Language", self.language), ("Use", self.use)):
-            row.addWidget(host.Field(label, field))
-        self.count = QSpinBox()
-        self.count.setRange(1, 30)
-        self.count.setValue(1)
-        row.addWidget(host.Field("Number of questions", self.count))
-        self.controls.body.addLayout(row)
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Slides to draft from"))
+        head.addStretch()
+        self.show_all = QCheckBox("Show all slides")
+        self.show_all.setVisible(bool(self.scope))
+        self.show_all.toggled.connect(self.populate)
+        head.addWidget(self.show_all)
+        self.controls.body.addLayout(head)
         self.choices = QListWidget()
         self.controls.body.addWidget(self.choices)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setPlaceholderText("Select a row to inspect its source text before ticking it.")
-        self.preview.setMaximumHeight(160)
+        self.preview.setMaximumHeight(140)
         self.controls.body.addWidget(self.preview)
+        row = QHBoxLayout()
+        self.count = QSpinBox()
+        self.count.setRange(1, 30)
+        self.count.setValue(1)
+        self.use = QComboBox()
+        self.use.addItem("Revision quiz", "revision")
+        self.use.addItem("ELP exam", "elp")
+        self.view, self.language = QComboBox(), QComboBox()
+        for label, value in VIEWS:
+            self.view.addItem(label, value)
+        self.language.addItems(["en", "de"])
+        try:
+            self.language.setCurrentText(host.deck_language(deck))
+        except Exception:
+            pass
+        for label, field in (("How many", self.count), ("For", self.use),
+                             ("Read slides as", self.view), ("Language", self.language)):
+            row.addWidget(host.Field(label, field))
+        self.controls.body.addLayout(row)
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        self.controls.body.addWidget(self.note)
         self.message = QLabel()
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
         row = QHBoxLayout()
-        self.send = host.Button("Draft with AI", "primary")
+        self.send = host.Button("Draft", "primary")
         self.send.clicked.connect(self.generate)
         row.addWidget(self.send)
         cancel = host.Button("Cancel")
         cancel.clicked.connect(self.reject)
         row.addWidget(cancel)
         layout.addLayout(row)
-        self.view.currentTextChanged.connect(self.load)
+        self.view.currentIndexChanged.connect(self.load)
         self.language.currentTextChanged.connect(self.load)
+        self.count.valueChanged.connect(self.refresh)
         self.choices.currentRowChanged.connect(self.show_source)
+        self.choices.itemChanged.connect(self.tick)
+        if preselect and self.scope and preselect not in self.scope:
+            self.show_all.setChecked(True)
+        self.refresh()
         self.load()
+
+    def selected(self):
+        return [i for i, ref in enumerate(self.refs) if ref.id in self.ticked]
+
+    def refresh(self, *_):
+        n = len(self.selected())
+        self.note.setText(
+            f"Only the text of the {plural(n, 'ticked slide')} is sent, and SlideMage shows it to you "
+            "before anything leaves your computer. Images, other questions, answer keys and student data "
+            "are never sent. Drafts arrive labelled AI draft and wait for your review.")
+        self.send.setText("Drafting…" if self.busy else f"Draft {plural(self.count.value(), 'question')}")
+        self.send.setEnabled(not self.busy and not self.loading and n > 0)
+
+    def tick(self, row):
+        slide = self.refs[row.data(Qt.ItemDataRole.UserRole)].id
+        (self.ticked.add if row.checkState() == Qt.CheckState.Checked else self.ticked.discard)(slide)
+        self.refresh()
+
+    def populate(self, *_):
+        shown = [i for i, ref in enumerate(self.refs) if ref.id in self.scope]
+        if self.show_all.isChecked() or not shown:
+            shown = range(len(self.refs))
+        self.choices.blockSignals(True)
+        self.choices.clear()
+        self.preview.clear()
+        for i in shown:
+            r = self.refs[i]
+            row = QListWidgetItem(f"Slide {r.position}: {r.title or r.id_slug} · {r.version or 'current'}"
+                                  + (" · hidden" if r.hidden else ""))
+            row.setFlags(row.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            row.setData(Qt.ItemDataRole.UserRole, i)
+            row.setCheckState(Qt.CheckState.Checked if r.id in self.ticked else Qt.CheckState.Unchecked)
+            self.choices.addItem(row)
+        self.choices.blockSignals(False)
+        self.refresh()
 
     def load(self, *_):
         self.generation += 1
         generation = self.generation
-        view, language = self.view.currentText(), self.language.currentText()
+        view, language = self.view.currentData(), self.language.currentText()
+        self.loading = True
         self.choices.clear()
         self.preview.clear()
-        self.send.setEnabled(False)
+        self.refresh()
         self.message.setText("Loading sources…")
 
         def work():
@@ -98,30 +165,34 @@ class DraftDialog(QDialog):
         def done(result, error):
             if not self.state["active"] or generation != self.generation:
                 return
+            self.loading = False
             if error:
+                self.refs, self.sources = [], []
                 self.message.setText(str(error))
+                self.refresh()
                 return
             self.refs, self.sources = result
-            labels = [f"Slide {r.position}: {r.title or r.id_slug} · {r.version or 'current'}"
-                      + (" · hidden" if r.hidden else "") for r in self.refs]
-            for label in labels:
-                row = QListWidgetItem(label)
-                row.setCheckState(Qt.CheckState.Unchecked)
-                self.choices.addItem(row)
-            self.send.setEnabled(True)
+            self.ticked &= {ref.id for ref in self.refs}
+            self.populate()
             self.message.setText("Choose slides.")
 
         self.host.run_in_background(work, done)
 
     def show_source(self, index):
         self.preview.clear()
-        if index < 0:
+        row = self.choices.item(index) if index >= 0 else None
+        if row is None:
             return
-        source = self.sources[index]
+        source = self.sources[row.data(Qt.ItemDataRole.UserRole)]
         if isinstance(source, Exception):
             self.message.setText(str(source))
             return
         self.preview.setPlainText(source.text)
+
+    def idle(self):
+        self.busy = False
+        self.controls.setEnabled(True)
+        self.refresh()
 
     def generate(self):
         # Check again after source selection: disabling AI closes the gate immediately.
@@ -133,15 +204,15 @@ class DraftDialog(QDialog):
         except AiChatError as exc:
             self.message.setText(str(exc))
             return
-        indices = [i for i in range(self.choices.count())
-                   if self.choices.item(i).checkState() == Qt.CheckState.Checked]
-        refs = [self.refs[i] for i in indices if i < len(self.refs)]
-        sources = [self.sources[i] for i in indices if i < len(self.sources)]
-        view, language, use = self.view.currentText(), self.language.currentText(), self.use.currentData()
+        indices = self.selected()
+        refs = [self.refs[i] for i in indices]
+        sources = [self.sources[i] for i in indices]
+        view, language, use = self.view.currentData(), self.language.currentText(), self.use.currentData()
         guidance = self.host.settings().get("drafting_guidance")
         count = self.count.value()
         self.controls.setEnabled(False)
-        self.send.setEnabled(False)
+        self.busy = True
+        self.refresh()
         self.message.setText("Preparing selected sources…")
 
         def work():
@@ -179,8 +250,7 @@ class DraftDialog(QDialog):
             return
         self.state["cancel"] = None
         if not self.host.settings().get("ai_support", False):
-            self.controls.setEnabled(True)
-            self.send.setEnabled(True)
+            self.idle()
             self.message.setText("AI support is off. Reply discarded.")
             return
         if error is None and result is None:
@@ -192,8 +262,7 @@ class DraftDialog(QDialog):
             except DraftReplyError as exc:
                 error = exc
         if error is not None:
-            self.controls.setEnabled(True)
-            self.send.setEnabled(True)
+            self.idle()
             self.message.setText(str(error))
         else:
             self.accept()
