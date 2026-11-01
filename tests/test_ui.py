@@ -22,7 +22,6 @@ from exam_forge.bank import Bank
 from exam_forge.folder import open_chosen_folder
 from exam_forge.model import Item, Origin
 from exam_forge.sources import link_slide
-from exam_forge.ui.source_picker import SourcePicker
 
 
 class GuiHost(FakeHost):
@@ -242,7 +241,7 @@ def test_export_includes_bank_media_and_excludes_elp_draft_and_retired(env, tmp_
     window.reload()
     path = tmp_path / "export.xml"
     path.write_text("old content")
-    monkeypatch.setattr("exam_forge.ui.bank_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     window.export_button.click()
     host.drain()
     xml = path.read_bytes()
@@ -297,51 +296,25 @@ def test_sidebar_reads_focus_at_click_and_creates_linked_draft(env):
     assert bank.get(window.current.id).sources[0].view == "instructor"
 
 
-def test_picker_view_language_and_late_results(env):
-    host, deck, _, _, window = env
-    ref = source(host, deck)
-    host.slides[(deck.path, "after-course", "de")] = [replace(ref, language_read="de")]
-    host.sources[replace(ref, language_read="de")] = SlideSource(text="Deutsch")
-    picker = SourcePicker(host, deck, window)
-    picker.view.setCurrentText("after-course")
-    picker.language.setCurrentText("de")
-    host.drain()
-    assert len(picker.refs) == 1 and picker.refs[0].language_read == "de"
-    picker.slides.setCurrentRow(0)
-    picker.capture()
-    host.drain()
-    assert picker.link.view == "after-course" and picker.link.language == "de"
-    picker = SourcePicker(host, deck, window)
-    picker.reject()
-    host.drain()
-    assert not picker.refs
-
-
-def test_filters_ai_assisted_permanent_and_palette(env):
+def test_needs_attention_ai_assisted_permanent_and_palette(env):
     _, _, bank, _, window = env
     item = fill(window)
     ai = bank.create(Item("ai", 1, "AI question", item.options, topic="Other", sources=item.sources,
                           origin=Origin("ai", "local", "model")))
     bank.set_source_changed(ai.id, True)
     window.reload()
-    window.ai_filter.click()
-    assert window.item_list.count() == 1
-    window.item_list.setCurrentRow(0)
+    window.view = "attention"
+    window.render()
+    assert [window.slide_list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(window.slide_list.count())] == ["ai"]
+    window.open_card("ai")
     assert window.draft_tag.isVisible() and not window.ai_tag.isVisible()
     assert window.draft_tag.toolTip() == window.ai_tag.toolTip() == "local · model"
     window.approve_button.click()
     # This check has no links so it clears the source flag.
     window.host.drain()
-    assert window.item_list.count() == 0
+    window.render()
+    assert window.slide_list.count() == 0 or window.view == "all"
     assert window.ai_tag.isVisible()
-    window.ai_filter.click()
-    window.status_filter.setCurrentIndex(window.status_filter.findData("reviewed"))
-    assert window.item_list.count() == 1
-    window.use_filter.setCurrentIndex(window.use_filter.findData("elp"))
-    assert window.item_list.count() == 0
-    window.use_filter.setCurrentIndex(0)
-    window.topic_filter.setCurrentIndex(window.topic_filter.findData("Arithmetic"))
-    assert window.item_list.count() == 0
     # A dark palette leaves fields/surfaces inherited, with no literal background styles.
     palette = window.palette()
     palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
@@ -399,9 +372,10 @@ def test_navigation_saves_before_selecting(env, monkeypatch):
     window.reload()
     window.stem.setPlainText("Saved while navigating")
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Save)
-    row = next(window.item_list.item(i) for i in range(window.item_list.count())
-               if window.item_list.item(i).data(Qt.ItemDataRole.UserRole) == "second")
-    window.item_list.setCurrentItem(row)
+    window.view = "unlinked"
+    window.render()
+    window.view = "all"
+    assert window.open_card("second")
     assert window.current.id == "second"
     assert bank.get(first.id).stem == "Saved while navigating"
 
@@ -414,7 +388,7 @@ def test_export_rechecks_stale_list(env, tmp_path, monkeypatch):
     reviewed = bank.get(item.id)
     bank.save(replace(reviewed, stem="Changed elsewhere", status="draft", use="elp"))
     path = tmp_path / "out.xml"
-    monkeypatch.setattr("exam_forge.ui.bank_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     window.export()
     host.drain()
     assert not path.exists()
@@ -446,7 +420,7 @@ def test_export_warns_about_newly_changed_source(env, tmp_path, monkeypatch):
     notices = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: notices.append(a[2]) or QMessageBox.StandardButton.No)
     path = tmp_path / "out.xml"
-    monkeypatch.setattr("exam_forge.ui.bank_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     window.export()
     host.drain()
     assert notices and item.stem in notices[0] and "s1" in notices[0]

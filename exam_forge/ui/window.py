@@ -11,12 +11,12 @@ from PySide6.QtWidgets import (
 )
 from ..bank import BankError
 from ..topics import TopicStore, migrate, topic_name
-from .bank_tab import BankTab
-from .editor import ItemEditor, accent
+from .editor import ItemEditor
 from .exam_tab import ExamTab
+from .questions_tab import QuestionsTab
 
 
-class BankWindow(BankTab, ItemEditor, QWidget):
+class BankWindow(QuestionsTab, ItemEditor, QWidget):
     def __init__(self, host, deck, bank, changed):
         super().__init__(None, Qt.WindowType.Window)
         self.host, self.deck, self.bank, self.changed = host, deck, bank, changed
@@ -31,13 +31,11 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         self.resize(1120, 790)
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
-        self.folder_label = QLabel(str(bank.folder))
-        self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        top.addWidget(self.folder_label, 1)
-        self.check_button = host.Button("Check now")
+        top.addStretch()
+        self.check_button = host.Button("Check slides")
         self.check_button.clicked.connect(self.check_sources)
         top.addWidget(self.check_button)
-        self.export_button = host.Button("Export Moodle XML…")
+        self.export_button = host.Button("Export to Moodle")
         self.export_button.clicked.connect(self.export)
         top.addWidget(self.export_button)
         layout.addLayout(top)
@@ -46,23 +44,35 @@ class BankWindow(BankTab, ItemEditor, QWidget):
         layout.addWidget(self.notice)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
-        self.tabs.addTab(self.build_bank_tab(), "Bank")
+        self.tabs.addTab(self.build_questions_tab(), "Questions")
         self.exam_tab = ExamTab(self)
         self.tabs.addTab(self.exam_tab, "Exam")
+        foot = QHBoxLayout()
+        self.folder_label = QLabel(str(bank.folder))
+        self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.checked_label = QLabel()
+        foot.addWidget(QLabel("🔒"))
+        foot.addWidget(self.folder_label, 1)
+        foot.addWidget(self.checked_label)
+        layout.addLayout(foot)
         self.load_topics()
         self.reload()
+        self.load_slides()
         self.check_sources()
 
     def switch_bank(self, bank):
         # Replace the window's bank only when there is no worker using it.
         self.bank = bank
         self.folder_label.setText(str(bank.folder))
-        self.current = self.baseline = None
-        self.new_item = False
-        self.editor.setEnabled(False)
+        self.drop_editor()
+        self.stack.setCurrentWidget(self.placeholder)
+        self.view, self.sel_slide, self.slides = "all", None, None
+        self.changed_links, self.checked_at = {}, None
+        self.elp_told, self.elp_text = False, ""
         self.exam_tab.reset()
         self.load_topics()
         self.reload()
+        self.load_slides()
 
     def load_topics(self):
         """Read topics.json; on a bank's first open, create it from legacy question topics."""
@@ -98,9 +108,6 @@ class BankWindow(BankTab, ItemEditor, QWidget):
     def topic_name_of(self, item):
         return topic_name(item, self.topics)
 
-    def open_question(self, item_id):
-        """Show a question in the editor. Replaced when the Questions tab arrives."""
-
     def error(self, error):
         self.notice.setText(str(error))
         self.host.show_message(str(error), error=True)
@@ -114,6 +121,7 @@ class BankWindow(BankTab, ItemEditor, QWidget):
     def set_busy(self, busy):
         self.busy = busy
         self.draft_button.setEnabled(not busy)
+        self.write_button.setEnabled(not busy)
         self.editor.setEnabled(not busy and self.current is not None)
         for widget in (self.check_button, self.export_button, self.exam_tab):
             widget.setEnabled(not busy)
@@ -137,11 +145,11 @@ class BankWindow(BankTab, ItemEditor, QWidget):
 
     def changeEvent(self, event):
         super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange and hasattr(self, "source_banner"):
-            accent(self.source_filter)
-            accent(self.ai_filter, True)
+        if event.type() == QEvent.Type.PaletteChange and hasattr(self, "topic_list"):
+            self.tint(self.changed_label)
+            self.tint(self.draft_button, True)
             self.restyle_editor()
-            self.filter_items()
+            self.render()
 
     def closeEvent(self, event):
         if self.may_leave():

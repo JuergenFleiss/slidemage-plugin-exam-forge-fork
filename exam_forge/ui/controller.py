@@ -126,11 +126,7 @@ class Controller:
                 window.error(error)
                 return
 
-            def create():
-                if window.new_question():
-                    window.links = (link,)
-                    window.render_links()
-            window.when_idle(create)
+            window.when_idle(lambda: window.start_question(link))
 
         def prepared(snapshot, error):
             if error:

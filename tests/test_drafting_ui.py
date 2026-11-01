@@ -81,7 +81,7 @@ def test_off_hides_entry_and_gates_programmatic_action(env, monkeypatch):
     assert not hasattr(window, "drafting_dialog") and bank.load() == ([], [])
 
 
-def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env):
+def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env, tmp_path, monkeypatch):
     host, deck, bank, _, window = env
     ref = source(host, deck)
     host.sources[ref] = SlideSource("SELECTED_TEACHING_TEXT", descriptions=(
@@ -108,15 +108,20 @@ def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env):
         assert excluded not in request.instructions + request.text
     chat.done(result(), None)
     host.drain()
+    assert window.sel_slide == ref.id and window.cards.count() == 1 and window.current is None
+    window.card_opened(window.cards.item(0))
     draft = window.current
     assert draft.status == "draft" and bank.get(draft.id).status == "draft"
     assert window.draft_tag.isVisible() and "color:" in window.draft_tag.styleSheet()
     assert draft.sources[0].slide_id == ref.id
     assert window.ai_tag.toolTip() == "captured-route · captured-model"
-    window.status_filter.setCurrentIndex(window.status_filter.findData("draft"))
+    exported = []
+    monkeypatch.setattr("exam_forge.ui.questions_tab.export_moodle_xml",
+                        lambda items, bank: exported.extend(items) or b"<quiz/>")
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(tmp_path / "o.xml"), ""))
     window.export()
     host.drain()
-    assert "No reviewed" in window.notice.text()  # Drafts are not exportable.
+    assert [item.id for item in exported] == ["old"]  # Drafts are not exportable.
     window.approve_button.click()
     host.drain()
     assert window.current.status == "reviewed" and window.draft_tag.isHidden()
@@ -277,7 +282,8 @@ def test_bulk_drafts_link_to_selected_slides(env):
     assert all(item.status == "draft" and item.origin.kind == "ai" and
                (item.origin.route, item.origin.model) == ("captured-route", "captured-model")
                for item in drafts)
-    assert window.item_list.count() == 2 and "2 AI draft" in window.notice.text()
+    assert window.sel_slide == first.id and "2 AI draft" in window.notice.text()
+    assert host.messages[-1] == ("2 AI drafts added · review before use", False)
 
 
 @pytest.mark.parametrize("rows", [[], [1], [1, 1, 1], [2, 1]])

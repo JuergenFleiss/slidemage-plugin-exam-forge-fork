@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """G7 integration proofs through real widgets and the fake host's worker queue."""
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from threading import get_ident
 
@@ -22,6 +23,7 @@ import exam_forge
 from exam_forge.assembly import Blueprint
 from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
+from exam_forge.sources import link_slide
 from exam_forge.topics import add_topic, assign_slide
 from exam_forge.ui.editor import accent_color
 from exam_forge.ui.exam_tab import red_color
@@ -80,14 +82,8 @@ def phase(app, tmp_path, monkeypatch):
             row.text.setPlainText(str(number))
         window.rows[0].tick.click()
         window.difficulty.setCurrentData("easy")
-        from exam_forge.ui.source_picker import SourcePicker
-        picker = SourcePicker(host, deck, window)
-        host.drain()
-        picker.slides.setCurrentRow(0)
-        picker.capture()
-        host.drain()
-        window.links = (picker.link,)
-        picker.deleteLater()
+        with ThreadPoolExecutor() as executor:
+            window.links = (executor.submit(link_slide, host, ref, "instructor").result(),)
         window.save()
         window.approve_button.click()
         host.drain()
@@ -156,7 +152,7 @@ def add_reviewed(bank, window, item_id, **fields):
 
 def test_bank_swap_and_elp_documents(phase, tmp_path, monkeypatch):
     host, deck, bank, window, _ref, _, warnings = phase()
-    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Bank", "Exam"]
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Questions", "Exam"]
     current = window.current
     add_reviewed(bank, window, "replacement")
     exam = propose(host, window)
