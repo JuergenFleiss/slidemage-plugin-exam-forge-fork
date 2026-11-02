@@ -12,6 +12,7 @@ from slidemage.plugin_api import AiChatError, MediaDescription, SlideSource
 from test_drafting import result
 from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
 
+from exam_forge.ai_support import NO_REPLY
 from exam_forge.drafting import DEFAULT_GUIDANCE
 from exam_forge.model import Item, Option
 
@@ -192,7 +193,7 @@ def test_closing_dialog_cancels_request(env):
 
 
 @pytest.mark.parametrize("case", ["decline", "cancel", "before_ready", "destroyed"])
-def test_decline_cancel_and_late_completions_are_quiet(env, case):
+def test_decline_cancel_and_late_completions_add_nothing(env, case):
     host, deck, bank, _, window = env
     source(host, deck)
     chat, page = enable(host)
@@ -208,6 +209,7 @@ def test_decline_cancel_and_late_completions_are_quiet(env, case):
         host.drain()
         if case == "decline":
             chat.done(None, None)
+            assert dialog.isVisible() and dialog.message.text() == NO_REPLY and dialog.send.isEnabled()
         elif case == "destroyed":
             # Real C++ destruction while the callback still retains its Python wrapper.
             from PySide6.QtCore import QCoreApplication, QEvent

@@ -10,6 +10,7 @@ from slidemage.plugin_api import AiChatError, AiChatResult, Route, SlideSource
 from test_drafting_ui import enable
 from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
 
+from exam_forge.ai_support import NO_REPLY
 from exam_forge.model import Item, Option, Origin
 from exam_forge.sources import link_slide
 from exam_forge.ui.editor import accent_color
@@ -208,7 +209,7 @@ def test_close_during_request_cancels_and_drops_the_reply(env):
     assert bank.get("q1").revision == 1
 
 
-def test_decline_is_quiet_and_busy_rows_ignore_second_operation(env):
+def test_decline_is_said_and_busy_rows_ignore_second_operation(env):
     host, deck, bank, _, window = env
     changed_item(host, deck, bank)
     chat, _ = enable(host)
@@ -222,7 +223,7 @@ def test_decline_is_quiet_and_busy_rows_ignore_second_operation(env):
     before = list(host.messages)
     chat.done(None, None)
     host.drain()
-    assert row.note.text() == "" and row.update.isEnabled() and host.messages == before
+    assert row.note.text() == NO_REPLY and row.update.isEnabled() and host.messages == before
     assert bank.get("q1").revision == 1
     dialog.reject()
 

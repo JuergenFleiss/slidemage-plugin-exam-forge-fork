@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from slidemage.plugin_api import AiChatError
 
-from ..ai_support import ai_service
+from ..ai_support import NO_REPLY, ai_service
 from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
 from ..model import DEFAULT_RULES, KINDS, SourceLink
 from ..sources import fingerprint
@@ -251,7 +251,8 @@ class DraftDialog(Sheet):
             try:
                 service = ai_service(self.host)
                 if service is None:
-                    self.reject()
+                    self.idle()
+                    self.message.setText("AI support is off. Nothing was sent.")
                     return
                 self.message.setText("Drafting… Cancel discards the reply.")
                 self.state["cancel"] = service.request(
@@ -271,7 +272,8 @@ class DraftDialog(Sheet):
             self.message.setText("AI support is off. Reply discarded.")
             return
         if error is None and result is None:
-            self.reject()  # The host's decline/cancel is deliberately quiet.
+            self.idle()
+            self.message.setText(NO_REPLY)
             return
         if error is None:
             try:

@@ -121,3 +121,5 @@ NEW: Switch the middle column between Slides and Questions, export every questio
 - Exams with another number of answers get a matching scoring sheet. Settings refuses rules that would not give whole points per tick.
 - Reviewed questions that no longer fit are marked Off the answer rules and listed under Needs attention, and exports and exam proposals leave them out.
 - ELP exams are now just exams: in the editor, the Exam tab and the exam documents.
+- Export table and Export to Moodle open in the deck's question folder.
+- When an AI request ends without a reply, Draft with AI and Update with AI say so instead of closing without a word.

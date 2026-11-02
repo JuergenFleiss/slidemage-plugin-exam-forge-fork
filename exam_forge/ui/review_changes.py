@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from slidemage.plugin_api import AiChatError
 
-from ..ai_support import ai_service
+from ..ai_support import NO_REPLY, ai_service
 from ..diffing import word_diff
 from ..drafting import DraftReplyError, build_update_request, parse_update_reply
 from ..sources import _resolve, rebaseline_links
@@ -280,7 +280,7 @@ class ReviewChangesDialog(Sheet):
             self.finish(row, error="AI support is off. Reply discarded.")
             return
         if error is None and result is None:
-            self.finish(row)  # The host's decline/cancel is deliberately quiet.
+            self.finish(row, error=NO_REPLY)
             return
         if error is None:
             try:

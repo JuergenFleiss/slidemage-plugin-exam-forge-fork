@@ -897,7 +897,8 @@ class QuestionsTab:
                                          QMessageBox.StandardButton.No)
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        filename, _ = QFileDialog.getSaveFileName(self, "Export reviewed revision questions", "revision-quiz.xml", "Moodle XML (*.xml)")
+        filename, _ = QFileDialog.getSaveFileName(self, "Export reviewed revision questions",
+                                                  str(self.bank.folder / "revision-quiz.xml"), "Moodle XML (*.xml)")
         if not filename:
             return
         if not filename.lower().endswith(".xml"):

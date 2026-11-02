@@ -612,10 +612,13 @@ def test_export_takes_every_reviewed_revision_question(lab, tmp_path, monkeypatc
 
     path = tmp_path / "all"
     monkeypatch.setattr("exam_forge.ui.questions_tab.export_moodle_xml", fake)
-    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    asked = []
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
+                        lambda *a: asked.append(a) or (str(path), ""))
     pick(window.topic_list, "attention")  # No filter applies.
     window.export_button.click()
     host.drain()
+    assert asked[0][2] == str(window.bank.folder / "revision-quiz.xml")
     assert sorted(i.id for i in exported) == ["q1", "q3"]
     assert path.with_suffix(".xml").read_bytes() == b"<quiz/>" and "Exported 2" in window.notice.text()
 
