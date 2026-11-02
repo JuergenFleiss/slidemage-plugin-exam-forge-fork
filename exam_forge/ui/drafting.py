@@ -78,11 +78,14 @@ class DraftDialog(Sheet):
         self.view, self.language = QComboBox(), QComboBox()
         for label, value in VIEWS:
             self.view.addItem(label, value)
-        self.language.addItems(["en", "de"])
+        codes = list(host.project_languages())          # the main language first: the default
         try:
-            self.language.setCurrentText(host.deck_language(deck))
+            own = host.deck_language(deck)
+            codes += [] if own in codes else [own]       # the deck's own, should it be another
         except Exception:
-            pass
+            own = codes[0]
+        self.language.addItems(codes)
+        self.language.setCurrentText(own)
         for label, field in (("How many", self.count), ("For", self.use),
                              ("Read slides as", self.view), ("Language", self.language)):
             row.addWidget(host.Field(label, field))

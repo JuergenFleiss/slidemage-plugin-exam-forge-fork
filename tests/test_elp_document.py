@@ -256,3 +256,9 @@ def test_import_needs_only_standard_library():
               'from exam_forge.elp_document import export_elp_documents; '
               'assert not any(n.startswith(("slidemage", "PySide6")) for n in sys.modules)')
     subprocess.run([sys.executable, '-I', '-S', '-c', script, str(Path(__file__).resolve().parents[1])], check=True)
+
+
+def test_the_pages_carry_the_decks_language(tmp_path):
+    manifest, _bank, _png = sample(tmp_path)
+    assert all('<html lang="en">' in html for html in export_elp_documents(manifest))
+    assert all('<html lang="fr">' in html for html in export_elp_documents(manifest, "fr"))

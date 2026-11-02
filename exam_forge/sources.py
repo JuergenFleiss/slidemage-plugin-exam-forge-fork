@@ -92,8 +92,8 @@ def link_slide(host: Host, ref: SlideRef, view: str) -> SourceLink:
     ref.language may instead be the fallback language, 'mult', or None.
     """
     language = ref.language_read or ref.language
-    if language not in ("de", "en"):
-        raise ValueError("a source link needs the requested reading language (de or en)")
+    if not (isinstance(language, str) and len(language) == 2 and language.isalpha() and language.islower()):
+        raise ValueError("a source link needs the requested reading language (a code such as en, de or fr)")
     if view not in ("instructor", "during-course", "after-course"):
         raise ValueError(f"unknown view: {view}")
     source = host.slide_source(ref)

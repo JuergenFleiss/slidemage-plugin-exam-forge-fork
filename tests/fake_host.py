@@ -120,6 +120,9 @@ class FakeHost:
     def deck_language(self, deck):
         return "en"
 
+    def project_languages(self):
+        return ["en", "de"]
+
     def run_in_background(self, work, done):
         try:
             result = work()

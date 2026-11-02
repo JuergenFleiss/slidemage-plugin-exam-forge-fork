@@ -281,6 +281,12 @@ def test_reading_language_and_view_survive_fallback_and_multilingual_refs(env):
     assert link_slide(env.host, unversioned, "instructor").version == ""
 
 
+def test_a_slide_read_in_french_links_in_french(env):
+    ref = replace(env.ref, language="fr", language_read="fr")
+    env.host.sources[ref] = env.source
+    assert link_slide(env.host, ref, "instructor").language == "fr"
+
+
 def test_link_rejects_unknown_reading_context(env):
     with pytest.raises(ValueError, match="reading language"):
         link_slide(env.host, replace(env.ref, language="mult", language_read=None), "instructor")

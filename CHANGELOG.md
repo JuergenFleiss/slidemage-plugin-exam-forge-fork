@@ -100,3 +100,9 @@ NEW: Adding an image to a question is quick, and a deck's question folder can ch
 CHANGED: Rules for images.
 - Every image needs a description before a question can be marked reviewed.
 - SVG files can no longer be added, because ELP exams cannot include them. The file's content now decides whether it is accepted, not its name.
+
+v0.9.0 (2026-11-02, any language of the project, with SlideMage v0.13.31): Questions can be drafted from slides in any language of the project, not only English and German. Requires SlideMage v0.13.31.
+
+NEW: Exam Forge works with every language of your project.
+- Draft questions lists the project's languages, the deck's own first selected; a slide read in French is linked in French.
+- The ELP exam copy and key sheet are marked with the deck's language, so a screen reader reads them in it.

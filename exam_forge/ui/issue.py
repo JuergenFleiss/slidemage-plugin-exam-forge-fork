@@ -184,7 +184,8 @@ class IssueView(QWidget):
         manifest = self.manifest
 
         def work():
-            path.write_text(export_elp_documents(manifest)[which], encoding="utf-8")
+            path.write_text(export_elp_documents(manifest, self.host.deck_language(self.window.deck))[which],
+                            encoding="utf-8")
 
         def done(_):
             if self.manifest is manifest:

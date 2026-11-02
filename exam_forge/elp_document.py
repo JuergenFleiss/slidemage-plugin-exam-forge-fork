@@ -54,9 +54,9 @@ def _text(value: str) -> str:
     return escape(value, quote=True)
 
 
-def _page(title: str, body: list[str]) -> str:
+def _page(title: str, body: list[str], language: str = "en") -> str:
     return '\n'.join([
-        '<!doctype html>', '<html lang="en">', '<head>', '<meta charset="utf-8">',
+        '<!doctype html>', f'<html lang="{_text(language)}">', '<head>', '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
          'img-src data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'">'),
@@ -118,7 +118,7 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
     return '\n'.join(parts)
 
 
-def export_elp_documents(manifest: Manifest) -> tuple[str, str]:
+def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str, str]:
     """Return (exam_html, key_html), to write as UTF-8; no I/O or live bank reads.
 
     Expects a G5 schema-1 or schema-2 snapshot; unknown item keys are ignored. Unknown difficulty classes, missing frozen
@@ -172,4 +172,5 @@ def export_elp_documents(manifest: Manifest) -> tuple[str, str]:
                 'Correct tick: +P/n; wrong tick: −P/(5−n).</p>'),
                ('<table><thead><tr><th>P</th><th>n</th><th>Correct tick</th><th>Wrong tick</th>'
                 '</tr></thead><tbody>'), *tables, '</tbody></table>']
-    return _page('ELP exam — entry copy', exam), _page('ELP key and scoring sheet', key)
+    # `language` is the deck's: the questions are written in it, so a screen reader reads the page in it.
+    return _page('ELP exam — entry copy', exam, language), _page('ELP key and scoring sheet', key, language)
