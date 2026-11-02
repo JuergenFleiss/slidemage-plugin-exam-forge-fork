@@ -7,17 +7,15 @@ from html import escape
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImageReader, QPalette
+from PySide6.QtCore import QBuffer, QIODevice, Qt, Signal
+from PySide6.QtGui import QGuiApplication, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -29,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from ..bank import BankError
 from ..elp import check_elp
+from ..elp_document import image_mime
 from ..model import Item, Option, check_phase1
 from ..sources import check_item, link_slide, rebaseline_links
 from ..topics import topic_color, topic_of
@@ -37,6 +36,9 @@ from .work import SCROLL_STYLE, fresh_deck, slide_title
 REVISION_MAX, ELP_COUNT = 8, 5
 HINTS = {"revision": "Revision quiz: exactly one correct answer",
          "elp": "ELP exam: exactly five answers, one to four correct"}
+IMAGE_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
+IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.gif *.webp)"
+THUMB_WIDTH, THUMB_HEIGHT = 160, 100
 TA_WARNING = "Shared stem, exclusions or fixed option order. This appears in the exam file; do not put answers here."
 
 
@@ -73,6 +75,8 @@ def reviewed_issues(item):
             issues.append("keep at most eight answers")
         if check_phase1(item):
             issues.append("mark exactly one correct answer")
+    if any(not media.alt.strip() for media in item.media):
+        issues.append("describe every image")
     if not item.sources:
         issues.append("link a slide")
     return issues
@@ -150,6 +154,69 @@ class Fold(QWidget):
         self.header.setChecked(on)
         self.content.setVisible(on)
         self.header.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+
+
+def png_bytes(image):
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buffer, "PNG")
+    return bytes(buffer.data())
+
+
+class StemEdit(QPlainTextEdit):
+    """Question text that also takes images. Copied text often carries a picture of itself, so text wins."""
+    image_pasted = Signal(bytes)
+    file_dropped = Signal(str)
+
+    @staticmethod
+    def image_file(source):
+        files = (url.toLocalFile() for url in source.urls() if url.isLocalFile())
+        return next((name for name in files if Path(name).suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp")), "")
+
+    def canInsertFromMimeData(self, source):
+        return bool(self.image_file(source)) or source.hasImage() or super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source):
+        if name := self.image_file(source):
+            self.file_dropped.emit(name)
+        elif source.hasImage() and not source.hasText():
+            self.image_pasted.emit(png_bytes(source.imageData()))
+        else:
+            super().insertFromMimeData(source)
+
+
+class ImageRow(QWidget):
+    changed = Signal(object)
+    removed = Signal(object)
+
+    def __init__(self, host, media, data):
+        super().__init__()
+        self.name = media.name
+        line = QHBoxLayout(self)
+        line.setContentsMargins(0, 0, 0, 0)
+        self.thumb = QLabel()
+        self.thumb.setFixedSize(THUMB_WIDTH, THUMB_HEIGHT)
+        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pixmap = QPixmap()
+        if data is not None and pixmap.loadFromData(data):
+            ratio = self.devicePixelRatioF()
+            pixmap = pixmap.scaled(int(THUMB_WIDTH * ratio), int(THUMB_HEIGHT * ratio),
+                                   Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            pixmap.setDevicePixelRatio(ratio)
+            self.thumb.setPixmap(pixmap)
+        else:
+            self.thumb.setText("Image missing" if data is None else "No preview")
+        self.alt = QLineEdit(media.alt)
+        self.alt.setPlaceholderText("Describe the image")
+        self.alt.setToolTip("Shown under the image in ELP exams, so do not put the answer in it.")
+        self.alt.setAccessibleName("Image description")
+        self.alt.textChanged.connect(lambda: self.changed.emit(self))
+        self.remove = host.Button("✕", compact=True)
+        self.remove.setToolTip("Remove image")
+        self.remove.clicked.connect(lambda: self.removed.emit(self))
+        line.addWidget(self.thumb)
+        line.addWidget(self.alt, 1)
+        line.addWidget(self.remove)
 
 
 class AnswerRow(QWidget):
@@ -258,10 +325,25 @@ class ItemEditor:
         bar.addWidget(self.compare_button)
         bar.addWidget(self.still_button)
         body.addWidget(self.source_bar)
-        self.stem = QPlainTextEdit()
+        self.stem = StemEdit()
+        self.stem.image_pasted.connect(self.add_image)
+        self.stem.file_dropped.connect(self.add_image_file)
         self.stem.setPlaceholderText(r"\( … \)")
         self.stem.setMaximumHeight(135)
         body.addWidget(host.Field("Question", self.stem))
+        self.media_box = QVBoxLayout()
+        body.addLayout(self.media_box)
+        self.image_rows = []
+        row = QHBoxLayout()
+        self.image_button = host.Button("+ Add image…", compact=True)
+        self.image_button.clicked.connect(self.attach_image)
+        self.paste_button = host.Button("Paste image", compact=True)
+        self.paste_button.clicked.connect(self.paste_image)
+        row.addWidget(self.image_button)
+        row.addWidget(self.paste_button)
+        row.addWidget(host.caption("or paste or drop one into the question"))
+        row.addStretch()
+        body.addLayout(row)
         head = QHBoxLayout()
         head.addWidget(host.Label("Answers", "heading"))
         self.hint = host.caption("")
@@ -307,19 +389,6 @@ class ItemEditor:
         self.note_fold.box.addWidget(warning)
         self.note_fold.box.addWidget(self.assistant_note)
         body.addWidget(self.note_fold)
-        self.media_fold = Fold("Images (appended to the question)")
-        self.media_list = QListWidget()
-        self.media_list.setMaximumHeight(85)
-        self.media_fold.box.addWidget(self.media_list)
-        row = QHBoxLayout()
-        for text, action in (("Attach image…", self.attach_image), ("Edit alt text…", self.edit_alt),
-                             ("Remove image", self.remove_image)):
-            button = host.Button(text, compact=True)
-            button.clicked.connect(action)
-            row.addWidget(button)
-        row.addStretch()
-        self.media_fold.box.addLayout(row)
-        body.addWidget(self.media_fold)
         body.addStretch()
         footer = QHBoxLayout()
         footer.setContentsMargins(14, 8, 14, 8)
@@ -399,7 +468,6 @@ class ItemEditor:
         self.stem.setPlainText(item.stem)
         self.assistant_note.setPlainText(item.assistant_note)
         self.note_fold.set_open(bool(item.assistant_note))
-        self.media_fold.set_open(bool(item.media))
         for row in self.rows:
             self.answers.removeWidget(row)
             row.hide()
@@ -783,39 +851,64 @@ class ItemEditor:
     # -- images --------------------------------------------------------------------------------------------
 
     def render_media(self):
-        self.media_list.clear()
-        self.media_list.addItems([f"{m.name[:16]}… · {m.alt or 'No alt text'}" for m in self.attachments])
+        for row in self.image_rows:
+            self.media_box.removeWidget(row)
+            row.hide()
+            row.deleteLater()
+        self.image_rows = []
+        for media in self.attachments:
+            try:
+                data = self.bank.read_media(media)
+            except (OSError, BankError):
+                data = None
+            row = ImageRow(self.host, media, data)
+            row.changed.connect(self.image_described)
+            row.removed.connect(self.remove_image)
+            self.image_rows.append(row)
+            self.media_box.addWidget(row)
         self.touch()
 
-    def attach_image(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Attach image", "", "Images (*.png *.jpg *.jpeg *.gif *.webp *.svg)")
-        if not path:
-            return
-        alt, ok = QInputDialog.getText(self, "Image description", "Alternative text")
-        if not ok:
-            return
+    def add_image(self, data):
+        """Store an image for this question and put the cursor on its description."""
         try:
-            if not QImageReader(path).canRead():
-                raise ValueError("This file could not be read as an image.")
-            media = self.bank.store_media("image" + Path(path).suffix.lower(), Path(path).read_bytes(), alt)
-            if any(m.name == media.name for m in self.attachments):
-                self.error("This image is already attached. Edit its alternative text instead.")
-                return
-            self.attachments += (media,)
-            self.media_fold.set_open(True)
-            self.render_media()
+            mime = image_mime(data)
+            if mime is None:
+                raise ValueError("Use a PNG, JPEG, GIF or WebP image.")
+            media = self.bank.store_media("image" + IMAGE_SUFFIXES[mime], data)
         except (OSError, BankError, ValueError) as exc:
             self.error(exc)
+            return
+        if any(m.sha256 == media.sha256 for m in self.attachments):
+            self.error("This image is already attached to this question.")
+            return
+        self.attachments += (media,)
+        self.render_media()
+        self.image_rows[-1].alt.setFocus()
 
-    def edit_alt(self):
-        row = self.media_list.currentRow()
-        if 0 <= row < len(self.attachments):
-            alt, ok = QInputDialog.getText(self, "Image description", "Alternative text", text=self.attachments[row].alt)
-            if ok:
-                self.attachments = tuple(replace(m, alt=alt) if i == row else m for i, m in enumerate(self.attachments))
-                self.render_media()
+    def add_image_file(self, path):
+        try:
+            data = Path(path).read_bytes()
+        except OSError as exc:
+            self.error(exc)
+            return
+        self.add_image(data)
 
-    def remove_image(self):
-        row = self.media_list.currentRow()
-        self.attachments = tuple(m for i, m in enumerate(self.attachments) if i != row)
+    def attach_image(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Add image", "", IMAGE_FILTER)
+        if path:
+            self.add_image_file(path)
+
+    def paste_image(self):
+        image = QGuiApplication.clipboard().image()
+        if image.isNull():
+            self.error("The clipboard holds no image. Copy one first.")
+            return
+        self.add_image(png_bytes(image))
+
+    def image_described(self, row):
+        self.attachments = tuple(replace(m, alt=row.alt.text()) if m.name == row.name else m for m in self.attachments)
+        self.touch()
+
+    def remove_image(self, row):
+        self.attachments = tuple(m for m in self.attachments if m.name != row.name)
         self.render_media()

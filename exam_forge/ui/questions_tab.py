@@ -425,6 +425,8 @@ class QuestionsTab:
         chips = [self.chip(*STATUS[item.status]), self.chip(USES[item.use], "muted")]
         if item.difficulty in ("easy", "hard"):
             chips.append(self.chip(item.difficulty.title(), "muted"))
+        if item.media:
+            chips.append(self.chip(plural(len(item.media), "image"), "muted"))
         if ai_draft(item):
             chips.append(self.chip("AI draft", amber=True))
         if item.source_changed and item.status != "retired":

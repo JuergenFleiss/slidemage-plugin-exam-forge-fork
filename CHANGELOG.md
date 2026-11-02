@@ -88,3 +88,15 @@ NEW: Exam Forge looks like SlideMage, in light and dark.
 - Slide titles show without LaTeX markup.
 - The Exam Forge box in the sidebar has an Open Exam Forge button.
 - Short messages such as a saved draft appear for a moment at the bottom of the window.
+
+v0.8.0 (2026-11-02, question images and folder): Images now sit directly under the question text, with previews, and Settings can change a deck's question folder.
+
+NEW: Adding an image to a question is quick, and a deck's question folder can change.
+- Add a file, use Paste image, or paste or drop an image into the question. Each image shows a preview and its description right there, instead of in a folded list at the bottom.
+- Question lists and exam proposals show how many images a question has.
+- Change the open deck's question folder in Settings, Exam Forge. An empty folder receives a checked copy of the bank's files. The old folder is not changed, so delete it yourself once you have checked the new one.
+- A folder that already has a bank is used as it is, after you confirm; nothing is merged.
+
+CHANGED: Rules for images.
+- Every image needs a description before a question can be marked reviewed.
+- SVG files can no longer be added, because ELP exams cannot include them. The file's content now decides whether it is accepted, not its name.

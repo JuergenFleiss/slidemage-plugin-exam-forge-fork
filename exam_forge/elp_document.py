@@ -65,6 +65,19 @@ def _page(title: str, body: list[str]) -> str:
     ])
 
 
+def image_mime(raw: bytes) -> str | None:
+    """The media type of a supported image, judged by its content."""
+    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if raw.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if raw.startswith((b'GIF87a', b'GIF89a')):
+        return 'image/gif'
+    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+        return 'image/webp'
+    return None
+
+
 def _image(media: dict, attachments: dict) -> str:
     name = media['name']
     try:
@@ -73,15 +86,8 @@ def _image(media: dict, attachments: dict) -> str:
         raise ValueError(f'Missing or invalid snapshot image: {name}') from exc
     if hashlib.sha256(raw).hexdigest() != media['sha256']:
         raise ValueError(f'Snapshot image hash mismatch: {name}')
-    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
-        mime = 'image/png'
-    elif raw.startswith(b'\xff\xd8\xff'):
-        mime = 'image/jpeg'
-    elif raw.startswith((b'GIF87a', b'GIF89a')):
-        mime = 'image/gif'
-    elif raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
-        mime = 'image/webp'
-    else:
+    mime = image_mime(raw)
+    if mime is None:
         raise ValueError(f'Unsupported image {name}: use PNG, JPEG, GIF or WebP')
     encoded = base64.b64encode(raw).decode('ascii')
     alt = _text(media['alt'])

@@ -4,7 +4,7 @@ Exam Forge is a SlideMage plugin for creating and managing exam questions for a 
 
 ## Question bank
 
-**The bank contains answer keys and rationales.** Keep its folder private and back it up securely. Choose a private bank folder before saving anything. SlideMage remembers it by the deck's absolute path; a moved deck or a missing bank folder prompts you to choose again. Folders inside deck output or an unignored project directory require confirmation because questions and answers could be shared accidentally.
+**The bank contains answer keys and rationales.** Keep its folder private and back it up securely. Choose a private bank folder before saving anything. SlideMage remembers it by the deck's absolute path; a moved deck or a missing bank folder prompts you to choose again. To change the open deck's folder, use **Change folder…** in Settings, Exam Forge. An empty folder receives a copy of the bank, and the old folder stays as it is until you delete it, answers included; a folder that already has a bank is used as it is, without merging. Folders inside deck output or an unignored project directory require confirmation because questions and answers could be shared accidentally.
 
 The window has **Questions** and **Exam** tabs. On Questions, choose a topic, then a slide, to see the questions written for it. **Needs attention** lists questions whose slide changed and AI drafts still awaiting review.
 
@@ -13,6 +13,8 @@ Create questions with answers and rationales, a learning objective, difficulty (
 **Topics** are groups of slides, kept in `topics.json` in the bank folder. Each slide belongs to at most one topic, and a question's topic is the topic of its first linked slide. When you first open a bank that has older free-text topics, Exam Forge creates topics from them automatically and reports any conflicts once.
 
 Marking a question reviewed requires at least one linked slide; questions that were already reviewed keep their status. Questions without a linked slide appear under **Unlinked questions** and are left out of exam counts until you link one.
+
+A question can have images, shown after its text in Moodle and in ELP exams; answers stay text only. Add a PNG, JPEG, GIF or WebP file, paste one, or drop it into the question. Every image needs a description before the question can be marked reviewed; ELP exams print it under the image, so do not put the answer in it.
 
 Every saved edit creates a draft revision, including edits to images or their alternative text. Reviewed revisions and their media stay available in the bank. Conflicts keep your typed fields and offer to save them as a separate question. Leaving a question with unsaved edits asks whether to save, discard or cancel.
 

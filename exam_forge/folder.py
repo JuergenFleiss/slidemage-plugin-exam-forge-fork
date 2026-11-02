@@ -3,7 +3,9 @@
 """Folder choices and exposure checks; independent of the user interface."""
 from __future__ import annotations
 
+import filecmp
 from pathlib import Path
+import shutil
 import subprocess
 
 from .bank import Bank
@@ -53,6 +55,31 @@ def folder_warnings(host, deck, folder: str | Path) -> list[str]:
     if _inside(folder, project) and not _ignored_by_git(folder, project):
         warnings.append("This folder is inside the project and is not ignored by Git (or Git could not check it).")
     return warnings
+
+
+def copy_bank(source: str | Path, target: str | Path) -> None:
+    """Copy a bank's own files into a folder without a bank and verify them; the source stays as it is.
+
+    The index goes last, so an interrupted copy is never a bank. A failed copy removes what it wrote.
+    """
+    source, target = Path(source), Path(target)
+    if any(target.glob("*.json")):
+        raise ValueError(f"This folder already holds question files: {target}")
+    written = []
+    try:
+        for path in Bank(source).files():
+            copy = target / path.relative_to(source)
+            copy.parent.mkdir(exist_ok=True)
+            written.append(copy)
+            shutil.copy2(path, copy)
+            if not filecmp.cmp(path, copy, shallow=False):
+                raise OSError(f"Copy differs from the original: {path.name}")
+    except BaseException:
+        for copy in written:
+            copy.unlink(missing_ok=True)
+        if (target / "media").is_dir() and not any((target / "media").iterdir()):
+            (target / "media").rmdir()
+        raise
 
 
 def open_chosen_folder(host, deck, folder: str | Path) -> Bank:

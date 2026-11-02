@@ -7,14 +7,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from pathlib import Path
+import shutil
 from threading import get_ident
 from xml.etree import ElementTree as ET
 
 import pytest
 from fake_host import FakeDeck, FakeHost
 from PySide6.QtGui import QColor, QImage, QPalette
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
+from PySide6.QtCore import QMimeData, Qt, QUrl
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton
 from slidemage.plugin_api import Focus, SlideRef, SlideSource
 
 import exam_forge
@@ -22,6 +24,7 @@ from exam_forge.bank import Bank
 from exam_forge.folder import open_chosen_folder
 from exam_forge.model import Item, Origin
 from exam_forge.sources import link_slide
+from exam_forge.ui.editor import png_bytes
 
 
 class GuiHost(FakeHost):
@@ -126,8 +129,11 @@ def test_create_edit_review_and_media_revisions(env, monkeypatch, tmp_path):
     image.fill(QColor("red"))
     assert image.save(str(image_path))
     monkeypatch.setattr("exam_forge.ui.editor.QFileDialog.getOpenFileName", lambda *a: (str(image_path), ""))
-    monkeypatch.setattr("exam_forge.ui.editor.QInputDialog.getText", lambda *a, **k: ("A red square", True))
     window.attach_image()
+    assert "describe every image" in window.status_line.text()
+    assert not window.image_rows[0].thumb.pixmap().isNull()
+    window.image_rows[0].alt.setText("A red square")
+    assert window.approve_button.isEnabled()
     window.save_button.click()
     edited = window.current
     assert edited.status == "draft" and edited.revision == reviewed.revision + 1
@@ -221,6 +227,65 @@ def test_background_check_preserves_unsaved_fields_and_refreshes_deck_text(env):
     host.drain()
     assert seen and set(seen) == {"fresh deck contents"}
     assert window.stem.toPlainText() == "Still typing after saving" and window.dirty()
+
+
+def png(color="red"):
+    image = QImage(8, 8, QImage.Format.Format_RGB32)
+    image.fill(QColor(color))
+    return png_bytes(image)
+
+
+def test_pasted_and_dropped_images_join_the_question_and_text_still_pastes(env, tmp_path):
+    *_, window = env
+    fill(window)
+    pasted = QMimeData()
+    pasted.setImageData(QImage.fromData(png("red")))
+    window.stem.insertFromMimeData(pasted)
+    assert len(window.attachments) == 1
+    path = tmp_path / "blue.png"
+    path.write_bytes(png("blue"))
+    dropped = QMimeData()
+    dropped.setUrls([QUrl.fromLocalFile(str(path))])
+    assert window.stem.canInsertFromMimeData(dropped)
+    window.stem.insertFromMimeData(dropped)
+    assert len(window.attachments) == 2
+    both = QMimeData()
+    both.setText("copied words")
+    both.setImageData(QImage.fromData(png("green")))
+    window.stem.insertFromMimeData(both)
+    assert len(window.attachments) == 2 and "copied words" in window.stem.toPlainText()
+
+
+def test_clipboard_button_and_unusable_images(env, tmp_path, monkeypatch):
+    *_, window = env
+    fill(window)
+    errors = []
+    monkeypatch.setattr(window, "error", errors.append)
+    QApplication.clipboard().clear()
+    window.paste_image()
+    assert errors and not window.attachments
+    QApplication.clipboard().setImage(QImage.fromData(png()))
+    window.paste_button.click()
+    assert len(window.attachments) == 1
+    window.paste_button.click()
+    assert len(window.attachments) == 1 and "already attached" in str(errors[-1])
+    svg = tmp_path / "drawing.png"
+    svg.write_bytes(b"<svg xmlns='http://www.w3.org/2000/svg'/>")
+    window.add_image_file(str(svg))
+    assert len(window.attachments) == 1 and "PNG, JPEG" in str(errors[-1])
+    window.image_rows[0].remove.click()
+    assert not window.attachments and not window.image_rows
+
+
+def test_an_image_missing_from_the_bank_does_not_stop_the_editor(env):
+    _, _, bank, _, window = env
+    item = fill(window)
+    media = bank.store_media("plot.png", png(), "A plot")
+    window.attachments = (media,)
+    window.save()
+    (bank.folder / "media" / media.name).unlink()
+    window.populate(bank.get(item.id))
+    assert window.image_rows[0].thumb.text() == "Image missing"
 
 
 def test_export_includes_bank_media_and_excludes_elp_draft_and_retired(env, tmp_path, monkeypatch):
@@ -443,3 +508,119 @@ def test_first_open_migrates_legacy_topics_once_and_saving_drops_the_proposal(en
     assert window.save_topics(add_topic(window.topics, "Bayes"))
     assert window.exam_tab.selection is None
     assert [t.name for t in TopicStore(bank.folder).load()] == ["Probability", "Bayes"]
+
+
+def settings_button(host, deck):
+    host.current_focus = Focus(deck.path, None, "slide")
+    page = host.settings_tabs["Exam Forge"]()
+    return page, next(b for b in page.findChildren(QPushButton) if b.text() == "Change folder…")
+
+
+def pick_folder(monkeypatch, folder):
+    monkeypatch.setattr("exam_forge.ui.first_use.QFileDialog.getExistingDirectory", lambda *a: str(folder))
+
+
+def test_settings_copy_the_bank_to_an_empty_folder_and_leave_the_old_one(env, tmp_path, monkeypatch):
+    host, deck, bank, controller, window = env
+    item = fill(window)
+    media = bank.store_media("plot.png", png(), "A plot")
+    window.attachments = (media,)
+    window.save()
+    (bank.folder / "unrelated.txt").write_text("not the bank's")
+    (bank.folder / "1.manifest.json").write_text("{}")
+    old = bank.folder
+    before = sorted(p.name for p in old.iterdir())
+    target = tmp_path / "moved"
+    target.mkdir()
+    pick_folder(monkeypatch, target)
+    _, button = settings_button(host, deck)
+    button.click()
+    host.drain()
+    assert window.bank.folder == target and window.bank.get(item.id).media == (media,)
+    assert window.bank.read_media(media) == png()
+    assert (target / "1.manifest.json").exists() and not (target / "unrelated.txt").exists()
+    assert sorted(p.name for p in old.iterdir()) == before
+    assert host.settings().get("bank_folders")[str(deck.path.resolve())] == str(target)
+    assert window.folder_label.text() == str(target)
+
+
+def test_settings_use_a_folder_with_a_bank_only_after_asking(env, tmp_path, monkeypatch):
+    host, deck, bank, _, window = env
+    other = tmp_path / "other"
+    other.mkdir()
+    existing = Bank(other, create=True)
+    pick_folder(monkeypatch, other)
+    answers = [QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes]
+    monkeypatch.setattr("exam_forge.ui.first_use.QMessageBox.question", lambda *a: answers.pop(0))
+    _, button = settings_button(host, deck)
+    button.click()
+    assert window.bank.folder == bank.folder
+    button.click()
+    host.drain()
+    assert window.bank.id == existing.id
+
+
+def test_a_refused_unsaved_question_keeps_the_folder(env, tmp_path, monkeypatch):
+    host, deck, bank, _, window = env
+    fill(window)
+    window.stem.setPlainText("Edited")
+    monkeypatch.setattr("exam_forge.ui.editor.QMessageBox.question", lambda *a: QMessageBox.StandardButton.Cancel)
+    target = tmp_path / "moved"
+    target.mkdir()
+    pick_folder(monkeypatch, target)
+    _, button = settings_button(host, deck)
+    button.click()
+    assert window.bank.folder == bank.folder and not any(target.iterdir())
+    assert window.stem.toPlainText() == "Edited"
+
+
+def test_a_failed_copy_leaves_nothing_behind(env, tmp_path, monkeypatch):
+    host, deck, bank, _, window = env
+    item = fill(window)
+    media = bank.store_media("plot.png", png(), "A plot")
+    target = tmp_path / "moved"
+    target.mkdir()
+    pick_folder(monkeypatch, target)
+    real_copy = shutil.copy2
+    def failing(source, copy):
+        if Path(source).name == "bank.json":
+            raise OSError("disk full")
+        return real_copy(source, copy)
+    monkeypatch.setattr("exam_forge.folder.shutil.copy2", failing)
+    messages = []
+    monkeypatch.setattr(host, "show_message", lambda text, error=False: messages.append((text, error)))
+    _, button = settings_button(host, deck)
+    button.click()
+    assert messages == [("disk full", True)] and not any(target.iterdir())
+    assert window.bank.folder == bank.folder and window.bank.get(item.id) and media
+
+
+def test_a_deck_without_a_window_changes_folder_and_recounts(env, tmp_path, monkeypatch):
+    host, deck, bank, controller, window = env
+    controller.windows.clear()
+    controller.counts[controller.key(deck)] = (1, 1, 0, 0, 0)
+    target = tmp_path / "moved"
+    target.mkdir()
+    pick_folder(monkeypatch, target)
+    assert controller.change_folder(deck)
+    assert controller.key(deck) not in controller.counts
+    assert (target / "bank.json").is_file()
+    controller.windows[controller.key(deck)] = window
+
+
+def test_settings_find_the_open_deck_without_a_window_or_sidebar_box(app, tmp_path, monkeypatch):
+    host = GuiHost(tmp_path / "project")
+    host.root.mkdir()
+    deck = FakeDeck("course", host.root / "course.tex")
+    deck.path.write_text("deck")
+    exam_forge.activate(host)
+    host.finish_activation()
+    page = host.settings_tabs["Exam Forge"]()
+    assert not [b for b in page.findChildren(QPushButton) if b.text() == "Change folder…"]
+    target = tmp_path / "chosen"
+    target.mkdir()
+    pick_folder(monkeypatch, target)
+    page, button = settings_button(host, deck)
+    assert any(label.text() == "course: not chosen yet" for label in page.findChildren(QLabel))
+    button.click()
+    assert host.settings().get("bank_folders")[str(deck.path.resolve())] == str(target)

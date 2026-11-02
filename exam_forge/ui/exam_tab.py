@@ -483,6 +483,8 @@ class ExamTab(QWidget):
         rule = getattr(self.rules, item.difficulty)
         chip = self.host.Chip(f"{item.difficulty.capitalize()} · {rule.points} pts")
         meta.addWidget(chip)
+        if item.media:
+            meta.addWidget(self.host.Chip(f"{len(item.media)} image{'s' if len(item.media) != 1 else ''}", "muted"))
         meta.addWidget(self.muted(self.labels.get(item.id) or
                              (f"Slide {item.sources[0].slide_id}" if item.sources else "No slide")))
         row = self.rows[item.id] = {"stem": stem, "chip": chip, "changed": None, "review": None}

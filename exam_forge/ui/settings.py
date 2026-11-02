@@ -1,14 +1,40 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exam Forge settings, built when the host opens Settings."""
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QPlainTextEdit
 
 from ..ai_support import ai_service
 from ..drafting import DEFAULT_GUIDANCE
 
 
-def build_settings(host, on_change=lambda: None):
+def add_folder_section(host, controller, page):
+    deck = controller.open_deck()
+    if deck is None:
+        page.body.addWidget(host.Field("Question folder", host.caption("Open a deck to change its question folder.")))
+        return
+    path = host.caption("")
+    path.setWordWrap(True)
+    change = host.Button("Change folder…", compact=True)
+
+    def show():
+        folder = controller.bank_folder(deck)
+        path.setText(f"{deck.name}: {folder if folder is not None else 'not chosen yet'}")
+
+    def pick():
+        if controller.change_folder(deck, page):
+            show()
+
+    change.clicked.connect(pick)
+    show()
+    page.body.addWidget(host.Field("Question folder", path))
+    page.body.addWidget(change, 0, Qt.AlignmentFlag.AlignLeft)
+
+
+def build_settings(host, controller):
+    on_change = controller.refresh_ai_support
     page = host.Page()
+    add_folder_section(host, controller, page)
     checkbox = QCheckBox("Enable AI support")
     checkbox.setChecked(bool(host.settings().get("ai_support", False)))
     notice = host.caption("")

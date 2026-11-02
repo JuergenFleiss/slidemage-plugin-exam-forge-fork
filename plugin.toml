@@ -1,6 +1,6 @@
 id = "exam-forge"
 name = "Exam Forge"
-version = "0.7.0"
+version = "0.8.0"
 api_version = 1
 requires_slidemage = ">=0.13.18"
 summary = "Create and manage exam questions for a SlideMage deck."

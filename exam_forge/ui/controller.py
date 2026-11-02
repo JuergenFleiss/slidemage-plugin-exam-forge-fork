@@ -8,9 +8,9 @@ from PySide6.QtWidgets import QLabel
 from ..bank import Bank, BankError
 from ..folder import remembered_folder
 from ..sources import link_slide
-from .first_use import choose_bank
+from .first_use import change_bank, choose_bank
 from .window import BankWindow
-from .work import fresh_deck
+from .work import DeckSnapshot, fresh_deck
 
 SIDEBAR_KEY = "bank"
 
@@ -36,6 +36,42 @@ class Controller:
     def refresh_ai_support(self):
         for window in self.windows.values():
             window.refresh_ai_support()
+
+    def open_deck(self):
+        """The deck open in SlideMage, or None. Settings gets no deck, and a sidebar box is built only when shown."""
+        path = self.host.focus().deck
+        if path is None:
+            return None
+        window = self.windows.get(Path(path).resolve())
+        return window.deck if window is not None else fresh_deck(DeckSnapshot(Path(path).stem, Path(path), "", ()))
+
+    def bank_folder(self, deck):
+        window = self.windows.get(self.key(deck))
+        return window.bank.folder if window is not None else remembered_folder(self.host, deck)
+
+    def change_folder(self, deck, parent=None):
+        """Point this deck at another bank folder; True when it changed."""
+        key = self.key(deck)
+        window = self.windows.get(key)
+        if window is not None and window.busy:
+            self.host.show_message("Wait for the current operation to finish.", error=True)
+            return False
+        try:
+            changed = change_bank(self.host, deck, self.bank_folder(deck), parent,
+                                  window.may_leave if window is not None else lambda: True)
+        except (OSError, BankError, ValueError) as exc:
+            self.host.show_message(str(exc), error=True)
+            return False
+        if changed is None:
+            return False
+        bank, message = changed
+        if window is not None:
+            window.switch_bank(bank)
+        else:
+            self.counts.pop(key, None)
+            self.host.refresh_sidebar_box(SIDEBAR_KEY)
+        self.host.show_message(message)
+        return True
 
     def open(self, deck):
         key = self.key(deck)
