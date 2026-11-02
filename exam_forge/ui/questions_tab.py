@@ -534,7 +534,8 @@ class QuestionsTab:
         self.fill(self.cards, build, chosen.data(KEY) if chosen else None)
 
     def show_page(self):
-        if self.stack.currentWidget() is self.editor:
+        # The editor stays while it holds a question; a dropped one would be a disabled panel that ignores input.
+        if self.stack.currentWidget() is self.editor and self.current is not None:
             return
         if self.listing() or self.sel_slide is None:
             self.placeholder.setText("Select a question to open it." if self.listing()

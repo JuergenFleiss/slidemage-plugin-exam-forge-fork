@@ -771,3 +771,18 @@ def test_export_table_writes_every_question(lab, tmp_path, monkeypatch):
     text = path.with_suffix(".csv").read_bytes().decode("utf-8-sig")
     assert all(f"\r\nq{n}," in text for n in range(1, 9)) and "Slide 1 · Title a" in text
     assert "Exported 8 questions" in window.notice.text() and not window.busy
+
+
+def test_another_slide_or_topic_replaces_the_open_question(lab):
+    window, topics = lab[4], lab[7]
+    window.card_opened(window.cards.item(0))
+    assert window.stack.currentWidget() is window.editor
+    pick(window.slide_list, "b")
+    assert window.current is None and window.stack.currentWidget() is window.slide_page   # not a dead editor
+    assert keys(window.cards) == ["q3"]
+    window.card_opened(window.cards.item(0))
+    pick(window.topic_list, topics[1].id)
+    assert window.current is None and window.stack.currentWidget() is window.slide_page
+    window.card_opened(window.cards.item(0))
+    pick(window.topic_list, "attention")
+    assert window.stack.currentWidget() is window.placeholder

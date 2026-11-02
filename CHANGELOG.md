@@ -123,3 +123,6 @@ NEW: Switch the middle column between Slides and Questions, export every questio
 - ELP exams are now just exams: in the editor, the Exam tab and the exam documents.
 - Export table and Export to Moodle open in the deck's question folder.
 - When an AI request ends without a reply, Draft with AI and Update with AI say so instead of closing without a word.
+
+FIXED: Choosing another slide or topic while a question is open no longer leaves the right panel stuck.
+- It showed the closed question, disabled and ignoring every click, until you switched views.
