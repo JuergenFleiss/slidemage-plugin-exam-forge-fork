@@ -26,6 +26,8 @@ Source checks run in the background on open, on **Check slides**, and before sta
 
 **Export to Moodle** exports every reviewed revision-quiz question. It excludes ELP questions, drafts and retired questions. Images are read from the bank and verified against their SHA-256 hashes. Question and answer text is plain text; inline mathematics uses `\( ... \)`. In Moodle, import using the Moodle XML format with its MathJax filter enabled. **Moodle import has yet to be verified**, including media, mathematics and grading.
 
+**Export table** saves every question of the bank, whatever its status, as a CSV table: one row per question in the order of its slides, with topic, linked slides, learning objective, the teaching-assistant note, and each answer with whether it is correct and its rationale. **The table holds the answer key: keep it as private as the bank folder.** Images are only counted. It is UTF-8 and opens in Excel or LibreOffice; a cell that a spreadsheet would run as a formula starts with an apostrophe.
+
 ## ELP exams
 
 The **Exam** tab has three steps: counts, review and swap, freeze and save.

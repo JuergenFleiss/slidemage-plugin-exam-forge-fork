@@ -107,8 +107,10 @@ NEW: Exam Forge works with every language of your project.
 - Draft questions lists the project's languages, the deck's own first selected; a slide read in French is linked in French.
 - The ELP exam copy and key sheet are marked with the deck's language, so a screen reader reads them in it.
 
-v0.10.0 (2026-11-02, slides or questions): The middle column of the Questions tab shows either the slides or the questions.
+v0.10.0 (2026-11-02, slides or questions, and a table): The middle column of the Questions tab shows either the slides or the questions, and Export table saves the whole question set as a CSV table.
 
-NEW: Switch the middle column between Slides and Questions.
+NEW: Switch the middle column between Slides and Questions, and export every question as a table.
 - Slides lists the slides of the chosen topic, each with how many questions it has, as before.
 - Questions lists the topic's questions in the order of their slides, retired ones last. Click one to open it.
+- Export table saves a CSV table with one row per question: status, use, difficulty, topic, linked slides, learning objective and the note for teaching assistants, then each answer's text, whether it is correct, and its rationale.
+- The table holds the answer key, so keep it private. It opens in Excel or LibreOffice with accents and mathematics intact.

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Questions tab: topics, slides and the questions of one slide in three columns; source checks and XML export.
+"""Questions tab: topics, slides and the questions of one slide in three columns; source checks, XML and table
+export.
 The middle column lists the slides, each with its number of questions, or the questions themselves."""
 import os
 import tempfile
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
 from ..bank import BankError
 from ..moodle_xml import export_moodle_xml
 from ..sources import check_bank, link_slide
+from ..table_export import questions_csv
 from ..topics import topic_color, topic_of
 from .drafting import DraftDialog, plural
 from .editor import accent_color, is_dark
@@ -884,19 +886,7 @@ class QuestionsTab:
         def work():
             if any(self.bank.get(item.id) != item for item in items):
                 raise BankError("A question changed during export. Check slides and try again.")
-            xml = export_moodle_xml(items, bank=self.bank)
-            path = Path(filename)
-            temporary = None
-            try:
-                with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".moodle-", delete=False) as stream:
-                    temporary = stream.name
-                    stream.write(xml)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, path)
-            finally:
-                if temporary and os.path.exists(temporary):
-                    os.unlink(temporary)
+            write_atomically(Path(filename), export_moodle_xml(items, bank=self.bank), ".moodle-")
             return len(items)
 
         def done(count, error):
@@ -906,3 +896,48 @@ class QuestionsTab:
             else:
                 self.toast(f"Exported {count} reviewed questions to {filename}.")
         self.host.run_in_background(work, done)
+
+    def export_table(self):
+        """Every question of the bank, with its answers and rationales, as a CSV table."""
+        if not self.may_leave():
+            return
+        filename, _ = QFileDialog.getSaveFileName(self, "Export all questions with answers", "questions.csv",
+                                                  "CSV table (*.csv)")
+        if not filename:
+            return
+        if not filename.lower().endswith(".csv"):
+            filename += ".csv"
+        topics = self.topics
+        slides = {ref.id: (ref.position, slide_title(ref)) for ref in self.slides or ()}
+        self.set_busy(True)
+
+        def work():
+            items, corrupt = self.bank.load()
+            write_atomically(Path(filename), questions_csv(items, topics, slides), ".questions-")
+            return len(items), len(corrupt)
+
+        def done(counts, error):
+            self.set_busy(False)
+            if error:
+                self.error(error)
+            elif counts[1]:
+                self.error(f"Exported {plural(counts[0], 'question')} to {filename}; {plural(counts[1], 'question')} "
+                           f"could not be read and {'is' if counts[1] == 1 else 'are'} missing.")
+            else:
+                self.toast(f"Exported {plural(counts[0], 'question')} to {filename}. "
+                           "It holds the answers: keep it private.")
+        self.host.run_in_background(work, done)
+
+
+def write_atomically(path, data, prefix):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=prefix, delete=False) as stream:
+            temporary = stream.name
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)

@@ -753,3 +753,14 @@ def test_unsaved_work_keeps_the_focus(lab, monkeypatch):
     window.focus_switch.buttons()[1].click()
     assert window.focus == "slides" and window.focus_switch.current() == "slides"
     assert window.stack.currentWidget() is window.editor
+
+
+def test_export_table_writes_every_question(lab, tmp_path, monkeypatch):
+    host, _, _, _, window, *_ = lab
+    path = tmp_path / "all"
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    window.table_button.click()
+    host.drain()
+    text = path.with_suffix(".csv").read_bytes().decode("utf-8-sig")
+    assert all(f"\r\nq{n}," in text for n in range(1, 9)) and "Slide 1 · Title a" in text
+    assert "Exported 8 questions" in window.notice.text() and not window.busy
