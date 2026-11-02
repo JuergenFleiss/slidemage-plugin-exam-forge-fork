@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Questions tab: topics, slides and the questions of one slide in three columns; source checks and XML export."""
+"""Questions tab: topics, slides and the questions of one slide in three columns; source checks and XML export.
+The middle column lists the slides, each with its number of questions, or the questions themselves."""
 import os
 import tempfile
 from dataclasses import replace
@@ -39,6 +40,7 @@ KEY = Qt.ItemDataRole.UserRole
 REVIEW = ("attention", "unlinked")
 STATUS = {"draft": ("Draft", "neutral"), "reviewed": ("Reviewed", "ok"), "retired": ("Retired", "muted")}
 USES = {"revision": "Revision quiz", "elp": "ELP exam"}
+FOCUS = (("slides", "Slides"), ("questions", "Questions"))
 ELP_NOTE = "ELP questions without a linked slide are left out of exam counts until they are linked."
 
 
@@ -135,6 +137,7 @@ class QuestionsTab:
     def build_questions_tab(self):
         host = self.host
         self.view, self.sel_slide = "all", None
+        self.focus = "slides"
         self.slides = None
         self.slide_gen = 0
         self.changed_links, self.checked_at = {}, None
@@ -153,9 +156,14 @@ class QuestionsTab:
         self.cards.setSpacing(4)
         split.setChildrenCollapsible(False)
         split.setHandleWidth(8)
+        self.focus_switch = host.SegmentedControl(list(FOCUS))
+        self.focus_switch.set_current(self.focus)
+        self.focus_switch.changed.connect(self.focus_changed)
         for listw in (self.topic_list, self.slide_list):
             column = host.Card()
             column.layout().setContentsMargins(4, 6, 4, 6)
+            if listw is self.slide_list:
+                column.layout().addWidget(self.focus_switch, 0, Qt.AlignmentFlag.AlignLeft)
             column.layout().addWidget(listw)
             split.addWidget(column)
         split.addWidget(self.stack)
@@ -263,7 +271,25 @@ class QuestionsTab:
     def view_items(self):
         if self.view == "attention":
             return [item for item in self.items if needs_attention(item)]
-        return retired_last(self.unlinked()) if self.view == "unlinked" else []
+        if self.view == "unlinked":
+            return retired_last(self.unlinked())
+        return self.view_questions() if self.focus == "questions" else []
+
+    def view_questions(self):
+        """The questions a topic row counts, in deck order of their first slide; retired ones last."""
+        if self.view == "all":
+            mine = self.items
+        else:
+            topic = self.topic_by_id(self.view)
+            mine = [item for item in self.items if item.sources
+                    and getattr(topic_of(item, self.topics), "id", None) == getattr(topic, "id", None)]
+        order = {ref.id: n for n, ref in enumerate(self.slides or ())}
+        first = {item.id: order.get(next(iter(slide_ids(item)), None), len(order)) for item in mine}
+        return retired_last(sorted(mine, key=lambda item: first[item.id]))
+
+    def listing(self):
+        """Whether the middle column lists questions rather than slides."""
+        return self.view in REVIEW or self.focus == "questions"
 
     def view_name(self):
         topic = self.topic_by_id(self.view)
@@ -392,10 +418,14 @@ class QuestionsTab:
             for slide in slide_ids(item):
                 by_slide.setdefault(slide, []).append(item)
 
+        self.focus_switch.setVisible(self.view not in REVIEW)
+
         def build(add):
-            if self.view in REVIEW:
+            if self.listing():
                 for item in self.view_items():
                     add(item.id, self.card(item, compact=True), dim=item.status == "retired")
+                if self.view not in REVIEW and not self.view_items():
+                    add(None, row([], [passive(label(self.host, "No questions yet.", role="secondary"))]), False)
                 return
             for ref in self.view_slides():
                 mine = by_slide.get(ref.id, [])
@@ -416,7 +446,13 @@ class QuestionsTab:
                 add(None, row([], [passive(label(self.host, "Loading slides…" if self.slides is None else "No slides.",
                                                  role="secondary"))]), False)
 
-        self.fill(self.slide_list, build, None if self.view in REVIEW else self.sel_slide)
+        self.fill(self.slide_list, build, self.listed_key())
+
+    def listed_key(self):
+        """The row of the middle column that is current: the open question's, or the selected slide's."""
+        if self.listing():
+            return self.current.id if self.current is not None else None
+        return self.sel_slide
 
     def card(self, item, compact=False):
         stem = " ".join(item.stem.split()) or "Untitled question"
@@ -431,7 +467,7 @@ class QuestionsTab:
             chips.append(self.chip("AI draft", amber=True))
         if item.source_changed and item.status != "retired":
             chips.append(self.chip("Slide changed", amber=False))
-        review = self.view in REVIEW
+        review = self.listing()
         others = [s for s in slide_ids(item) if review or s != self.sel_slide]
         if others:
             names = ", ".join(str(ref.position) if (ref := self.slide_ref(s)) else s for s in others)
@@ -482,8 +518,8 @@ class QuestionsTab:
     def show_page(self):
         if self.stack.currentWidget() is self.editor:
             return
-        if self.view in REVIEW or self.sel_slide is None:
-            self.placeholder.setText("Select a question to open it." if self.view in REVIEW
+        if self.listing() or self.sel_slide is None:
+            self.placeholder.setText("Select a question to open it." if self.listing()
                               else "Select a slide to see its questions.")
             self.stack.setCurrentWidget(self.placeholder)
         else:
@@ -494,7 +530,7 @@ class QuestionsTab:
         self.syncing = True
         try:
             for listw, key in ((self.topic_list, self.view),
-                               (self.slide_list, None if self.view in REVIEW else self.sel_slide)):
+                               (self.slide_list, self.listed_key())):
                 listw.setCurrentItem(next((listw.item(i) for i in range(listw.count())
                                            if key is not None and listw.item(i).data(KEY) == key), None))
         finally:
@@ -531,7 +567,7 @@ class QuestionsTab:
 
     def slide_changed(self, entry, _previous):
         key = entry.data(KEY) if entry else None
-        if self.syncing or key is None or self.view in REVIEW or key == self.sel_slide:
+        if self.syncing or key is None or self.listing() or key == self.sel_slide:
             return
         if not self.leave():
             self.sync_selection()
@@ -539,8 +575,18 @@ class QuestionsTab:
         self.sel_slide = key
         self.render()
 
+    def focus_changed(self, focus):
+        if self.syncing or focus == self.focus:
+            return
+        if not self.leave():
+            self.focus_switch.set_current(self.focus)
+            return
+        self.focus = focus
+        self.stack.setCurrentWidget(self.placeholder)
+        self.render()
+
     def review_row_opened(self, entry):
-        if self.view in REVIEW and entry.data(KEY) is not None:
+        if self.listing() and entry.data(KEY) is not None:
             self.open_card(entry.data(KEY))
 
     def card_opened(self, entry):
@@ -561,8 +607,10 @@ class QuestionsTab:
         super().populate(item, new)
         self.stack.setCurrentWidget(self.editor)
         slide = self.sel_slide
-        self.set_back_label(f"‹ {self.slide_name(slide)}" if slide and self.view not in REVIEW
+        self.set_back_label(f"‹ {self.slide_name(slide)}" if slide and not self.listing()
                             else f"‹ {self.view_name()}")
+        if self.listing():
+            self.sync_selection()
 
     def leave_editor(self):
         self.drop_editor()

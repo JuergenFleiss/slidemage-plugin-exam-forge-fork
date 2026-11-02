@@ -106,3 +106,9 @@ v0.9.0 (2026-11-02, any language of the project, with SlideMage v0.13.31): Quest
 NEW: Exam Forge works with every language of your project.
 - Draft questions lists the project's languages, the deck's own first selected; a slide read in French is linked in French.
 - The ELP exam copy and key sheet are marked with the deck's language, so a screen reader reads them in it.
+
+v0.10.0 (2026-11-02, slides or questions): The middle column of the Questions tab shows either the slides or the questions.
+
+NEW: Switch the middle column between Slides and Questions.
+- Slides lists the slides of the chosen topic, each with how many questions it has, as before.
+- Questions lists the topic's questions in the order of their slides, retired ones last. Click one to open it.

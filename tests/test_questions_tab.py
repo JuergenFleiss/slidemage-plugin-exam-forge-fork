@@ -712,3 +712,44 @@ def test_the_sidebar_opens_exam_forge(lab):
     host.drain()
     assert window.isVisible()
 
+
+
+def test_questions_focus_lists_a_topics_questions_in_deck_order(lab):
+    window, topics = lab[4], lab[7]
+    assert window.focus_switch.isVisible() is not False and window.focus_switch.current() == "slides"
+    window.focus_switch.buttons()[1].click()
+    assert window.focus == "questions" and window.stack.currentWidget() is window.placeholder
+    assert keys(window.slide_list) == ["q1", "q2", "q4", "q3", "q6", "q7", "q5", "q8"]  # Unlinked, then retired, last.
+    assert "On slide 1, 3" in row_text(window.slide_list, "q2")
+    pick(window.topic_list, topics[0].id)
+    assert keys(window.slide_list) == ["q1", "q2", "q4", "q3", "q5"]  # As many as the topic row counts.
+    pick(window.topic_list, topics[1].id)
+    assert keys(window.slide_list) == [] and "No questions yet." in texts(window.slide_list)
+    pick(window.topic_list, "attention")
+    assert window.focus_switch.isHidden()
+    pick(window.topic_list, "all")
+    assert not window.focus_switch.isHidden() and window.focus == "questions"
+    window.focus_switch.buttons()[0].click()
+    assert keys(window.slide_list) == ["a", "b", "c", "d"] and window.stack.currentWidget() is window.slide_page
+
+
+def test_a_listed_question_opens_marked_and_back_returns_to_the_list(lab):
+    window, topics = lab[4], lab[7]
+    window.focus_switch.buttons()[1].click()
+    pick(window.topic_list, topics[0].id)
+    window.review_row_opened(window.slide_list.item(3))
+    assert window.current.id == "q3" and window.back_button.text() == "‹ Probability"
+    assert current_key(window.slide_list) == "q3"
+    window.back_button.click()
+    assert window.stack.currentWidget() is window.placeholder and window.focus == "questions"
+    assert current_key(window.slide_list) is None
+
+
+def test_unsaved_work_keeps_the_focus(lab, monkeypatch):
+    window = lab[4]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Cancel)
+    window.card_opened(window.cards.item(0))
+    window.stem.setPlainText("Typed but not saved")
+    window.focus_switch.buttons()[1].click()
+    assert window.focus == "slides" and window.focus_switch.current() == "slides"
+    assert window.stack.currentWidget() is window.editor
