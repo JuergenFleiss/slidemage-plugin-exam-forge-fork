@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 from fake_host import FakeHost
-from PySide6.QtWidgets import QApplication, QCheckBox
+from PySide6.QtWidgets import QApplication
 
 import exam_forge
 from exam_forge.ai_support import ai_service
@@ -27,7 +27,7 @@ def host(app):
 
 def widgets(host):
     page = host.settings_tabs["Exam Forge"]()
-    return page, page.findChild(QCheckBox), page.ai_notice
+    return page, page.ai_checkbox, page.ai_notice
 
 
 def test_off_by_default_and_after_disabling(host):
@@ -50,7 +50,7 @@ def test_on_without_route_explains_what_is_needed(host):
     assert host.settings().get("ai_support") is True
     assert "AI plugin" in notice.text()
     host.ai_chat.assert_called_with()
-    assert host.settings_tabs["Exam Forge"]().findChild(QCheckBox).isChecked()
+    assert host.settings_tabs["Exam Forge"]().ai_checkbox.isChecked()
 
 
 def test_on_with_route_returns_service(host):

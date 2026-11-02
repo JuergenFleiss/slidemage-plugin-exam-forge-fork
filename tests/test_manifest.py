@@ -171,7 +171,7 @@ def test_schema_versions_and_v1_manifest_still_open_and_render(tmp_path):
     assert manifest.data()["blueprint"]["difficulty_mix"] == {"easy": 1}
     exam, key = export_elp_documents(manifest)
     assert "Stem" in exam and "Correct" in key
-    for bad in (0, 3, None):
+    for bad in (0, 4, None):
         with pytest.raises(ValueError):
             Manifest(json.dumps({"schema_version": bad}).encode())
-    assert Manifest(b'{"schema_version":2}')
+    assert Manifest(b'{"schema_version":2}') and Manifest(b'{"schema_version":3}')

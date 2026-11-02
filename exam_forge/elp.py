@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
-from .model import ELP_ANSWERS, AnswerRule, Item, answer_issues
+from .model import ELP_ANSWERS, AnswerRule, Item, type_issues
 
 
 SCORING_FLOOR = 0
@@ -32,8 +32,12 @@ class ElpRules:
     easy: DifficultyRules = DifficultyRules(12, 2.5)
     hard: DifficultyRules = DifficultyRules(24, 5)
     answers: AnswerRule = ELP_ANSWERS
+    kinds: tuple[str, ...] = ("choice",)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "kinds", tuple(self.kinds))
+        if "choice" not in self.kinds:
+            return      # an open answer is graded by hand: no ticks to split the points into
         # Every tick is worth whole points: P/n for a correct one, P/(answers - n) for a wrong one.
         total = self.answers.max_options
         for name, rule in (("easy", self.easy), ("hard", self.hard)):
@@ -60,6 +64,6 @@ def scoring_table(points: int, answers: AnswerRule = ELP_ANSWERS) -> tuple[Scori
                  for n in range(answers.min_correct, answers.max_correct + 1))
 
 
-def check_elp(item: Item, rule: AnswerRule = ELP_ANSWERS) -> list[str]:
-    """Return answer-structure errors, allowing incomplete drafts to be saved."""
-    return [f"An ELP question must {issue}." for issue in answer_issues(item, rule)]
+def check_elp(item: Item, rule: AnswerRule = ELP_ANSWERS, kinds: tuple[str, ...] = ("choice",)) -> list[str]:
+    """Return exam answer-structure errors, allowing incomplete drafts to be saved."""
+    return [f"An exam question must {issue}." for issue in type_issues(item, kinds, rule)]

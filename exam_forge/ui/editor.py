@@ -27,12 +27,12 @@ from PySide6.QtWidgets import (
 
 from ..bank import BankError
 from ..elp_document import image_mime
-from ..model import DEFAULT_RULES, Item, Option, answer_issues, describe
+from ..model import DEFAULT_RULES, KINDS, USES, Item, Option, describe, question_issues
 from ..sources import check_item, link_slide, rebaseline_links
 from ..topics import topic_color, topic_of
 from .work import SCROLL_STYLE, fresh_deck, slide_title
 
-USE_NAMES = {"revision": "Revision quiz", "elp": "ELP exam"}
+PRIVATE = "Only in the private key."
 IMAGE_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.gif *.webp)"
 THUMB_WIDTH, THUMB_HEIGHT = 160, 100
@@ -62,7 +62,7 @@ def reviewed_issues(item, rules=DEFAULT_RULES):
         issues.append("write the question")
     if any(not option.text.strip() for option in item.options):
         issues.append("fill in every answer")
-    issues += answer_issues(item, rules.of(item.use))
+    issues += question_issues(item, rules)
     if any(not media.alt.strip() for media in item.media):
         issues.append("describe every image")
     if not item.sources:
@@ -196,7 +196,7 @@ class ImageRow(QWidget):
             self.thumb.setText("Image missing" if data is None else "No preview")
         self.alt = QLineEdit(media.alt)
         self.alt.setPlaceholderText("Describe the image")
-        self.alt.setToolTip("Shown under the image in ELP exams, so do not put the answer in it.")
+        self.alt.setToolTip("Shown under the image in exams, so do not put the answer in it.")
         self.alt.setAccessibleName("Image description")
         self.alt.textChanged.connect(lambda: self.changed.emit(self))
         self.remove = host.Button("✕", compact=True)
@@ -334,21 +334,41 @@ class ItemEditor:
         row.addWidget(host.caption("or paste or drop one into the question"))
         row.addStretch()
         body.addLayout(row)
+        # Multiple choice: the answers. Open answer: a model answer and grading notes instead.
+        self.choice_box = Box()
+        choice = QVBoxLayout(self.choice_box)
+        choice.setContentsMargins(0, 0, 0, 0)
         head = QHBoxLayout()
         head.addWidget(host.Label("Answers", "heading"))
         self.hint = host.caption("")
         head.addStretch()
         head.addWidget(self.hint)
-        body.addLayout(head)
+        choice.addLayout(head)
         self.answers = QVBoxLayout()
-        body.addLayout(self.answers)
+        choice.addLayout(self.answers)
         self.add_button = host.Button("+ Add answer", compact=True)
         self.add_button.clicked.connect(lambda: self.add_option())
-        body.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
-        self.use = Switch(host, (("Revision quiz", "revision"), ("ELP exam", "elp")))
+        choice.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
+        body.addWidget(self.choice_box)
+        self.open_box = Box()
+        open_answer = QVBoxLayout(self.open_box)
+        open_answer.setContentsMargins(0, 0, 0, 0)
+        self.model_answer = QPlainTextEdit()
+        self.model_answer.setPlaceholderText("What a full answer contains · " + PRIVATE.lower().rstrip("."))
+        self.model_answer.setMaximumHeight(120)
+        self.grading_notes = QPlainTextEdit()
+        self.grading_notes.setPlaceholderText("How to award the points · " + PRIVATE.lower().rstrip("."))
+        self.grading_notes.setMaximumHeight(85)
+        open_answer.addWidget(host.Field("Model answer", self.model_answer))
+        open_answer.addWidget(host.Field("Grading notes", self.grading_notes))
+        body.addWidget(self.open_box)
+        self.use = Switch(host, tuple((name, use) for use, name in USES.items()))
+        self.kind = Switch(host, tuple((name, kind) for kind, name in KINDS.items()))
         self.difficulty = Switch(host, (("Easy", "easy"), ("Hard", "hard")), clearable=True)
         row = QHBoxLayout()
         row.addWidget(host.Field("Used for", self.use))
+        self.kind_field = host.Field("Type", self.kind)
+        row.addWidget(self.kind_field)
         row.addWidget(host.Field("Difficulty", self.difficulty))
         body.addLayout(row)
         self.objective = QLineEdit()
@@ -397,19 +417,25 @@ class ItemEditor:
             footer.addWidget(button)
         outer.addLayout(footer)
         for signal in (self.stem.textChanged, self.objective.textChanged, self.assistant_note.textChanged,
-                       self.difficulty.changed):
+                       self.difficulty.changed, self.model_answer.textChanged, self.grading_notes.textChanged):
             signal.connect(self.touch)
         self.use.changed.connect(self.use_changed)
+        self.kind.changed.connect(self.kind_changed)
         for chip in (self.ai_tag, self.draft_tag, self.source_bar):
             chip.hide()
 
     # -- state ---------------------------------------------------------------------------------------------
 
     def candidate(self):
-        return replace(self.current, stem=self.stem.toPlainText(), options=tuple(r.option() for r in self.rows),
+        # Answers typed before switching to Open answer stay in the editor until it is left, but are not saved.
+        is_open = self.kind.currentData() == "open"
+        return replace(self.current, stem=self.stem.toPlainText(),
+                       options=() if is_open else tuple(r.option() for r in self.rows),
                        objective=self.objective.text(), difficulty=self.difficulty.currentData(),
                        use=self.use.currentData(), sources=self.links, media=self.attachments,
-                       assistant_note=self.assistant_note.toPlainText())
+                       assistant_note=self.assistant_note.toPlainText(), kind=self.kind.currentData(),
+                       model_answer=self.model_answer.toPlainText() if is_open else "",
+                       grading_notes=self.grading_notes.toPlainText() if is_open else "")
 
     def dirty(self):
         return self.current is not None and (self.new_item or self.candidate() != self.baseline)
@@ -467,6 +493,9 @@ class ItemEditor:
             self.add_option(option)
         self.objective.setText(item.objective)
         self.use.setCurrentData(item.use)
+        self.kind.setCurrentData(item.kind)
+        self.model_answer.setPlainText(item.model_answer)
+        self.grading_notes.setPlainText(item.grading_notes)
         self.difficulty.setCurrentData(item.difficulty)
         self._loading = False
         if item.sources:
@@ -524,7 +553,7 @@ class ItemEditor:
         if status == "retired":
             issues = []
         # The answer rules can change after a question was reviewed.
-        off_rules = status == "reviewed" and not dirty and answer_issues(item, self.answer_rules.of(item.use))
+        off_rules = status == "reviewed" and not dirty and question_issues(item, self.answer_rules)
         if issues and (dirty or status == "draft"):
             text = "Before marking reviewed: " + " · ".join(issues)
         elif off_rules:
@@ -593,15 +622,31 @@ class ItemEditor:
     def use_changed(self):
         if self._loading:
             return
-        if self.use.currentData() == "elp":
+        # A revision quiz is multiple choice; an exam question takes a type the deck's exam uses.
+        kinds = self.answer_rules.kinds(self.use.currentData())
+        self._loading = True
+        if self.kind.currentData() not in kinds:
+            self.kind.setCurrentData(kinds[0])
+        self._loading = False
+        self.kind_changed()
+
+    def kind_changed(self):
+        if self._loading:
+            return
+        if self.kind.currentData() == "choice":
             self._loading = True
-            while len(self.rows) < self.rule().min_options:
+            while len(self.rows) < (self.rule().min_options if self.use.currentData() == "elp" else 2):
                 self.add_option()
             self._loading = False
         self.touch()
 
     def refresh_answers(self):
-        self.hint.setText(f"{USE_NAMES[self.use.currentData()]}: {describe(self.rule())}")
+        use, kind = self.use.currentData(), self.kind.currentData()
+        self.hint.setText(f"{USES[use]}: {describe(self.rule())}")
+        self.choice_box.setVisible(kind != "open")
+        self.open_box.setVisible(kind == "open")
+        # The switch shows for an exam question, and for any question whose type its use does not allow.
+        self.kind_field.setVisible(use == "elp" or kind not in self.answer_rules.kinds(use))
         self.add_button.setEnabled(len(self.rows) < self.cap())
         for number, row in enumerate(self.rows, 1):
             row.tick.setAccessibleName(f"Option {number} is correct")

@@ -32,7 +32,7 @@ def test_one_row_per_question_in_deck_order_with_answers_side_by_side():
     assert "Answer 3 rationale" in head and "Answer 4" not in head
     assert [row[0] for row in table[1:]] == ["q4", "q3", "q2", "q5", "q1"]
     assert body["q2"]["Slides"] == "Slide 3 · Title c; Slide 2 · Title b" and body["q2"]["Topic"] == ""
-    assert body["q3"]["Topic"] == "Probability" and body["q3"]["Used for"] == "ELP exam"
+    assert body["q3"]["Topic"] == "Probability" and body["q3"]["Used for"] == "Exam"
     assert body["q2"]["Answer 1 correct"] == "yes" and body["q2"]["Answer 3"] == "Answer 2 of q2"
     assert body["q2"]["Answer 2 rationale"] == "Why 1" and body["q3"]["Answer 3"] == ""
     assert body["q2"]["Difficulty"] == "Hard" and body["q2"]["Learning objective"] == "Bayes"
@@ -43,7 +43,7 @@ def test_one_row_per_question_in_deck_order_with_answers_side_by_side():
 
 def test_formulas_are_not_run_and_text_survives():
     table = rows(questions_csv([item("q", '=HYPERLINK("x")\nsecond line, "quoted" \\( \\frac{1}{2} \\) Größe')]))
-    assert table[1][8] == '\'=HYPERLINK("x")\nsecond line, "quoted" \\( \\frac{1}{2} \\) Größe'
+    assert table[1][table[0].index("Question")] == '\'=HYPERLINK("x")\nsecond line, "quoted" \\( \\frac{1}{2} \\) Größe'
 
 
 def test_an_empty_bank_has_only_the_header():

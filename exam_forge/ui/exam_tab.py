@@ -35,7 +35,13 @@ from .issue import IssueView
 from .work import SCROLL_STYLE, fresh_deck
 
 STEPS = ("Counts", "Review & swap", "Freeze & save")
-_DIFFICULTIES = ("easy", "hard")
+def count_columns(kinds):
+    """The Counts step's columns, as (blueprint cell, heading), for the exam's question types."""
+    if kinds == ("open",):
+        return (("open easy", "Easy"), ("open hard", "Hard"))
+    if "open" in kinds:
+        return (("easy", "Easy"), ("hard", "Hard"), ("open easy", "Open easy"), ("open hard", "Open hard"))
+    return (("easy", "Easy"), ("hard", "Hard"))
 
 
 def red_color(widget):
@@ -47,6 +53,7 @@ def clear(layout):
     while layout.count():
         child = layout.takeAt(0)
         if child.widget():
+            child.widget().hide()       # deleted later: not shown in the meantime
             child.widget().deleteLater()
         elif child.layout():
             clear(child.layout())
@@ -148,10 +155,10 @@ class ExamTab(QWidget):
     def build_setup(self, body):
         head = QHBoxLayout()
         title = QVBoxLayout()
-        heading = self.host.Label("New ELP exam", "title")
+        heading = self.host.Label("New exam", "title")
         title.addWidget(heading)
         r = self.rules
-        title.addWidget(self.muted(f"Picks only reviewed ELP questions. Easy = {r.easy.points} points, "
+        title.addWidget(self.muted(f"Picks only reviewed exam questions. Easy = {r.easy.points} points, "
                               f"{number(r.easy.minutes)} min · Hard = {r.hard.points} points, "
                               f"{number(r.hard.minutes)} min."))
         head.addLayout(title, 1)
@@ -197,7 +204,8 @@ class ExamTab(QWidget):
 
     def render_counts(self):
         topics = self.window.topics
-        self.counts = {t.name: self.counts.get(t.name, dict.fromkeys(_DIFFICULTIES, 0)) for t in topics}
+        columns = count_columns(self.rules.kinds)
+        self.counts = {t.name: {key: self.counts.get(t.name, {}).get(key, 0) for key, _ in columns} for t in topics}
         clear(self.rows_box)
         self.cells = {}
         if not topics:
@@ -206,7 +214,7 @@ class ExamTab(QWidget):
         else:
             grid = QGridLayout()
             grid.setColumnStretch(0, 1)
-            for column, text in enumerate(("Topic", "Easy", "Hard")):
+            for column, text in enumerate(("Topic", *(heading for _, heading in columns))):
                 grid.addWidget(self.muted(text), 0, column)
             dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
             for row, topic in enumerate(topics, 1):
@@ -224,7 +232,7 @@ class ExamTab(QWidget):
                 info.addWidget(cell["avail"])
                 info.addWidget(cell["draft"])
                 grid.addLayout(info, row, 0)
-                for column, difficulty in enumerate(_DIFFICULTIES, 1):
+                for column, (difficulty, _) in enumerate(columns, 1):
                     stepper = QVBoxLayout()
                     spin = cell[difficulty] = QSpinBox()
                     spin.setRange(0, 999)
@@ -249,12 +257,13 @@ class ExamTab(QWidget):
         waiting = waiting_elp_drafts(items, of)
         for name, cell in self.cells.items():
             have = self.avail.get(name, {})
-            cell["avail"].setText(f"{have.get('easy', 0)} easy · {have.get('hard', 0)} hard reviewed")
+            cell["avail"].setText(" · ".join(f"{have.get(key, 0)} {heading.lower()}"
+                                             for key, heading in count_columns(self.rules.kinds)) + " reviewed")
             n = waiting.get(name, 0)
-            cell["draft"].setText(f"{plural(n, 'ELP draft')} waiting for review" if n else "")
+            cell["draft"].setText(f"{plural(n, 'exam draft')} waiting for review" if n else "")
             cell["draft"].setVisible(bool(n))
         lost = sum(1 for i in items if i.use == "elp" and i.status == "reviewed" and not of(i))
-        self.untopiced.setText(f"{plural(lost, 'reviewed ELP question')} {'has' if lost == 1 else 'have'}"
+        self.untopiced.setText(f"{plural(lost, 'reviewed exam question')} {'has' if lost == 1 else 'have'}"
                                " no topic and can't be used." if lost else "")
         self.untopiced.setVisible(bool(lost))
         errors = self.history[1] if self.history and avoid else []
@@ -266,14 +275,17 @@ class ExamTab(QWidget):
         short, easy, hard = [], 0, 0
         for name, cell in self.cells.items():
             counts = self.counts[name]
-            easy, hard = easy + counts["easy"], hard + counts["hard"]
-            for difficulty in _DIFFICULTIES:
-                have = self.avail.get(name, {}).get(difficulty, 0)
-                over = counts[difficulty] > have
-                cell[difficulty + "_over"].setText(f"Only {have} available" if over else "")
-                cell[difficulty + "_over"].setVisible(over)
+            for key, heading in count_columns(self.rules.kinds):
+                if key.endswith("easy"):
+                    easy += counts[key]
+                else:
+                    hard += counts[key]
+                have = self.avail.get(name, {}).get(key, 0)
+                over = counts[key] > have
+                cell[key + "_over"].setText(f"Only {have} available" if over else "")
+                cell[key + "_over"].setVisible(over)
                 if over:
-                    short.append(f"{name} ({difficulty})")
+                    short.append(f"{name} ({heading.lower()})")
         r = self.rules
         minutes = easy * Decimal(str(r.easy.minutes)) + hard * Decimal(str(r.hard.minutes))
         for key, value in (("questions", easy + hard), ("points", easy * r.easy.points + hard * r.hard.points),
@@ -483,6 +495,8 @@ class ExamTab(QWidget):
         rule = getattr(self.rules, item.difficulty)
         chip = self.host.Chip(f"{item.difficulty.capitalize()} · {rule.points} pts")
         meta.addWidget(chip)
+        if item.kind == "open":
+            meta.addWidget(self.host.Chip("Open answer", "muted"))
         if item.media:
             meta.addWidget(self.host.Chip(f"{len(item.media)} image{'s' if len(item.media) != 1 else ''}", "muted"))
         meta.addWidget(self.muted(self.labels.get(item.id) or

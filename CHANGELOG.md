@@ -107,14 +107,17 @@ NEW: Exam Forge works with every language of your project.
 - Draft questions lists the project's languages, the deck's own first selected; a slide read in French is linked in French.
 - The ELP exam copy and key sheet are marked with the deck's language, so a screen reader reads them in it.
 
-v0.10.0 (2026-11-02, slides or questions, a table, and answer rules): The middle column of the Questions tab shows either the slides or the questions, Export table saves the whole question set as a CSV table, and each deck sets its own answer rules.
+v0.10.0 (2026-11-02, slides or questions, a table, answer rules, and open answers): The middle column of the Questions tab shows either the slides or the questions, Export table saves the whole question set as a CSV table, each deck sets its own answer rules, and an exam can have open-answer questions. ELP exams are now called exams.
 
-NEW: Switch the middle column between Slides and Questions, export every question as a table, and set a deck's answer rules.
+NEW: Switch the middle column between Slides and Questions, export every question as a table, set a deck's answer rules, and write open-answer exam questions.
 - Slides lists the slides of the chosen topic, each with how many questions it has, as before.
 - Questions lists the topic's questions in the order of their slides, retired ones last. Click one to open it.
-- Export table saves a CSV table with one row per question: status, use, difficulty, topic, linked slides, learning objective and the note for teaching assistants, then each answer's text, whether it is correct, and its rationale.
+- Export table saves a CSV table with one row per question: status, use, type, difficulty, topic, linked slides, learning objective and the note for teaching assistants, then each answer's text, whether it is correct, and its rationale, or an open question's model answer and grading notes.
 - The table holds the answer key, so keep it private. It opens in Excel or LibreOffice with accents and mathematics intact.
-- Settings, Exam Forge, Answer rules: how many answers a revision quiz and an ELP exam question have, and how many are correct, for the open deck. The rules are kept in its question folder.
+- Settings, Exam Forge, Answer rules: which question types the deck's exam uses (multiple choice, open answer, or both), and how many answers a revision quiz and a multiple-choice exam question have and how many are correct. The rules are kept in the deck's question folder.
+- An open-answer question has a model answer and grading notes, which only the private key shows. The exam copy leaves room to write, and the scoring sheet says it is graded by hand. Draft with AI and Update with AI write open-answer questions too.
+- When the exam uses both types, the Counts step sets how many of each per topic and difficulty.
 - Revision quizzes that allow several correct answers export to Moodle as multiple-response questions.
-- ELP exams with another number of answers get a matching scoring sheet. Settings refuses rules that would not give whole points per tick.
+- Exams with another number of answers get a matching scoring sheet. Settings refuses rules that would not give whole points per tick.
 - Reviewed questions that no longer fit are marked Off the answer rules and listed under Needs attention, and exports and exam proposals leave them out.
+- ELP exams are now just exams: in the editor, the Exam tab and the exam documents.

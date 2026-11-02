@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bank import BankError
-from ..model import answer_issues
+from ..model import KINDS, USES, question_issues
 from ..moodle_xml import export_moodle_xml
 from ..sources import check_bank, link_slide
 from ..table_export import questions_csv
@@ -42,9 +42,8 @@ from .work import fresh_deck, slide_title
 KEY = Qt.ItemDataRole.UserRole
 REVIEW = ("attention", "unlinked")
 STATUS = {"draft": ("Draft", "neutral"), "reviewed": ("Reviewed", "ok"), "retired": ("Retired", "muted")}
-USES = {"revision": "Revision quiz", "elp": "ELP exam"}
 FOCUS = (("slides", "Slides"), ("questions", "Questions"))
-ELP_NOTE = "ELP questions without a linked slide are left out of exam counts until they are linked."
+ELP_NOTE = "Exam questions without a linked slide are left out of exam counts until they are linked."
 
 
 def slide_ids(item):
@@ -57,7 +56,7 @@ def ai_draft(item):
 
 def off_rules(item, rules):
     """A reviewed question that the deck's answer rules, changed since, no longer allow."""
-    return item.status == "reviewed" and bool(answer_issues(item, rules.of(item.use)))
+    return item.status == "reviewed" and bool(question_issues(item, rules))
 
 
 def needs_attention(item, rules):
@@ -472,6 +471,8 @@ class QuestionsTab:
         host = self.host
         text = passive(label(host, stem if len(stem) < 180 else stem[:177] + "…", wrap=True))
         chips = [self.chip(*STATUS[item.status]), self.chip(USES[item.use], "muted")]
+        if item.kind == "open":
+            chips.append(self.chip(KINDS["open"], "muted"))
         if item.difficulty in ("easy", "hard"):
             chips.append(self.chip(item.difficulty.title(), "muted"))
         if item.media:
@@ -490,7 +491,9 @@ class QuestionsTab:
         elif review:
             chips.append(passive(label(host, "No slide linked", role="caption")))
         summary = plural(len(item.options), "answer")
-        if item.use == "elp":
+        if item.kind == "open":
+            summary = "Model answer" if item.model_answer.strip() else "No model answer yet"
+        elif item.use == "elp":
             summary += f" · {sum(o.correct for o in item.options)} correct"
         if compact:
             return passive(row([], [text, line(*chips)]))
@@ -876,7 +879,7 @@ class QuestionsTab:
         rule = self.answer_rules.revision
         reviewed = [checked.item for checked in report.items
                     if checked.item.status == "reviewed" and checked.item.use == "revision"]
-        items = [item for item in reviewed if not answer_issues(item, rule)]
+        items = [item for item in reviewed if not question_issues(item, self.answer_rules)]
         skipped = len(reviewed) - len(items)
         left_out = (f" {plural(skipped, 'reviewed question')} that no longer fit the answer rules "
                     f"{'was' if skipped == 1 else 'were'} left out.") if skipped else ""

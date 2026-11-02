@@ -7,13 +7,13 @@ from threading import get_ident
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QPlainTextEdit, QPushButton
+from PySide6.QtWidgets import QPlainTextEdit, QPushButton
 from slidemage.plugin_api import AiChatError, MediaDescription, SlideSource
-
-from exam_forge.model import Item, Option
-from exam_forge.drafting import DEFAULT_GUIDANCE
 from test_drafting import result
 from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
+
+from exam_forge.drafting import DEFAULT_GUIDANCE
+from exam_forge.model import Item, Option
 
 
 class Chat:
@@ -38,7 +38,7 @@ def enable(host):
     chat = Chat(host)
     host.chat = chat
     page = host.settings_tabs["Exam Forge"]()
-    page.findChild(QCheckBox).setChecked(True)
+    page.ai_checkbox.setChecked(True)
     return chat, page
 
 
@@ -69,7 +69,7 @@ def test_settings_guidance_reaches_request_and_reset(env):
     assert host.settings().get("drafting_guidance") is None
     field.clear()
     assert host.settings().get("drafting_guidance") is None
-    page.findChild(QCheckBox).setChecked(False)
+    page.ai_checkbox.setChecked(False)
     assert field.parentWidget().isHidden() and reset.isHidden()
 
 
@@ -168,7 +168,7 @@ def test_disable_during_request_discards_reply(env):
     dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
     dialog.send.click()
     host.drain()
-    page.findChild(QCheckBox).setChecked(False)
+    page.ai_checkbox.setChecked(False)
     chat.done(result(), None)
     host.drain()
     assert bank.load() == ([], [])
@@ -251,7 +251,7 @@ def test_disable_while_preparing_cannot_request_and_updates_existing_window(env)
     dialog = choose(host, window)
     dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
     dialog.send.click()
-    page.findChild(QCheckBox).setChecked(False)
+    page.ai_checkbox.setChecked(False)
     assert window.draft_button.isHidden()
     host.drain()
     assert not chat.requests and bank.load() == ([], [])

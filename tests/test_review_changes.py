@@ -6,15 +6,14 @@ from dataclasses import replace
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QCheckBox
 from slidemage.plugin_api import AiChatError, AiChatResult, Route, SlideSource
+from test_drafting_ui import enable
+from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
 
 from exam_forge.model import Item, Option, Origin
 from exam_forge.sources import link_slide
 from exam_forge.ui.editor import accent_color
 from exam_forge.ui.review_changes import NO_SNAPSHOT, ReviewChangesDialog
-from test_drafting_ui import Chat, enable
-from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
 
 OLD, NEW = "Two plus two = four\nsecond <b>line</b> & more", "Two plus three = five\nsecond <b>line</b> & more"
 
@@ -188,7 +187,7 @@ def test_ai_off_hides_update_and_refuses_a_late_reply(env):
     dialog = open_dialog(host, window, bank)
     dialog.rows[0].update.click()
     host.drain()
-    page.findChild(QCheckBox).setChecked(False)
+    page.ai_checkbox.setChecked(False)
     chat.done(reply(), None)
     host.drain()
     assert "discarded" in dialog.rows[0].note.text() and bank.get("q1").revision == 1

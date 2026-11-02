@@ -156,7 +156,7 @@ def test_cards_retired_last_dimmed_with_also_on_and_chips(lab):
     assert "Also on slide 3" in texts(window.cards.itemWidget(window.cards.item(1)))
     assert "AI draft" in texts(window.cards.itemWidget(window.cards.item(2)))
     elp_text = texts(window.cards.itemWidget(window.cards.item(3)))
-    assert "ELP exam" in elp_text and "Hard" in elp_text and "5 answers · 3 correct" in elp_text
+    assert "Exam" in elp_text and "Hard" in elp_text and "5 answers · 3 correct" in elp_text
     assert "Retired" in texts(window.cards.itemWidget(window.cards.item(4)))
     pick(window.slide_list, "c")
     assert keys(window.cards) == ["q2"] and "Also on slide 1" in texts(window.cards.itemWidget(window.cards.item(0)))

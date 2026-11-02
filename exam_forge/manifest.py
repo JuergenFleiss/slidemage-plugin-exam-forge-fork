@@ -38,7 +38,7 @@ class Manifest:
 
     def __post_init__(self) -> None:
         data = json.loads(self.encoded)
-        if not isinstance(data, dict) or data.get("schema_version") not in (1, 2):
+        if not isinstance(data, dict) or data.get("schema_version") not in (1, 2, 3):
             raise ValueError("unsupported manifest schema")
 
     def data(self) -> dict:
@@ -85,8 +85,8 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
         if item.revision != revision:
             raise ConflictError(f"stale revision for {item_id}")
         if item.status != "reviewed" or item.use != "elp":
-            raise ValueError(f"{item_id} must be a reviewed ELP question")
-        errors = check_elp(item, rules.answers)
+            raise ValueError(f"{item_id} must be a reviewed exam question")
+        errors = check_elp(item, rules.answers, rules.kinds)
         if errors:
             raise ValueError(f"{item_id}: {' '.join(errors)}")
         items.append(item)
@@ -103,14 +103,15 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
         if bank.get(item.id) != item:
             raise ConflictError(f"question changed during freeze: {item.id}")
     data = {
-        "schema_version": 2,
+        # Version 3 only for open-answer questions, which an older Exam Forge cannot print.
+        "schema_version": 3 if any(item.kind == "open" for item in items) else 2,
         "bank_id": bank.id,
         "items": [{**asdict(item), "topic": topic_of(item)} for item in items],
         "media_base64": attachments,
         "blueprint": blueprint,
         "scoring": {"rules": asdict(rules), "floor": SCORING_FLOOR,
                     "tables": {str(p): [asdict(row) for row in scoring_table(p, rules.answers)]
-                               for p in (rules.easy.points, rules.hard.points)}},
+                               for p in (rules.easy.points, rules.hard.points)} if "choice" in rules.kinds else {}},
     }
     return Manifest(json.dumps(data, ensure_ascii=False, sort_keys=True,
                                allow_nan=False, separators=(",", ":")).encode("utf-8"))

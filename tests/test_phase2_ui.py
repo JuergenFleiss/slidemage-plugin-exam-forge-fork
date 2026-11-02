@@ -249,10 +249,10 @@ def test_questions_without_topic_are_counted_not_offered(phase):
     assert exam.untopiced.isHidden()
     add_reviewed(bank, window, "orphan", sources=())
     assert not exam.untopiced.isHidden()
-    assert exam.untopiced.text() == "1 reviewed ELP question has no topic and can't be used."
+    assert exam.untopiced.text() == "1 reviewed exam question has no topic and can't be used."
     assert exam.cells["Arithmetic"]["avail"].text() == "1 easy · 0 hard reviewed"
     add_reviewed(bank, window, "orphan2", sources=())
-    assert exam.untopiced.text().startswith("2 reviewed ELP questions have no topic")
+    assert exam.untopiced.text().startswith("2 reviewed exam questions have no topic")
 
 
 def test_waiting_elp_drafts_are_shown(phase):
@@ -261,7 +261,7 @@ def test_waiting_elp_drafts_are_shown(phase):
     bank.create(replace(window.current, id="draft", revision=1, status="draft"))
     window.reload()
     exam.refresh()
-    assert exam.cells["Arithmetic"]["draft"].text() == "1 ELP draft waiting for review"
+    assert exam.cells["Arithmetic"]["draft"].text() == "1 exam draft waiting for review"
 
 
 def test_skip_last_changes_availability_live(phase):

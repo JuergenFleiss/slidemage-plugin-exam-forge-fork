@@ -56,6 +56,11 @@ class Media:
             raise ValueError("media needs a SHA-256 digest")
 
 
+KINDS = {"choice": "Multiple choice", "open": "Open answer"}
+# Item.use "elp" is the exam: the stored name stays, the shown one is "Exam".
+USES = {"revision": "Revision quiz", "elp": "Exam"}
+
+
 @dataclass(frozen=True)
 class Item:
     id: str
@@ -74,6 +79,10 @@ class Item:
     assistant_note: str = ""
     ai_edit_route: str = ""  # Per revision; non-empty once an AI assisted an edit.
     ai_edit_model: str = ""
+    # An open-answer question has no options: its model answer and grading notes go only into the private key.
+    kind: Literal["choice", "open"] = "choice"
+    model_answer: str = ""
+    grading_notes: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", tuple(self.options))
@@ -87,6 +96,8 @@ class Item:
             raise ValueError("invalid status")
         if self.use not in ("elp", "revision"):
             raise ValueError("invalid use")
+        if self.kind not in KINDS:
+            raise ValueError("invalid question type")
         if len({option.id for option in self.options}) != len(self.options):
             raise ValueError("option IDs must be unique")
 
@@ -122,17 +133,25 @@ ELP_ANSWERS = AnswerRule(5, 5, 1, 4)
 
 @dataclass(frozen=True)
 class AnswerRules:
-    """A deck's answer rules: revision quizzes (Moodle) and ELP exams. An ELP exam has one number of answers."""
+    """A deck's answer rules: revision quizzes (Moodle, multiple choice) and exams, whose question types the deck
+    chooses. Every multiple-choice exam question has the same number of answers."""
 
     revision: AnswerRule = REVISION_ANSWERS
     elp: AnswerRule = ELP_ANSWERS
+    exam_kinds: tuple[str, ...] = ("choice",)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "exam_kinds", tuple(k for k in KINDS if k in self.exam_kinds))
+        if not self.exam_kinds:
+            raise ValueError("an exam needs at least one question type")
         if self.elp.min_options != self.elp.max_options:
-            raise ValueError("every ELP question has the same number of answers")
+            raise ValueError("every multiple-choice exam question has the same number of answers")
 
     def of(self, use: str) -> AnswerRule:
         return self.elp if use == "elp" else self.revision
+
+    def kinds(self, use: str) -> tuple[str, ...]:
+        return self.exam_kinds if use == "elp" else ("choice",)
 
 
 DEFAULT_RULES = AnswerRules()
@@ -165,6 +184,28 @@ def answer_issues(item: Item, rule: AnswerRule) -> list[str]:
     return issues
 
 
+def kind_issues(item: Item, kinds: tuple[str, ...]) -> list[str]:
+    """answer_issues for a question of any type: its type must be allowed; an open one needs a model answer."""
+    if item.kind not in kinds:
+        return [" or ".join("be multiple choice" if k == "choice" else "be an open-answer question" for k in kinds)]
+    return []
+
+
+def type_issues(item: Item, kinds: tuple[str, ...], rule: AnswerRule) -> list[str]:
+    """What breaks a use's rules: its allowed types, then a model answer or the answer rule."""
+    issues = kind_issues(item, kinds)
+    if issues:
+        return issues
+    if item.kind == "open":
+        return [] if item.model_answer.strip() else ["have a model answer"]
+    return answer_issues(item, rule)
+
+
+def question_issues(item: Item, rules: AnswerRules) -> list[str]:
+    """What breaks the deck's rules for this question's use and type."""
+    return type_issues(item, rules.kinds(item.use), rules.of(item.use))
+
+
 def check_phase1(item: Item, rule: AnswerRule = REVISION_ANSWERS) -> list[str]:
     """Return revision-quiz answer errors; storing incomplete drafts is allowed."""
-    return [f"A revision-quiz question must {issue}." for issue in answer_issues(item, rule)]
+    return [f"A revision-quiz question must {issue}." for issue in type_issues(item, ("choice",), rule)]

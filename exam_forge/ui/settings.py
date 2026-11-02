@@ -5,11 +5,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QPlainTextEdit, QSpinBox, QWidget
 
 from ..ai_support import ai_service
-from ..answer_rules import AnswerRulesStore
+from ..answer_rules import AnswerRulesStore, exam_rules
 from ..bank import BankError
 from ..drafting import DEFAULT_GUIDANCE
-from ..elp import ElpRules
-from ..model import MAX_OPTIONS, AnswerRule, AnswerRules
+from ..model import KINDS, MAX_OPTIONS, AnswerRule, AnswerRules
 
 
 def add_folder_section(host, controller, page, folder_changed=lambda: None):
@@ -53,20 +52,23 @@ def add_rules_section(host, controller, page):
         row.addStretch()
         return widget
 
-    # Revision: answers from, to; correct from, to. ELP: one number of answers; correct from, to.
+    # Revision: answers from, to; correct from, to. Exam: one number of answers; correct from, to.
     rev = [spin(2, MAX_OPTIONS), spin(2, MAX_OPTIONS), spin(1, MAX_OPTIONS - 1), spin(1, MAX_OPTIONS - 1)]
     elp = [spin(2, MAX_OPTIONS), spin(1, MAX_OPTIONS - 1), spin(1, MAX_OPTIONS - 1)]
     revision_field = host.Field("Revision quiz (Moodle)", line("Answers", rev[0], "to", rev[1],
                                                                 "· Correct", rev[2], "to", rev[3]))
-    elp_field = host.Field("ELP exam", line("Answers", elp[0], "· Correct", elp[1], "to", elp[2]))
+    kinds = {kind: QCheckBox(name) for kind, name in KINDS.items()}
+    kinds_field = host.Field("Exam question types", line(*kinds.values()))
+    elp_field = host.Field("Exam, multiple choice", line("Answers", elp[0], "· Correct", elp[1], "to", elp[2]))
     notice = host.caption("")
     notice.setWordWrap(True)
     reset = host.Button("Default answer rules", compact=True)
-    widgets = (revision_field, elp_field, reset)
+    widgets = (revision_field, kinds_field, elp_field, reset)
     page.body.addWidget(host.Field("Answer rules", host.caption(
-        "How many answers a question has and how many of them are correct, for this deck. Reviewed questions "
-        "that no longer fit are flagged and left out of exports and exams until you fix them.")))
-    for widget in (revision_field, elp_field, notice):
+        "For this deck: the question types its exam uses, how many answers a multiple-choice question has, and "
+        "how many of them are correct. Revision quizzes are multiple choice. Reviewed questions that no longer fit "
+        "are flagged and left out of exports and exams until you fix them.")))
+    for widget in (revision_field, kinds_field, elp_field, notice):
         page.body.addWidget(widget)
     page.body.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
     state = {"store": None, "loading": False}
@@ -77,6 +79,9 @@ def add_rules_section(host, controller, page):
         for box, value in zip((*rev, *elp), (r.min_options, r.max_options, r.min_correct, r.max_correct,
                                              e.min_options, e.min_correct, e.max_correct)):
             box.setValue(value)
+        for kind, box in kinds.items():
+            box.setChecked(kind in rules.exam_kinds)
+        elp_field.setEnabled(state["store"] is not None and "choice" in rules.exam_kinds)
         state["loading"] = False
 
     def load():
@@ -98,7 +103,7 @@ def add_rules_section(host, controller, page):
 
     def save(rules):
         try:
-            ElpRules(answers=rules.elp)
+            exam_rules(rules)
             state["store"].save(rules)
         except (OSError, ValueError) as exc:
             notice.setText(f"Not saved: {exc}")
@@ -110,8 +115,11 @@ def add_rules_section(host, controller, page):
         if state["loading"] or state["store"] is None:
             return
         count, low, high = (box.value() for box in elp)
+        chosen = tuple(kind for kind, box in kinds.items() if box.isChecked())
+        elp_field.setEnabled("choice" in chosen)
         try:
-            rules = AnswerRules(AnswerRule(*(box.value() for box in rev)), AnswerRule(count, count, low, high))
+            rules = AnswerRules(AnswerRule(*(box.value() for box in rev)), AnswerRule(count, count, low, high),
+                                exam_kinds=chosen)
         except ValueError as exc:
             notice.setText(f"Not saved: {exc}")
             return
@@ -124,6 +132,8 @@ def add_rules_section(host, controller, page):
 
     for box in (*rev, *elp):
         box.valueChanged.connect(changed)
+    for box in kinds.values():
+        box.toggled.connect(changed)
     reset.clicked.connect(default)
     load()
     return load
@@ -135,7 +145,7 @@ def build_settings(host, controller):
     reload_rules = []
     add_folder_section(host, controller, page, lambda: reload_rules[0]())
     reload_rules.append(add_rules_section(host, controller, page))
-    checkbox = QCheckBox("Enable AI support")
+    checkbox = page.ai_checkbox = QCheckBox("Enable AI support")
     checkbox.setChecked(bool(host.settings().get("ai_support", False)))
     notice = page.ai_notice = host.caption("")
     notice.setWordWrap(True)

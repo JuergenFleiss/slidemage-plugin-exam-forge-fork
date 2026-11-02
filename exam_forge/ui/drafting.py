@@ -15,7 +15,7 @@ from slidemage.plugin_api import AiChatError
 
 from ..ai_support import ai_service
 from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
-from ..model import DEFAULT_RULES, SourceLink
+from ..model import DEFAULT_RULES, KINDS, SourceLink
 from ..sources import fingerprint
 from .sheet import Sheet
 from .work import fresh_deck, slide_title
@@ -78,8 +78,10 @@ class DraftDialog(Sheet):
         self.count.setRange(1, 30)
         self.count.setValue(1)
         self.use = QComboBox()
-        self.use.addItem("Revision quiz", "revision")
-        self.use.addItem("ELP exam", "elp")
+        self.use.addItem("Revision quiz", ("revision", "choice"))
+        kinds = rules.exam_kinds
+        for kind in kinds:
+            self.use.addItem("Exam" if len(kinds) == 1 else f"Exam · {KINDS[kind].lower()}", ("elp", kind))
         self.view, self.language = QComboBox(), QComboBox()
         for label, value in VIEWS:
             self.view.addItem(label, value)
@@ -220,7 +222,7 @@ class DraftDialog(Sheet):
         indices = self.selected()
         refs = [self.refs[i] for i in indices]
         sources = [self.sources[i] for i in indices]
-        view, language, use = self.view.currentData(), self.language.currentText(), self.use.currentData()
+        view, language, (use, kind) = self.view.currentData(), self.language.currentText(), self.use.currentData()
         guidance = self.host.settings().get("drafting_guidance")
         count = self.count.value()
         self.controls.setEnabled(False)
@@ -235,7 +237,8 @@ class DraftDialog(Sheet):
                     raise source
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source), source.text)
                 slides.append(DraftSlide(link, source))
-            return build_request(tuple(slides), use=use, guidance=guidance, count=count, rules=self.rules), tuple(s.link for s in slides)
+            request = build_request(tuple(slides), use=use, guidance=guidance, count=count, rules=self.rules, kind=kind)
+            return request, tuple(s.link for s in slides)
 
         def ready(prepared, error):
             if not self.state["active"]:
@@ -252,13 +255,14 @@ class DraftDialog(Sheet):
                     return
                 self.message.setText("Drafting… Cancel discards the reply.")
                 self.state["cancel"] = service.request(
-                    request, lambda result, error: self.completed(result, error, sources=sources, use=use, count=count))
+                    request, lambda result, error: self.completed(result, error, sources=sources, use=use, count=count,
+                                                                  kind=kind))
             except AiChatError as exc:
                 self.completed(None, exc)
 
         self.host.run_in_background(work, ready)
 
-    def completed(self, result, error, *, sources=(), use="revision", count=1):
+    def completed(self, result, error, *, sources=(), use="revision", count=1, kind="choice"):
         if not self.state["active"]:
             return
         self.state["cancel"] = None
@@ -271,7 +275,7 @@ class DraftDialog(Sheet):
             return
         if error is None:
             try:
-                self.items = parse_reply(result, sources=sources, use=use, count=count, rules=self.rules)
+                self.items = parse_reply(result, sources=sources, use=use, count=count, rules=self.rules, kind=kind)
             except DraftReplyError as exc:
                 error = exc
         if error is not None:

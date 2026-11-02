@@ -9,9 +9,14 @@ from pathlib import Path
 
 from .bank import CorruptFileError, SchemaError, _atomic_write
 from .elp import ElpRules
-from .model import AnswerRule, AnswerRules
+from .model import KINDS, AnswerRule, AnswerRules
 
 RULES_SCHEMA_VERSION = 1
+
+
+def exam_rules(rules: AnswerRules) -> ElpRules:
+    """The exam's points, minutes and answer rules; refuses answer rules that do not split the points evenly."""
+    return ElpRules(answers=rules.elp, kinds=rules.exam_kinds)
 
 
 class AnswerRulesStore:
@@ -28,12 +33,16 @@ class AnswerRulesStore:
                 raise ValueError("missing schema version")
             if data["schema_version"] > RULES_SCHEMA_VERSION:
                 raise SchemaError(f"{self.path}: newer schema {data['schema_version']}")
-            rules = AnswerRules(**{use: AnswerRule(**data[use]) for use in ("revision", "elp")})
-            ElpRules(answers=rules.elp)
+            kinds = data.get("exam_kinds", ["choice"])
+            if type(kinds) is not list or not set(kinds) <= set(KINDS):
+                raise ValueError("invalid exam question types")
+            rules = AnswerRules(**{use: AnswerRule(**data[use]) for use in ("revision", "elp")},
+                                exam_kinds=tuple(kinds))
+            exam_rules(rules)
             return rules
         except (OSError, ValueError, TypeError, KeyError) as exc:
             raise CorruptFileError(f"{self.path}: {exc}") from exc
 
     def save(self, rules: AnswerRules) -> None:
-        ElpRules(answers=rules.elp)
+        exam_rules(rules)
         _atomic_write(self.path, {"schema_version": RULES_SCHEMA_VERSION, **asdict(rules)})

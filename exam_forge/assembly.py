@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Exact ELP blueprint selection, swaps and the pre-approval source check.
+"""Exact exam blueprint selection, swaps and the pre-approval source check.
 
 Approval and freeze each recheck sources.
 """
@@ -27,12 +27,20 @@ class ExcludedItem:
 
 
 _DIFFICULTIES = ("easy", "hard")
+# A blueprint cell: a difficulty for multiple choice, as before open answers; "open easy" and "open hard" otherwise.
+CELLS = ("easy", "hard", "open easy", "open hard")
+CELL_NAMES = {"easy": "easy", "hard": "hard", "open easy": "easy open-answer", "open hard": "hard open-answer"}
+
+
+def cell_of(item: Item) -> str:
+    return item.difficulty if item.kind == "choice" else f"open {item.difficulty}"
 _NO_TOPIC = "Question has no topic; link it to a slide in a topic."
 
 
 @dataclass(frozen=True)
 class Blueprint:
-    """Exact easy and hard counts per topic; minutes follow from ElpRules."""
+    """Exact counts per topic and cell (CELLS); minutes follow from ElpRules. Open-answer cells are kept only when
+    given, so a multiple-choice blueprint reads as before."""
 
     counts: Mapping[str, Mapping[str, int]]
     avoid_last: int = 0
@@ -40,10 +48,10 @@ class Blueprint:
     def __post_init__(self):
         counts = {}
         for name, cell in self.counts.items():
-            if (not isinstance(name, str) or not name or set(cell) - set(_DIFFICULTIES)
+            if (not isinstance(name, str) or not name or set(cell) - set(CELLS)
                     or any(type(v) is not int or v < 0 for v in cell.values())):
                 raise ValueError("Blueprint counts need topic names and nonnegative easy/hard integers")
-            counts[name] = {d: cell.get(d, 0) for d in _DIFFICULTIES}
+            counts[name] = {d: cell.get(d, 0) for d in CELLS if d in _DIFFICULTIES or d in cell}
         if type(self.avoid_last) is not int or self.avoid_last < 0:
             raise ValueError("avoid_last must be a nonnegative integer")
         object.__setattr__(self, "counts", counts)
@@ -81,14 +89,14 @@ class Assembly:
         return sum(getattr(self.rules, i.difficulty).points for i in self.items)
 
     def alternatives(self, item_id: str) -> tuple[Item, ...]:
-        """Unselected candidates in the same topic and difficulty as a selected item."""
+        """Unselected candidates in the same topic and cell as a selected item."""
         current = next((i for i in self.items if i.id == item_id), None)
         if current is None:
             return ()
         selected = {i.id for i in self.items}
-        cell = (self.topic_of(current), current.difficulty)
+        cell = (self.topic_of(current), cell_of(current))
         return tuple(c for c in self.candidates if c.id not in selected
-                     and (self.topic_of(c), c.difficulty) == cell)
+                     and (self.topic_of(c), cell_of(c)) == cell)
 
 
 def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams,
@@ -103,13 +111,13 @@ def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exa
         if item.status != "reviewed":
             reasons.append("Item is not reviewed.")
         if item.use != "elp":
-            reasons.append("Item is not an ELP question.")
-        reasons.extend(check_elp(item, rules.answers))
+            reasons.append("Item is not an exam question.")
+        reasons.extend(check_elp(item, rules.answers, rules.kinds))
         if item.difficulty not in _DIFFICULTIES:
             reasons.append("Item has no supported difficulty class.")
         if not topic:
             reasons.append(_NO_TOPIC)
-        elif wanted and item.difficulty in _DIFFICULTIES and not wanted(topic, item.difficulty):
+        elif wanted and item.difficulty in _DIFFICULTIES and not wanted(topic, cell_of(item)):
             reasons.append("Item is outside the requested topic counts.")
         if item.id in recent:
             reasons.append(f"Item was used in the last {avoid_last} exams.")
@@ -122,15 +130,16 @@ def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exa
 
 def available(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams=(),
               avoid_last: int = 0, rules: ElpRules = _DEFAULT_RULES) -> dict[str, dict[str, int]]:
-    """Eligible counts per topic and difficulty, as assemble would see them."""
+    """Eligible counts per topic and cell, as assemble would see them; open-answer cells only when there are some."""
     result: dict[str, dict[str, int]] = {}
     for item in _screen(items, topic_of, previous_exams, avoid_last, rules=rules)[0]:
-        result.setdefault(topic_of(item), dict.fromkeys(_DIFFICULTIES, 0))[item.difficulty] += 1
+        cells = result.setdefault(topic_of(item), dict.fromkeys(_DIFFICULTIES, 0))
+        cells[cell_of(item)] = cells.get(cell_of(item), 0) + 1
     return result
 
 
 def waiting_elp_drafts(items: Sequence[Item], topic_of: Callable[[Item], str]) -> dict[str, int]:
-    """ELP items still in draft, counted per topic."""
+    """Exam questions still in draft, counted per topic."""
     return dict(Counter(t for i in items if i.use == "elp" and i.status == "draft"
                         if (t := topic_of(i))))
 
@@ -138,12 +147,12 @@ def waiting_elp_drafts(items: Sequence[Item], topic_of: Callable[[Item], str]) -
 def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
              topic_of: Callable[[Item], str], rules: ElpRules = _DEFAULT_RULES,
              previous_exams: Sequence[Sequence[str]] = ()) -> Assembly:
-    """Select reviewed ELP items, with no relaxed constraints or partial result.
+    """Select reviewed exam questions, with no relaxed constraints or partial result.
 
     Pass current revisions. History is oldest first and
     contains stable item IDs: reuse avoidance covers all revisions. Input order
     does not affect a seeded selection. source_changed remains a separate flag.
-    Each (topic, difficulty) cell is filled exactly from the items topic_of puts there.
+    Each (topic, cell) is filled exactly from the items topic_of and cell_of put there.
     """
     if type(seed) is not int:
         raise ValueError("Seed must be an integer")
@@ -153,14 +162,15 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
     problems = [] if blueprint.total else ["The blueprint requests no items."]
     cells = []
     for name, cell in sorted(blueprint.counts.items()):
-        for difficulty in _DIFFICULTIES:
-            pool = [i for i in candidates if topic_of(i) == name and i.difficulty == difficulty]
-            if cell[difficulty] > len(pool):
-                n, have = cell[difficulty], len(pool)
-                problems.append(f"Topic {name!r} needs {n} {difficulty} question{'s' * (n != 1)}; "
+        for key in CELLS:
+            n = cell.get(key, 0)
+            pool = [i for i in candidates if topic_of(i) == name and cell_of(i) == key]
+            if n > len(pool):
+                have = len(pool)
+                problems.append(f"Topic {name!r} needs {n} {CELL_NAMES[key]} question{'s' * (n != 1)}; "
                                 f"only {have} {'is' if have == 1 else 'are'} eligible.")
-            if cell[difficulty]:
-                cells.append((cell[difficulty], pool))
+            if n:
+                cells.append((n, pool))
     if problems:
         return replace(result, problems=tuple(problems))
     rng = random.Random(seed)
@@ -169,13 +179,13 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
 
 
 def swap(selection: Assembly, outgoing_id: str, incoming_id: str) -> Assembly:
-    """Swap only within the same topic and difficulty, from the eligible pool."""
+    """Swap only within the same topic, type and difficulty, from the eligible pool."""
     if not selection.feasible:
         raise ValueError("Cannot swap an infeasible selection")
     pool = {i.id: i for i in selection.alternatives(outgoing_id)}
     if incoming_id not in pool:
         raise ValueError("Swap needs a selected item and an unselected eligible replacement "
-                         "of the same topic and difficulty")
+                         "of the same topic, type and difficulty")
     items = tuple(pool[incoming_id] if i.id == outgoing_id else i for i in selection.items)
     return replace(selection, items=items)
 

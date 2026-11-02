@@ -15,8 +15,11 @@ from typing import Literal, get_type_hints
 
 from .model import Item, Media, Option, Origin, SourceLink
 
-SCHEMA_VERSION = 2
-_READABLE = (1, 2)
+SCHEMA_VERSION = 3
+_READABLE = (1, 2, 3)
+# A question file is version 3 only when it holds an open-answer question; other files and the index stay version 2,
+# so an older Exam Forge keeps reading a bank that does not use open answers.
+_OPEN_FIELDS = {"kind": "choice", "model_answer": "", "grading_notes": ""}
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 
@@ -97,6 +100,9 @@ def _revision_data(item: Item) -> dict:
     """Serialize revision content without the item-level source check flag."""
     data = asdict(item)
     del data["source_changed"]
+    for name, default in _OPEN_FIELDS.items():
+        if data[name] == default:
+            del data[name]
     return data
 
 
@@ -110,7 +116,7 @@ class Bank:
         if create and not self._index_path.exists():
             if any(p.name != "bank.json" for p in self.folder.glob("*.json")):
                 raise BankError("bank.json is missing but question files exist in this folder")
-            _atomic_write(self._index_path, {"schema_version": SCHEMA_VERSION,
+            _atomic_write(self._index_path, {"schema_version": 2,
                                             "id": str(uuid4()), "items": []})
         self._index()
 
@@ -158,7 +164,7 @@ class Bank:
         return self._document(item_id)[1]
 
     def _write_item(self, item_id: str, data: dict, revisions: list[Item], changed: bool) -> None:
-        data["schema_version"] = SCHEMA_VERSION
+        data["schema_version"] = 3 if any(row.kind == "open" for row in revisions) else 2
         data["source_changed"] = changed
         data["revisions"] = [_revision_data(row) for row in revisions]
         _atomic_write(self._path(item_id), data)

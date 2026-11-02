@@ -9,9 +9,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from ..answer_rules import AnswerRulesStore
+from ..answer_rules import AnswerRulesStore, exam_rules
 from ..bank import BankError
-from ..elp import ElpRules
 from ..model import AnswerRules
 from ..topics import TopicStore, migrate, topic_name
 from .editor import ItemEditor
@@ -174,7 +173,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         except (OSError, BankError, ValueError) as exc:
             self.answer_rules = AnswerRules()
             self.error(f"{exc} The default answer rules apply.")
-        self.exam_tab.rules = ElpRules(answers=self.answer_rules.elp)
+        self.exam_tab.rules = exam_rules(self.answer_rules)
 
     def answer_rules_changed(self):
         """Settings saved new rules: a proposed exam was screened with the old ones, so it is dropped."""
