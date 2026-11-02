@@ -493,11 +493,13 @@ def test_draft_dialog_receives_selected_topic_and_slide(lab, monkeypatch):
     monkeypatch.setattr("exam_forge.ui.questions_tab.DraftDialog", type("D", (SpyDialog,), {"DialogCode": QDialog.DialogCode}))
     SpyDialog.made.clear()
     window.draft_button.click()
-    assert SpyDialog.made[-1].kwargs == {"topics": topics, "topic_id": None, "preselect": "a"}
+    assert SpyDialog.made[-1].kwargs == {"topics": topics, "topic_id": None, "preselect": "a",
+                                         "rules": window.answer_rules}
     SpyDialog.made[-1].reject()
     pick(window.topic_list, topics[1].id)
     window.draft_with_ai()
-    assert SpyDialog.made[-1].kwargs == {"topics": topics, "topic_id": topics[1].id, "preselect": "c"}
+    assert SpyDialog.made[-1].kwargs == {"topics": topics, "topic_id": topics[1].id, "preselect": "c",
+                                         "rules": window.answer_rules}
     SpyDialog.made[-1].reject()
     assert not window.busy
     host.settings().set("ai_support", False)
@@ -604,7 +606,7 @@ def test_export_takes_every_reviewed_revision_question(lab, tmp_path, monkeypatc
     add(bank, "elp", "Reviewed ELP", [link["a"]], "reviewed", use="elp")
     exported = []
 
-    def fake(items, bank):
+    def fake(items, bank, rule):
         exported.extend(items)
         return b"<quiz/>"
 

@@ -30,8 +30,11 @@ def test_round_trip_and_phase_check(bank):
     assert reopened.id == bank.id
     assert reopened.load() == ([item], [])
     assert reopened.get(item.id, 1) == item
-    assert check_phase1(item)
-    assert not check_phase1(replace(item, options=(item.options[0],)))
+    assert check_phase1(item) == ["A revision-quiz question must mark exactly one correct answer."]
+    assert not check_phase1(replace(item, options=(item.options[0], replace(item.options[1], correct=False))))
+    assert check_phase1(replace(item, options=(item.options[0],))) == [
+        "A revision-quiz question must have two to eight answers.",
+        "A revision-quiz question must leave at least one answer wrong."]
 
 
 def test_conflict_and_reviewed_immutability(bank):

@@ -86,7 +86,7 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
             raise ConflictError(f"stale revision for {item_id}")
         if item.status != "reviewed" or item.use != "elp":
             raise ValueError(f"{item_id} must be a reviewed ELP question")
-        errors = check_elp(item)
+        errors = check_elp(item, rules.answers)
         if errors:
             raise ValueError(f"{item_id}: {' '.join(errors)}")
         items.append(item)
@@ -109,7 +109,7 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
         "media_base64": attachments,
         "blueprint": blueprint,
         "scoring": {"rules": asdict(rules), "floor": SCORING_FLOOR,
-                    "tables": {str(p): [asdict(row) for row in scoring_table(p)]
+                    "tables": {str(p): [asdict(row) for row in scoring_table(p, rules.answers)]
                                for p in (rules.easy.points, rules.hard.points)}},
     }
     return Manifest(json.dumps(data, ensure_ascii=False, sort_keys=True,

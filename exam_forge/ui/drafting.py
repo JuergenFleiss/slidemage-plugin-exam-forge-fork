@@ -3,14 +3,19 @@
 """Slide chooser and one cancellable host AI request."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QListWidget,
-    QListWidgetItem, QPlainTextEdit, QSpinBox,
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QListWidget,
+    QListWidgetItem,
+    QPlainTextEdit,
+    QSpinBox,
 )
 from slidemage.plugin_api import AiChatError
 
 from ..ai_support import ai_service
 from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
-from ..model import SourceLink
+from ..model import DEFAULT_RULES, SourceLink
 from ..sources import fingerprint
 from .sheet import Sheet
 from .work import fresh_deck, slide_title
@@ -27,9 +32,9 @@ def plural(n, word):
 
 
 class DraftDialog(Sheet):
-    def __init__(self, host, deck, bank, parent, *, topics=(), topic_id=None, preselect=None):
+    def __init__(self, host, deck, bank, parent, *, topics=(), topic_id=None, preselect=None, rules=DEFAULT_RULES):
         super().__init__(host, "Draft with AI", parent)
-        self.host, self.deck = host, deck
+        self.host, self.deck, self.rules = host, deck, rules
         self.items = ()
         self.refs = []
         self.sources = []
@@ -230,7 +235,7 @@ class DraftDialog(Sheet):
                     raise source
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source), source.text)
                 slides.append(DraftSlide(link, source))
-            return build_request(tuple(slides), use=use, guidance=guidance, count=count), tuple(s.link for s in slides)
+            return build_request(tuple(slides), use=use, guidance=guidance, count=count, rules=self.rules), tuple(s.link for s in slides)
 
         def ready(prepared, error):
             if not self.state["active"]:
@@ -266,7 +271,7 @@ class DraftDialog(Sheet):
             return
         if error is None:
             try:
-                self.items = parse_reply(result, sources=sources, use=use, count=count)
+                self.items = parse_reply(result, sources=sources, use=use, count=count, rules=self.rules)
             except DraftReplyError as exc:
                 error = exc
         if error is not None:

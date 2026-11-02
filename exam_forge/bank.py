@@ -275,7 +275,8 @@ class Bank:
         """Every file that belongs to this bank, the index last; a folder can also hold unrelated files."""
         folder = self.folder
         paths = [self._path(item_id) for item_id in self._index()["items"]]
-        paths += [folder / "topics.json", *folder.glob("*.manifest.json"), *folder.glob("*.corrections.jsonl")]
+        paths += [folder / "topics.json", folder / "answer-rules.json", *folder.glob("*.manifest.json"),
+                  *folder.glob("*.corrections.jsonl")]
         paths += [p for p in (folder / "media").glob("*") if not p.name.startswith(".")]
         return [p for p in paths if p.is_file()] + [self._index_path]
 

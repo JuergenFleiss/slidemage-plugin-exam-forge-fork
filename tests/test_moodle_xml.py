@@ -103,7 +103,8 @@ def test_invalid_inputs_fail_closed():
         export_moodle_xml([item], images={(item.id, 1): [image, image]})
     with pytest.raises(ValueError):
         export_moodle_xml([item], images={(item.id, 1): [Image('../x.png', b'x', '')]})
-    assert _fraction(0) == '0' and _fraction(100) == '100'
-    for value in (-1, 33.33333, 50, 101, True):
+    assert _fraction(0) == '0' and _fraction(1) == '100' and _fraction(3) == '33.33333'
+    assert _fraction(2, -1) == '-50' and _fraction(0, -1) == '0'
+    for value in (-1, 33.33333, 10, True):
         with pytest.raises(ValueError):
             _fraction(value)

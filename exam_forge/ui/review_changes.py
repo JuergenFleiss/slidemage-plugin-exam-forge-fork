@@ -250,7 +250,8 @@ class ReviewChangesDialog(Sheet):
 
         def work():
             links = rebaseline_links(host, fresh_deck(self.shell.deck), item)
-            return links, build_update_request(item, "\n\n".join(link.text for link in links))
+            return links, build_update_request(item, "\n\n".join(link.text for link in links),
+                                               rules=self.shell.answer_rules)
 
         def ready(prepared, error):
             if not self.state["active"]:
@@ -283,7 +284,7 @@ class ReviewChangesDialog(Sheet):
             return
         if error is None:
             try:
-                updated = parse_update_reply(result, item)
+                updated = parse_update_reply(result, item, self.shell.answer_rules)
             except DraftReplyError as exc:
                 error = exc
         if error is not None:

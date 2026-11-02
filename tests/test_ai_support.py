@@ -4,11 +4,11 @@
 from unittest.mock import Mock
 
 import pytest
-from PySide6.QtWidgets import QApplication, QCheckBox, QLabel
+from fake_host import FakeHost
+from PySide6.QtWidgets import QApplication, QCheckBox
 
 import exam_forge
 from exam_forge.ai_support import ai_service
-from fake_host import FakeHost
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +27,7 @@ def host(app):
 
 def widgets(host):
     page = host.settings_tabs["Exam Forge"]()
-    return page, page.findChild(QCheckBox), page.findChild(QLabel)
+    return page, page.findChild(QCheckBox), page.ai_notice
 
 
 def test_off_by_default_and_after_disabling(host):

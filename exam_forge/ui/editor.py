@@ -26,16 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from ..bank import BankError
-from ..elp import check_elp
 from ..elp_document import image_mime
-from ..model import Item, Option, check_phase1
+from ..model import DEFAULT_RULES, Item, Option, answer_issues, describe
 from ..sources import check_item, link_slide, rebaseline_links
 from ..topics import topic_color, topic_of
 from .work import SCROLL_STYLE, fresh_deck, slide_title
 
-REVISION_MAX, ELP_COUNT = 8, 5
-HINTS = {"revision": "Revision quiz: exactly one correct answer",
-         "elp": "ELP exam: exactly five answers, one to four correct"}
+USE_NAMES = {"revision": "Revision quiz", "elp": "ELP exam"}
 IMAGE_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.gif *.webp)"
 THUMB_WIDTH, THUMB_HEIGHT = 160, 100
@@ -58,23 +55,14 @@ def accent(widget, amber=False):
     widget.setStyleSheet(f"color: {accent_color(widget, amber)};")
 
 
-def reviewed_issues(item):
+def reviewed_issues(item, rules=DEFAULT_RULES):
     """What still stops a question from being marked reviewed, in the footer's wording."""
     issues = []
     if not item.stem.strip():
         issues.append("write the question")
-    if len(item.options) < 2:
-        issues.append("add at least two answers")
-    elif any(not option.text.strip() for option in item.options):
+    if any(not option.text.strip() for option in item.options):
         issues.append("fill in every answer")
-    if item.use == "elp":
-        for error in check_elp(item):
-            issues.append("have exactly five answers" if "five" in error else "mark one to four correct answers")
-    else:
-        if len(item.options) > REVISION_MAX:
-            issues.append("keep at most eight answers")
-        if check_phase1(item):
-            issues.append("mark exactly one correct answer")
+    issues += answer_issues(item, rules.of(item.use))
     if any(not media.alt.strip() for media in item.media):
         issues.append("describe every image")
     if not item.sources:
@@ -272,6 +260,8 @@ class AnswerRow(QWidget):
 
 
 class ItemEditor:
+    answer_rules = DEFAULT_RULES   # the deck's; the window reads them from the bank folder
+
     def build_editor(self, host, split):
         self._loading = False
         self.labels, self.labels_tried, self.context_gen, self.context_key = {}, set(), 0, None
@@ -529,12 +519,16 @@ class ItemEditor:
             for button in buttons:
                 button.setEnabled(False)
             return
-        dirty, issues = self.dirty(), reviewed_issues(self.candidate())
+        dirty, issues = self.dirty(), reviewed_issues(self.candidate(), self.answer_rules)
         status = item.status
         if status == "retired":
             issues = []
+        # The answer rules can change after a question was reviewed.
+        off_rules = status == "reviewed" and not dirty and answer_issues(item, self.answer_rules.of(item.use))
         if issues and (dirty or status == "draft"):
             text = "Before marking reviewed: " + " · ".join(issues)
+        elif off_rules:
+            text = "Reviewed, but it no longer fits the answer rules: " + " · ".join(off_rules)
         elif dirty:
             text = "Unsaved edits" if self.new_item else "Unsaved edits · saving creates a new draft revision"
         elif status == "draft":
@@ -543,7 +537,7 @@ class ItemEditor:
             text = "Reviewed · ready to use"
         else:
             text = "Retired · restore it as a draft to edit or review again"
-        shown = bool(issues and (dirty or status == "draft"))
+        shown = bool(issues and (dirty or status == "draft") or off_rules)
         self.status_line.setText(text)
         self.status_line.setStyleSheet(f"color: {topic_color('red', is_dark(self))};" if shown else "")
         reviewed_clean = status == "reviewed" and not dirty and not self.new_item
@@ -565,8 +559,11 @@ class ItemEditor:
 
     # -- answers -------------------------------------------------------------------------------------------
 
+    def rule(self):
+        return self.answer_rules.of(self.use.currentData())
+
     def cap(self):
-        return ELP_COUNT if self.use.currentData() == "elp" else REVISION_MAX
+        return self.rule().max_options
 
     def add_option(self, option=None):
         row = AnswerRow(self.host, option or Option(uuid4().hex, ""))
@@ -586,7 +583,7 @@ class ItemEditor:
         self.touch()
 
     def tick(self, row):
-        if self.use.currentData() == "revision":
+        if self.rule().max_correct == 1:
             for other in self.rows:
                 other.set_correct(other is row)
         else:
@@ -598,14 +595,13 @@ class ItemEditor:
             return
         if self.use.currentData() == "elp":
             self._loading = True
-            while len(self.rows) < ELP_COUNT:
+            while len(self.rows) < self.rule().min_options:
                 self.add_option()
             self._loading = False
         self.touch()
 
     def refresh_answers(self):
-        use = self.use.currentData()
-        self.hint.setText(HINTS[use])
+        self.hint.setText(f"{USE_NAMES[self.use.currentData()]}: {describe(self.rule())}")
         self.add_button.setEnabled(len(self.rows) < self.cap())
         for number, row in enumerate(self.rows, 1):
             row.tick.setAccessibleName(f"Option {number} is correct")
@@ -643,7 +639,7 @@ class ItemEditor:
         if target == "draft" and self.current.status == "draft":
             return
         if target == "reviewed":
-            issues = reviewed_issues(self.current)
+            issues = reviewed_issues(self.current, self.answer_rules)
             if issues:
                 self.error("Before marking reviewed: " + " · ".join(issues))
                 return

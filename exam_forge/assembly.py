@@ -92,7 +92,7 @@ class Assembly:
 
 
 def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams,
-            avoid_last: int, wanted: Callable[[str, str], bool] | None = None):
+            avoid_last: int, wanted: Callable[[str, str], bool] | None = None, rules: ElpRules = _DEFAULT_RULES):
     """Split items into eligible candidates and explained exclusions, ordered by ID."""
     if len({i.id for i in items}) != len(items):
         raise ValueError("Supply one current revision per item ID")
@@ -104,7 +104,7 @@ def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exa
             reasons.append("Item is not reviewed.")
         if item.use != "elp":
             reasons.append("Item is not an ELP question.")
-        reasons.extend(check_elp(item))
+        reasons.extend(check_elp(item, rules.answers))
         if item.difficulty not in _DIFFICULTIES:
             reasons.append("Item has no supported difficulty class.")
         if not topic:
@@ -121,10 +121,10 @@ def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exa
 
 
 def available(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams=(),
-              avoid_last: int = 0) -> dict[str, dict[str, int]]:
+              avoid_last: int = 0, rules: ElpRules = _DEFAULT_RULES) -> dict[str, dict[str, int]]:
     """Eligible counts per topic and difficulty, as assemble would see them."""
     result: dict[str, dict[str, int]] = {}
-    for item in _screen(items, topic_of, previous_exams, avoid_last)[0]:
+    for item in _screen(items, topic_of, previous_exams, avoid_last, rules=rules)[0]:
         result.setdefault(topic_of(item), dict.fromkeys(_DIFFICULTIES, 0))[item.difficulty] += 1
     return result
 
@@ -148,7 +148,7 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
     if type(seed) is not int:
         raise ValueError("Seed must be an integer")
     candidates, excluded = _screen(items, topic_of, previous_exams, blueprint.avoid_last,
-                                   lambda t, d: blueprint.counts.get(t, {}).get(d, 0) > 0)
+                                   lambda t, d: blueprint.counts.get(t, {}).get(d, 0) > 0, rules)
     result = Assembly(blueprint, rules, seed, (), tuple(candidates), tuple(excluded), topic_of)
     problems = [] if blueprint.total else ["The blueprint requests no items."]
     cells = []

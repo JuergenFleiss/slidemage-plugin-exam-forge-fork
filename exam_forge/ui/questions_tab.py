@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bank import BankError
+from ..model import answer_issues
 from ..moodle_xml import export_moodle_xml
 from ..sources import check_bank, link_slide
 from ..table_export import questions_csv
@@ -54,8 +55,13 @@ def ai_draft(item):
     return item.status == "draft" and (item.origin.kind == "ai" or bool(item.ai_edit_route))
 
 
-def needs_attention(item):
-    return (item.source_changed and item.status != "retired") or ai_draft(item)
+def off_rules(item, rules):
+    """A reviewed question that the deck's answer rules, changed since, no longer allow."""
+    return item.status == "reviewed" and bool(answer_issues(item, rules.of(item.use)))
+
+
+def needs_attention(item, rules):
+    return (item.source_changed and item.status != "retired") or ai_draft(item) or off_rules(item, rules)
 
 
 def retired_last(items):
@@ -272,7 +278,7 @@ class QuestionsTab:
 
     def view_items(self):
         if self.view == "attention":
-            return [item for item in self.items if needs_attention(item)]
+            return [item for item in self.items if needs_attention(item, self.answer_rules)]
         if self.view == "unlinked":
             return retired_last(self.unlinked())
         return self.view_questions() if self.focus == "questions" else []
@@ -369,7 +375,8 @@ class QuestionsTab:
 
     def render_topics(self):
         host, items = self.host, self.items
-        attention = [item for item in items if needs_attention(item)]
+        rules = self.answer_rules
+        attention = [item for item in items if needs_attention(item, rules)]
         owned = {slide for t in self.topics for slide in t.slides}
         bare = [r for r in self.slides or () if r.id not in owned]
         topic_ids = {item.id: topic_of(item, self.topics) for item in items}
@@ -396,18 +403,22 @@ class QuestionsTab:
             for topic in self.topics:
                 mine = [i for i in items if topic_ids[i.id] is not None and topic_ids[i.id].id == topic.id]
                 add(topic.id, entry(topic.name, f"{plural(len(topic.slides), 'slide')} · {plural(len(mine), 'question')}",
-                                    topic, sum(needs_attention(i) for i in mine), topic.id))
+                                    topic, sum(needs_attention(i, rules) for i in mine), topic.id))
             if bare:
                 loose = [i for i in items if i.sources and topic_ids[i.id] is None]
                 add("none", entry("No topic", f"{plural(len(bare), 'slide')} · {plural(len(loose), 'question')}",
-                                  None, sum(needs_attention(i) for i in loose)))
+                                  None, sum(needs_attention(i, rules) for i in loose)))
             new = host.Button("+ New topic", compact=True)
             new.setMinimumWidth(new.fontMetrics().boundingRect("+ New topic").width() + 28)
             new.clicked.connect(lambda: self.edit_topic())
             add(None, row([new], []), False)
             add(None, row([], [passive(label(host, "Review", role="caption"))]), False)
             changed, drafts = len(self.changed_slides()), sum(ai_draft(i) for i in items)
-            add("attention", entry("Needs attention", f"{plural(changed, 'changed slide')} · {plural(drafts, 'AI draft')}",
+            broken = sum(off_rules(i, rules) for i in items)
+            subtitle = f"{plural(changed, 'changed slide')} · {plural(drafts, 'AI draft')}"
+            if broken:
+                subtitle += f" · {broken} off the answer rules"
+            add("attention", entry("Needs attention", subtitle,
                                    None, len(attention)))
             if self.unlinked():
                 add("unlinked", entry("Unlinked questions", plural(len(self.unlinked()), "question")))
@@ -467,6 +478,8 @@ class QuestionsTab:
             chips.append(self.chip(plural(len(item.media), "image"), "muted"))
         if ai_draft(item):
             chips.append(self.chip("AI draft", amber=True))
+        if off_rules(item, self.answer_rules):
+            chips.append(self.chip("Off the answer rules", "warning"))
         if item.source_changed and item.status != "retired":
             chips.append(self.chip("Slide changed", amber=False))
         review = self.listing()
@@ -740,7 +753,7 @@ class QuestionsTab:
             return
         topic = self.topic_by_id(self.view)
         dialog = DraftDialog(self.host, self.deck, self.bank, self, topics=self.topics,
-                             topic_id=topic.id if topic else None, preselect=self.sel_slide)
+                             topic_id=topic.id if topic else None, preselect=self.sel_slide, rules=self.answer_rules)
         self.drafting_dialog = dialog
         self.set_busy(True)
 
@@ -860,10 +873,15 @@ class QuestionsTab:
         self.check_sources(then=self.export_checked)
 
     def export_checked(self, report):
-        items = [checked.item for checked in report.items
-                 if checked.item.status == "reviewed" and checked.item.use == "revision"]
+        rule = self.answer_rules.revision
+        reviewed = [checked.item for checked in report.items
+                    if checked.item.status == "reviewed" and checked.item.use == "revision"]
+        items = [item for item in reviewed if not answer_issues(item, rule)]
+        skipped = len(reviewed) - len(items)
+        left_out = (f" {plural(skipped, 'reviewed question')} that no longer fit the answer rules "
+                    f"{'was' if skipped == 1 else 'were'} left out.") if skipped else ""
         if not items:
-            self.error("No reviewed revision-quiz questions to export.")
+            self.error("No reviewed revision-quiz questions to export." + left_out)
             return
         changed = [checked for checked in report.items if checked.item in items and checked.source_changed]
         if changed:
@@ -886,7 +904,7 @@ class QuestionsTab:
         def work():
             if any(self.bank.get(item.id) != item for item in items):
                 raise BankError("A question changed during export. Check slides and try again.")
-            write_atomically(Path(filename), export_moodle_xml(items, bank=self.bank), ".moodle-")
+            write_atomically(Path(filename), export_moodle_xml(items, bank=self.bank, rule=rule), ".moodle-")
             return len(items)
 
         def done(count, error):
@@ -894,7 +912,7 @@ class QuestionsTab:
             if error:
                 self.error(error)
             else:
-                self.toast(f"Exported {count} reviewed questions to {filename}.")
+                self.toast(f"Exported {count} reviewed questions to {filename}.{left_out}")
         self.host.run_in_background(work, done)
 
     def export_table(self):

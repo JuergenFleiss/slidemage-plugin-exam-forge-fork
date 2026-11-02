@@ -49,6 +49,11 @@ class Controller:
         window = self.windows.get(self.key(deck))
         return window.bank.folder if window is not None else remembered_folder(self.host, deck)
 
+    def answer_rules_changed(self, deck):
+        window = self.windows.get(self.key(deck)) if deck is not None else None
+        if window is not None:
+            window.answer_rules_changed()
+
     def change_folder(self, deck, parent=None):
         """Point this deck at another bank folder; True when it changed."""
         key = self.key(deck)

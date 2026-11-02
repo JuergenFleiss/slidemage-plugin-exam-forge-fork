@@ -9,7 +9,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from ..answer_rules import AnswerRulesStore
 from ..bank import BankError
+from ..elp import ElpRules
+from ..model import AnswerRules
 from ..topics import TopicStore, migrate, topic_name
 from .editor import ItemEditor
 from .exam_tab import ExamTab
@@ -48,6 +51,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.new_item = False
         self.items = []
         self.topics = ()
+        self.answer_rules = AnswerRules()
         self.links = self.attachments = ()
         self.busy = False
         self.idle_callbacks = []
@@ -91,6 +95,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         foot.addWidget(self.checked_label)
         layout.addLayout(foot)
         self.load_topics()
+        self.load_answer_rules()
         self.reload()
         self.load_slides()
         self.check_sources()
@@ -138,6 +143,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.elp_told, self.elp_text = False, ""
         self.exam_tab.reset()
         self.load_topics()
+        self.load_answer_rules()
         self.reload()
         self.load_slides()
 
@@ -160,6 +166,24 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         except (OSError, BankError, ValueError) as exc:
             self.topics = ()
             self.error(exc)
+
+    def load_answer_rules(self):
+        """Read answer-rules.json; the defaults when there is none or it cannot be read."""
+        try:
+            self.answer_rules = AnswerRulesStore(self.bank.folder).load()
+        except (OSError, BankError, ValueError) as exc:
+            self.answer_rules = AnswerRules()
+            self.error(f"{exc} The default answer rules apply.")
+        self.exam_tab.rules = ElpRules(answers=self.answer_rules.elp)
+
+    def answer_rules_changed(self):
+        """Settings saved new rules: a proposed exam was screened with the old ones, so it is dropped."""
+        self.load_answer_rules()
+        self.exam_tab.invalidate()
+        self.render()
+        if self.current is not None:
+            self.refresh_answers()
+            self.refresh_footer()
 
     def save_topics(self, topics):
         """Persist topics. A proposed exam was resolved with the old ones, so it is dropped."""

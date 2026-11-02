@@ -89,7 +89,8 @@ def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env, tm
     other = replace(ref, id="other", id_slug="other", position=2)
     host.slides[(deck.path, "instructor", "en")].append(other)
     host.sources[other] = SlideSource("UNCHOSEN_SLIDE")
-    bank.create(Item("old", 1, "BANK_STEM", (Option("BANK_KEY", "BANK_ANSWER", True, "BANK_RATIONALE"),)))
+    bank.create(Item("old", 1, "BANK_STEM", (Option("BANK_KEY", "BANK_ANSWER", True, "BANK_RATIONALE"),
+                                            Option("BANK_KEY2", "BANK_ANSWER", False, "BANK_RATIONALE"))))
     bank.set_status("old", 1, "reviewed")
     host.student_data = {"name": "STUDENT_NAME", "grade": "STUDENT_GRADE"}
     chat, page = enable(host)
@@ -117,7 +118,7 @@ def test_outgoing_request_excludes_bank_keys_rationales_and_student_data(env, tm
     assert window.ai_tag.toolTip() == "captured-route · captured-model"
     exported = []
     monkeypatch.setattr("exam_forge.ui.questions_tab.export_moodle_xml",
-                        lambda items, bank: exported.extend(items) or b"<quiz/>")
+                        lambda items, bank, rule: exported.extend(items) or b"<quiz/>")
     monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(tmp_path / "o.xml"), ""))
     window.export()
     host.drain()

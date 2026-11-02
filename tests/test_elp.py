@@ -58,5 +58,5 @@ def test_editor_reviews_multiple_answer_elp_and_moodle_stays_single_answer(env):
     window.change_status('reviewed')
     host.drain()
     assert window.current.status == 'reviewed'
-    with pytest.raises(ValueError, match='single-answer'):
+    with pytest.raises(ValueError, match='mark exactly one correct answer'):
         export_moodle_xml([window.current], released_elp={(window.current.id, window.current.revision)})

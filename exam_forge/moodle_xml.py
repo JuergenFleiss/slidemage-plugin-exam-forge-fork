@@ -17,7 +17,7 @@ from html import escape
 from xml.etree import ElementTree as ET
 
 from .bank import Bank
-from .model import Item, check_phase1
+from .model import REVISION_ANSWERS, AnswerRule, Item, answer_issues
 
 
 @dataclass(frozen=True)
@@ -42,11 +42,13 @@ def _html(value: str) -> str:
     return escape(_text(value), quote=True).replace('\n', '<br />\n')
 
 
-def _fraction(percent: int) -> str:
-    """Only the Moodle-allowed grades used by single-answer phase 1."""
-    if type(percent) is not int or percent not in (0, 100):
-        raise ValueError('phase 1 answer fraction must be 0 or 100')
-    return str(percent)
+def _fraction(share: int, sign: int = 1) -> str:
+    """100% split into `share` equal parts, one of Moodle's grades for up to nine parts; 0 for no share."""
+    if type(share) is not int or not 0 <= share <= 9:
+        raise ValueError('answer fraction must split 100% into at most nine parts')
+    if share == 0:
+        return '0'
+    return f'{sign * round(100 / share, 5):.5f}'.rstrip('0').rstrip('.')
 
 
 def export_moodle_xml(
@@ -54,13 +56,17 @@ def export_moodle_xml(
     released_elp: Iterable[tuple[str, int]] = (),
     images: Mapping[tuple[str, int], Iterable[Image]] | None = None,
     bank: Bank | None = None,
+    rule: AnswerRule = REVISION_ANSWERS,
 ) -> bytes:
     """Return UTF-8 XML. ELP release is explicit and specific to a revision.
 
     Images are keyed by (item id, revision). The caller decides which items to
-    export; status does not imply release or approval. Each selected item needs
-    at least two options and exactly one correct option. Only answer fractions
-    encode the correctness flag. Rationales become per-answer feedback.
+    export; status does not imply release or approval. Each selected item must
+    follow `rule`. A rule that allows one correct answer makes single-answer
+    questions; otherwise every question is multiple-response: the correct
+    answers share 100% and the wrong ones -100%, so the format does not tell how
+    many are correct. Only answer fractions encode the correctness flag.
+    Rationales become per-answer feedback.
     """
     released = set(released_elp)
     image_map = images if images is not None else {}
@@ -69,8 +75,9 @@ def export_moodle_xml(
         key = (item.id, item.revision)
         if item.use == 'elp' and key not in released:
             continue
-        if len(item.options) < 2 or check_phase1(item):
-            raise ValueError(f'{item.id}: single-answer question needs at least two options and exactly one correct answer')
+        issues = answer_issues(item, rule)
+        if issues:
+            raise ValueError(f'{item.id}: the question must {" and ".join(issues)}')
         question = ET.SubElement(root, 'question', {'type': 'multichoice'})
         ET.SubElement(ET.SubElement(question, 'name'), 'text').text = _text(f'{item.id} r{item.revision}')
         questiontext = ET.SubElement(question, 'questiontext', {'format': 'html'})
@@ -90,11 +97,14 @@ def export_moodle_xml(
             node.text = base64.b64encode(image.data).decode('ascii')
         ET.SubElement(questiontext, 'text').text = html
         ET.SubElement(question, 'defaultgrade').text = '1.0000000'
-        ET.SubElement(question, 'single').text = 'true'
+        ET.SubElement(question, 'single').text = 'true' if rule.max_correct == 1 else 'false'
+        correct = sum(option.correct for option in item.options)
+        wrong = 0 if rule.max_correct == 1 else len(item.options) - correct
         ET.SubElement(question, 'shuffleanswers').text = '1'
         ET.SubElement(question, 'answernumbering').text = 'abc'
         for option in item.options:
-            answer = ET.SubElement(question, 'answer', {'fraction': _fraction(100 if option.correct else 0), 'format': 'html'})
+            fraction = _fraction(correct) if option.correct else _fraction(wrong, -1)
+            answer = ET.SubElement(question, 'answer', {'fraction': fraction, 'format': 'html'})
             ET.SubElement(answer, 'text').text = _html(option.text)
             feedback = ET.SubElement(answer, 'feedback', {'format': 'html'})
             ET.SubElement(feedback, 'text').text = _html(option.rationale)

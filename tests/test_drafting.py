@@ -106,7 +106,7 @@ def test_draft_cannot_skip_review_and_provenance_survives_edit(tmp_path):
 def test_default_model_is_preserved_verbatim_and_elp_rules_apply():
     reply = replace(result(), route=Route("default-route", "chat", ""))
     assert parse_reply(reply, sources=(SourceLink(),))[0].origin.model == ""
-    with pytest.raises(DraftReplyError, match="five options"):
+    with pytest.raises(DraftReplyError, match="exactly five answers"):
         parse_reply(reply, use="elp", sources=(SourceLink(),))
     row = reply_row()
     row["options"] += [{"text": str(i), "correct": False, "rationale": "Incorrect sum"} for i in range(3)]
@@ -180,5 +180,5 @@ def test_bad_update_json_is_refused(text):
 def test_truncated_update_reply_and_elp_rules():
     with pytest.raises(DraftReplyError, match="truncated"):
         parse_update_reply(update_result(truncated=True), existing())
-    with pytest.raises(DraftReplyError, match="five options"):
+    with pytest.raises(DraftReplyError, match="exactly five answers"):
         parse_update_reply(update_result(), existing(use="elp"))

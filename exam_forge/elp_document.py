@@ -30,6 +30,8 @@ from decimal import Decimal
 from html import escape
 from typing import TYPE_CHECKING
 
+from .model import number_word
+
 if TYPE_CHECKING:
     # manifest imports host-facing source checks; rendering needs no host or Qt.
     from .manifest import Manifest
@@ -127,6 +129,8 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
     """
     data = manifest.data()
     scoring = data['scoring']
+    # Exams issued before answer rules could change have no `answers`: five per question.
+    total = scoring['rules'].get('answers', {}).get('max_options', 5)
     exam, key, sheet = [], [], []
     points, minutes = 0, Decimal(0)
     for number, item in enumerate(data['items'], 1):
@@ -136,8 +140,8 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
         rule = scoring['rules'][difficulty]
         options = item['options']
         count = sum(option['correct'] for option in options)
-        if len(options) != 5 or not 1 <= count <= 4:
-            raise ValueError(f'{item["id"]}: ELP needs five options, one to four correct')
+        if len(options) != total or not 1 <= count < total:
+            raise ValueError(f'{item["id"]}: ELP needs {total} options, at least one correct and one wrong')
         rows = scoring['tables'].get(str(rule['points']), [])
         row = next((r for r in rows if r['correct_options'] == count), None)
         if row is None:
@@ -168,8 +172,9 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                ('<table><thead><tr><th>Question / revision</th><th>Correct choices / option IDs</th>'
                 '<th>Maximum points</th><th>Correct tick</th><th>Wrong tick</th></tr></thead><tbody>'),
                *sheet, '</tbody></table>', '<h2>Frozen scoring tables</h2>',
-               ('<p>P = question points; n = number of correct options; five options per question. '
-                'Correct tick: +P/n; wrong tick: −P/(5−n).</p>'),
+               (f'<p>P = question points; n = number of correct options; {number_word(total)} options per '
+                'question. '
+                f'Correct tick: +P/n; wrong tick: −P/({total}−n).</p>'),
                ('<table><thead><tr><th>P</th><th>n</th><th>Correct tick</th><th>Wrong tick</th>'
                 '</tr></thead><tbody>'), *tables, '</tbody></table>']
     # `language` is the deck's: the questions are written in it, so a screen reader reads the page in it.

@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
-from .model import Item
+from .model import ELP_ANSWERS, AnswerRule, Item, answer_issues
 
 
 SCORING_FLOOR = 0
@@ -31,6 +31,16 @@ class DifficultyRules:
 class ElpRules:
     easy: DifficultyRules = DifficultyRules(12, 2.5)
     hard: DifficultyRules = DifficultyRules(24, 5)
+    answers: AnswerRule = ELP_ANSWERS
+
+    def __post_init__(self) -> None:
+        # Every tick is worth whole points: P/n for a correct one, P/(answers - n) for a wrong one.
+        total = self.answers.max_options
+        for name, rule in (("easy", self.easy), ("hard", self.hard)):
+            for n in range(self.answers.min_correct, self.answers.max_correct + 1):
+                if rule.points % n or rule.points % (total - n):
+                    raise ValueError(f"With {total} answers and {n} correct, the {rule.points} points of {'an' if name == 'easy' else 'a'} {name} "
+                                     "question cannot be split into whole points per answer.")
 
 
 @dataclass(frozen=True)
@@ -40,19 +50,16 @@ class ScoringRow:
     wrong_tick: int
 
 
-def scoring_table(points: int) -> tuple[ScoringRow, ...]:
-    """Return the per-option values for a scoring sheet, with a zero floor."""
+def scoring_table(points: int, answers: AnswerRule = ELP_ANSWERS) -> tuple[ScoringRow, ...]:
+    """Return the per-option values for a scoring sheet, with a zero floor: one row per allowed number of correct
+    answers."""
     if type(points) is not int or points <= 0 or points % 12:
         raise ValueError("points must be a positive multiple of 12")
-    return tuple(ScoringRow(n, points // n, -(points // (5 - n)))
-                 for n in range(1, 5))
+    total = answers.max_options
+    return tuple(ScoringRow(n, points // n, -(points // (total - n)))
+                 for n in range(answers.min_correct, answers.max_correct + 1))
 
 
-def check_elp(item: Item) -> list[str]:
+def check_elp(item: Item, rule: AnswerRule = ELP_ANSWERS) -> list[str]:
     """Return answer-structure errors, allowing incomplete drafts to be saved."""
-    errors = []
-    if len(item.options) != 5:
-        errors.append("An ELP item must have exactly five options.")
-    if not 1 <= sum(option.correct for option in item.options) <= 4:
-        errors.append("An ELP item must have one to four correct options.")
-    return errors
+    return [f"An ELP question must {issue}." for issue in answer_issues(item, rule)]
