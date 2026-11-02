@@ -31,6 +31,7 @@ from ..bank import BankError
 from ..model import KINDS, USES, question_issues
 from ..moodle_xml import export_moodle_xml
 from ..sources import check_bank, link_slide
+from ..question_document import questions_html
 from ..table_export import questions_csv
 from ..topics import topic_color, topic_of
 from .drafting import DraftDialog, plural
@@ -922,22 +923,35 @@ class QuestionsTab:
 
     def export_table(self):
         """Every question of the bank, with its answers and rationales, as a CSV table."""
+        self.export_all(".csv", "CSV table (*.csv)", questions_csv)
+
+    def export_html(self):
+        """Every question of the bank, with its answers and rationales, as one HTML page like the exam key."""
+        bank = self.bank
+        try:
+            language = self.host.deck_language(self.deck)
+        except Exception:  # noqa: BLE001 - the page's language is only a hint for screen readers
+            language = "en"
+        self.export_all(".html", "HTML page (*.html)", lambda items, topics, slides: questions_html(
+            items, topics, slides, bank.read_media, language).encode("utf-8"))
+
+    def export_all(self, suffix, kind, render):
         if not self.may_leave():
             return
-        # The question folder is already private, like the table, which holds the answers.
+        # The question folder is already private, like the export, which holds the answers.
         filename, _ = QFileDialog.getSaveFileName(self, "Export all questions with answers",
-                                                  str(self.bank.folder / "questions.csv"), "CSV table (*.csv)")
+                                                  str(self.bank.folder / f"questions{suffix}"), kind)
         if not filename:
             return
-        if not filename.lower().endswith(".csv"):
-            filename += ".csv"
+        if not filename.lower().endswith(suffix):
+            filename += suffix
         topics = self.topics
         slides = {ref.id: (ref.position, slide_title(ref)) for ref in self.slides or ()}
         self.set_busy(True)
 
         def work():
             items, corrupt = self.bank.load()
-            write_atomically(Path(filename), questions_csv(items, topics, slides), ".questions-")
+            write_atomically(Path(filename), render(items, topics, slides), ".questions-")
             return len(items), len(corrupt)
 
         def done(counts, error):

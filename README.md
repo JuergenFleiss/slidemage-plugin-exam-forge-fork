@@ -30,6 +30,8 @@ Source checks run in the background on open, on **Check slides**, and before sta
 
 **Export table** saves every question of the bank, whatever its status, as a CSV table, by default in the question folder: one row per question in the order of its slides, with topic, linked slides, learning objective, the teaching-assistant note, and each answer with whether it is correct and its rationale. **The table holds the answer key: keep it as private as the bank folder.** Images are only counted. It is UTF-8 and opens in Excel or LibreOffice; a cell that a spreadsheet would run as a formula starts with an apostrophe.
 
+**Export HTML** saves the same questions as one self-contained page, laid out like the exam key: each question with its status, use, type, difficulty, topic and slides, its images, the teaching-assistant note, and its answers marked correct or incorrect with their rationales, or its model answer and grading notes. It opens in the question folder by default. **The page holds the answer key: keep it as private as the bank folder.** An image that is missing or changed is named instead of shown.
+
 ## Exams
 
 The **Exam** tab has three steps: counts, review and swap, freeze and save.

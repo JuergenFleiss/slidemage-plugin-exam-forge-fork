@@ -24,7 +24,8 @@ def _cell(value: str) -> str:
     return "'" + value if value.startswith(FORMULA) else value
 
 
-def _order(item: Item, positions: Mapping[str, int]) -> tuple:
+def deck_order(item: Item, positions: Mapping[str, int]) -> tuple:
+    """Sort key: by the first linked slide in the deck, unlinked last, retired last on a slide."""
     firsts = [positions[link.slide_id] for link in item.sources if link.slide_id in positions]
     return (not item.sources, min(firsts, default=len(positions) + 1), item.status == "retired", item.stem)
 
@@ -33,7 +34,7 @@ def questions_csv(items: Iterable[Item], topics: Iterable[Topic] = (),
                   slides: Mapping[str, tuple[int, str]] | None = None) -> bytes:
     """`slides` maps a slide id to its position and title in the deck; slides it lacks show by id."""
     items, topics, slides = list(items), tuple(topics), dict(slides or {})
-    items.sort(key=lambda item: _order(item, {slide: pos for slide, (pos, _) in slides.items()}))
+    items.sort(key=lambda item: deck_order(item, {slide: pos for slide, (pos, _) in slides.items()}))
     answers = max((len(item.options) for item in items), default=0)
     head = ["ID", "Revision", "Status", "Used for", "Type", "Difficulty", "Topic", "Slides", "Learning objective",
             "Question", "Model answer", "Grading notes"]

@@ -70,6 +70,8 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.export_button.clicked.connect(self.export)
         self.table_button = host.Button("Export table")
         self.table_button.clicked.connect(self.export_table)
+        self.html_button = host.Button("Export HTML")
+        self.html_button.clicked.connect(self.export_html)
         questions = self.build_questions_tab()
         self.exam_tab = ExamTab(self)
         self.tabs = Tabs(host, (("Questions", questions), ("Exam", self.exam_tab)))
@@ -78,6 +80,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         top.addStretch()
         top.addWidget(self.check_button)
         top.addWidget(self.table_button)
+        top.addWidget(self.html_button)
         top.addWidget(self.export_button)
         layout.addLayout(top)
         layout.addWidget(self.notice)
@@ -213,7 +216,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.draft_button.setEnabled(not busy)
         self.write_button.setEnabled(not busy)
         self.editor.setEnabled(not busy and self.current is not None)
-        for widget in (self.check_button, self.export_button, self.table_button, self.exam_tab):
+        for widget in (self.check_button, self.export_button, self.table_button, self.html_button, self.exam_tab):
             widget.setEnabled(not busy)
         if not busy:
             callbacks, self.idle_callbacks = self.idle_callbacks, []

@@ -786,3 +786,16 @@ def test_another_slide_or_topic_replaces_the_open_question(lab):
     window.card_opened(window.cards.item(0))
     pick(window.topic_list, "attention")
     assert window.stack.currentWidget() is window.placeholder
+
+
+def test_export_html_writes_every_question_into_the_question_folder(lab, tmp_path, monkeypatch):
+    host, _, _, _, window, *_ = lab
+    asked = []
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
+                        lambda *a: asked.append(a) or (str(tmp_path / "all"), ""))
+    window.html_button.click()
+    host.drain()
+    assert asked[0][2] == str(window.bank.folder / "questions.html")
+    html = (tmp_path / "all.html").read_text(encoding="utf-8")
+    assert html.count('<section class="question">') == 8 and "Slide 1 · Title a" in html
+    assert "Exported 8 questions" in window.notice.text() and not window.busy
