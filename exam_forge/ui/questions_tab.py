@@ -922,8 +922,9 @@ class QuestionsTab:
         """Every question of the bank, with its answers and rationales, as a CSV table."""
         if not self.may_leave():
             return
-        filename, _ = QFileDialog.getSaveFileName(self, "Export all questions with answers", "questions.csv",
-                                                  "CSV table (*.csv)")
+        # The question folder is already private, like the table, which holds the answers.
+        filename, _ = QFileDialog.getSaveFileName(self, "Export all questions with answers",
+                                                  str(self.bank.folder / "questions.csv"), "CSV table (*.csv)")
         if not filename:
             return
         if not filename.lower().endswith(".csv"):

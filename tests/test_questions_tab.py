@@ -759,9 +759,11 @@ def test_unsaved_work_keeps_the_focus(lab, monkeypatch):
 
 def test_export_table_writes_every_question(lab, tmp_path, monkeypatch):
     host, _, _, _, window, *_ = lab
-    path = tmp_path / "all"
-    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    path, asked = tmp_path / "all", []
+    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
+                        lambda *a: asked.append(a) or (str(path), ""))
     window.table_button.click()
+    assert asked[0][2] == str(window.bank.folder / "questions.csv")
     host.drain()
     text = path.with_suffix(".csv").read_bytes().decode("utf-8-sig")
     assert all(f"\r\nq{n}," in text for n in range(1, 9)) and "Slide 1 · Title a" in text
