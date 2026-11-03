@@ -16,7 +16,7 @@ SlideMage plugin for writing exam questions for a deck and assembling exams. Ope
 - **Answer rules** (Settings) set how many answers and correct answers a question has, per deck.
 - Every save creates a draft revision. **Mark reviewed** needs a linked slide.
 - Changed slides are flagged. **Review changes** compares old and new text; **Update with AI** drafts a revision.
-- **Draft with AI** (off by default, Settings) writes questions from chosen slides. Answer keys are never sent; replies arrive as **AI draft**.
+- **Draft with AI** (off by default, Settings) writes questions from chosen slides. Answer keys are never sent; replies arrive as **AI draft** until you review them. A question an AI drafted or revised keeps the permanent **AI-assisted** label.
 
 </td>
 </tr>
