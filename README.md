@@ -32,7 +32,7 @@ SlideMage plugin for writing exam questions for a deck and assembling exams. Ope
 
 <table width="100%">
 <tr>
-<td width="55%"><img src="docs/screenshots/export-html.png" alt="Question page export" width="100%"></td>
+<td width="55%"><img src="docs/screenshots/export-html.png" alt="Question page export" width="380"></td>
 <td width="45%" valign="top">
 
 The **Export** menu holds the answers: keep the files private.
