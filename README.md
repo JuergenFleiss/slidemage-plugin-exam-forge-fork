@@ -54,10 +54,32 @@ Easy questions are worth 12 points and 2.5 minutes, hard ones 24 points and 5 mi
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="55%" valign="top">
+
 ## Compatibility
+
+</td>
+<td valign="top">
 
 Banks from versions before 0.10.0 are upgraded when written, and older versions cannot read them: update every machine that shares a bank.
 
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="55%" valign="top">
+
 ## Development
 
+</td>
+<td valign="top">
+
 Run `QT_QPA_PLATFORM=offscreen python -m pytest -q` with SlideMage's plugin API installed, and `python build.py --check` to validate the package. Keep `CHANGELOG.md` in SlideMage's format; releases are built from version tags.
+
+</td>
+</tr>
+</table>
