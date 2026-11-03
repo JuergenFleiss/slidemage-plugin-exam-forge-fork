@@ -3,7 +3,7 @@ name = "Exam Forge"
 version = "0.10.2"
 api_version = 1
 requires_slidemage = ">=0.13.31"
-summary = "Write exam questions from your slides, review them, export them, and assemble exams."
+summary = "Exam questions linked to the material you taught, with clearly documented AI use. Review, export, assemble exams."
 author = "Jürgen Fleiß"
 homepage = "https://github.com/slidemage/slidemage-plugin-exam-forge"
 license = "GPL-3.0-or-later"
