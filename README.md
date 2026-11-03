@@ -23,8 +23,6 @@ The **Export** menu holds the answers: keep the files private.
 - **Question table (CSV):** every question, one row each.
 - **Question page (HTML):** every question with its answers, like the exam key.
 
-![Question table export](docs/screenshots/export-table.png)
-
 ![Question page export](docs/screenshots/export-html.png)
 
 ## Exams
