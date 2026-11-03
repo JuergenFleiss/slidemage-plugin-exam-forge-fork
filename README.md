@@ -21,7 +21,8 @@ SlideMage plugin for writing exam questions for a deck and assembling exams. Ope
 
 - **Draft with AI** writes questions from chosen slides. Answer keys are never sent.
 - **Update with AI** drafts a revision of a question whose slide changed.
-- Replies arrive as **AI draft** until you review them. A question an AI drafted or revised keeps the permanent **AI-assisted** label.
+- Replies arrive as **AI draft** until you review them.
+- **AI-assisted** is a permanent label on every question an AI drafted or revised.
 
 </td>
 </tr>
