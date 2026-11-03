@@ -4,7 +4,7 @@ SlideMage plugin for writing exam questions for a deck and assembling exams. Ope
 
 ## Questions
 
-<table>
+<table width="100%">
 <tr>
 <td width="55%"><img src="docs/screenshots/questions.png" alt="Questions tab" width="100%"></td>
 <td width="45%" valign="top">
@@ -24,7 +24,7 @@ SlideMage plugin for writing exam questions for a deck and assembling exams. Ope
 
 ## Export
 
-<table>
+<table width="100%">
 <tr>
 <td width="55%"><img src="docs/screenshots/export-html.png" alt="Question page export" width="100%"></td>
 <td width="45%" valign="top">
@@ -41,7 +41,7 @@ The **Export** menu holds the answers: keep the files private.
 
 ## Exams
 
-<table>
+<table width="100%">
 <tr>
 <td width="55%"><img src="docs/screenshots/exam.png" alt="Exam tab" width="100%"></td>
 <td width="45%" valign="top">
@@ -54,7 +54,7 @@ Easy questions are worth 12 points and 2.5 minutes, hard ones 24 points and 5 mi
 </tr>
 </table>
 
-<table>
+<table width="100%">
 <tr>
 <td width="55%" valign="top">
 
@@ -69,7 +69,7 @@ Banks from versions before 0.10.0 are upgraded when written, and older versions 
 </tr>
 </table>
 
-<table>
+<table width="100%">
 <tr>
 <td width="55%" valign="top">
 
