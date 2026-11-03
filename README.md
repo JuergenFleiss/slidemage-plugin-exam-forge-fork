@@ -1,12 +1,14 @@
 # Exam Forge
 
-SlideMage plugin for writing exam questions for a deck and assembling exams. Open **Exam Forge…** in the Deck menu. Requires SlideMage 0.13.18 or later.
+A [SlideMage](https://slidemage.org) plugin for writing exam questions for a deck and assembling exams.
+
+**Open:** Deck menu → **Exam Forge…** · **Requires:** SlideMage 0.13.18 or later
 
 ## Questions
 
 <table width="100%">
 <tr>
-<td width="55%"><img src="docs/screenshots/questions.png" alt="Questions tab" width="100%"></td>
+<td width="55%" valign="top"><img src="docs/screenshots/questions.png" alt="Questions tab" width="100%"></td>
 <td width="45%" valign="top">
 
 **The bank holds answer keys and rationales: keep its folder private.** Choose the folder on first use; **Change folder…** in Settings moves it.
@@ -32,8 +34,8 @@ SlideMage plugin for writing exam questions for a deck and assembling exams. Ope
 
 <table width="100%">
 <tr>
-<td width="55%"><img src="docs/screenshots/export-html.png" alt="Question page export" width="380"></td>
-<td width="45%" valign="top">
+<td width="40%" valign="top"><img src="docs/screenshots/export-html.png" alt="Question page export" width="100%"></td>
+<td width="60%" valign="top">
 
 The **Export** menu holds the answers: keep the files private.
 
@@ -49,7 +51,7 @@ The **Export** menu holds the answers: keep the files private.
 
 <table width="100%">
 <tr>
-<td width="55%"><img src="docs/screenshots/exam.png" alt="Exam tab" width="100%"></td>
+<td width="55%" valign="top"><img src="docs/screenshots/exam.png" alt="Exam tab" width="100%"></td>
 <td width="45%" valign="top">
 
 The **Exam** tab: set easy and hard counts per topic, review and swap the proposal, then **Approve and freeze**. This issues a manifest in the bank folder and saves an exam copy and a private key (HTML). **Record a correction…** logs later changes.
