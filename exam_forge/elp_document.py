@@ -37,17 +37,33 @@ if TYPE_CHECKING:
     from .manifest import Manifest
 
 
-_STYLE = """body { font-family: sans-serif; line-height: 1.5; max-width: 56rem; margin: 2rem auto; padding: 0 1rem; }
-.question { border-top: 1px solid #aaa; margin-top: 2rem; break-inside: avoid; }
-.text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.meta, figcaption { color: #444; }
-li { margin: .6rem 0; }
-img { max-width: 100%; height: auto; }
-figure { margin: 1rem 0; }
-table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-th, td { border: 1px solid #aaa; padding: .4rem; text-align: left; }
-.answer-space { border: 1px solid #aaa; min-height: 14rem; margin: 1rem 0; }
-@media print { body { max-width: none; margin: 0; } }
+_STYLE = """body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;max-width:46rem;margin:2.5rem auto;padding:0 1.25rem;color:#1c1b19}
+h1{font-size:1.5rem;letter-spacing:-.01em;margin:0 0 .25rem}
+.lead{color:#66625a;margin:.25rem 0}
+.private{background:#fffaf0;border:1px solid #e8d3a6;border-radius:10px;padding:.6rem .9rem;margin:1rem 0;color:#6b4300}
+.question{border-top:1px solid #e4e1da;margin-top:2rem;padding-top:1.25rem;break-inside:avoid}
+.question h2{font-size:1.05rem;margin:0 0 .4rem;display:flex;gap:.6rem;align-items:baseline}
+.question h2 .id{font:400 .75rem ui-monospace,monospace;color:#8a857b}
+.question h3{font-size:.95rem;margin:.9rem 0 .2rem}
+.chips{display:flex;flex-wrap:wrap;gap:.35rem;margin:0 0 .75rem}
+.chip{font-size:.75rem;padding:.1rem .55rem;border-radius:999px;background:#efede8;color:#4a4740}
+.chip.reviewed{background:#e4f3ea;color:#16613a}
+.text{white-space:pre-wrap;overflow-wrap:anywhere}
+.stem{font-size:1.02rem;font-weight:500}
+.meta,figcaption{color:#66625a;font-size:.8rem}
+ol{list-style:none;padding:0;margin:.9rem 0 0;counter-reset:a}
+li{display:grid;grid-template-columns:1.6rem 1.5rem minmax(0,1fr);gap:.5rem;margin:.55rem 0;counter-increment:a}
+li.pl{grid-template-columns:1.6rem minmax(0,1fr)}
+li::before{content:counter(a,upper-alpha);font-weight:700;color:#66625a;text-align:right}
+.mk{width:1.4rem;height:1.4rem;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700}
+.ok .mk{background:#e4f3ea;color:#16613a}.no .mk{background:#f4f2ee;color:#8a857b}
+.ok .option{font-weight:600}
+.rationale{color:#66625a;font-size:.85rem;margin-top:.15rem}
+.objective{color:#4a4740;font-size:.85rem;margin-top:.9rem}
+img{max-width:100%;height:auto}figure{margin:1rem 0}
+table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #d9d6cf;padding:.4rem;text-align:left}
+.answer-space{border:1px dashed #c9c5bc;border-radius:8px;min-height:14rem;margin:1rem 0}
+@media print{body{max-width:none;margin:0}.private{break-inside:avoid}}
 """
 _MATH_NOTE = (r'Math is shown as copyable source, including \( ... \) and \[ ... \] '
               'delimiters. It is not typeset. Check entry in the exam software at gate J4.')
@@ -64,8 +80,26 @@ def _page(title: str, body: list[str], language: str = "en") -> str:
         ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
          'img-src data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'">'),
         f'<title>{_text(title)}</title>', f'<style>{_STYLE}</style>', '</head>', '<body>',
-        f'<h1>{_text(title)}</h1>', f'<p>{_text(_MATH_NOTE)}</p>', *body, '</body>', '</html>', '',
+        f'<h1>{_text(title)}</h1>', f'<p class="lead">{_text(_MATH_NOTE)}</p>', *body, '</body>', '</html>', '',
     ])
+
+
+def heading(number: int, item_id: str, revision: int) -> str:
+    """"Question N" with the short id and revision as small monospace text; the full id stays in the title."""
+    return (f'<h2>Question {number} <span class="id" title="{_text(item_id)}">'
+            f'{_text(item_id[:8])} · r{revision}</span></h2>')
+
+
+def chips(labels: list[str], reviewed: bool = False) -> str:
+    """Small pills; the first is the status, green when reviewed."""
+    cells = [f'<span class="chip{" reviewed" if reviewed and not n else ""}">{_text(label)}</span>'
+             for n, label in enumerate(labels) if label]
+    return f'<div class="chips">{"".join(cells)}</div>'
+
+
+def marker(correct: bool) -> str:
+    label, glyph = ("Correct", "✓") if correct else ("Incorrect", "✗")
+    return f'<span class="mk" aria-label="{label}">{glyph}</span>'
 
 
 def image_mime(raw: bytes) -> str | None:
@@ -101,10 +135,9 @@ def _image(media: dict, attachments: dict) -> str:
 def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bool) -> str:
     parts = [
         '<section class="question">',
-        f'<h2>Question {number} — {_text(item["id"])} r{item["revision"]}</h2>',
-        (f'<p class="meta">{rule["points"]} points; {rule["minutes"]} planned minutes; '
-         f'{_text(item["difficulty"])}</p>'),
-        f'<div class="text stem">{_text(item["stem"])}</div>', *images, '<ol type="A">',
+        heading(number, item["id"], item["revision"]),
+        chips([f'{rule["points"]} points', f'{rule["minutes"]} planned minutes', item["difficulty"]]),
+        f'<div class="text stem">{_text(item["stem"])}</div>', *images, '<ol>',
     ]
     if item.get('assistant_note'):
         parts.insert(-1, '<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
@@ -122,13 +155,14 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
         parts.append('</section>')
         return '\n'.join(parts)
     for option in item['options']:
-        parts.append(f'<li><div class="text option">{_text(option["text"])}</div>')
-        if key:
-            mark = 'Correct' if option['correct'] else 'Incorrect'
-            parts.append(f'<p>{mark} — option {_text(option["id"])}</p>')
-            if option['rationale']:
-                parts.append(f'<div class="text rationale">{_text(option["rationale"])}</div>')
-        parts.append('</li>')
+        text = f'<div class="text option">{_text(option["text"])}</div>'
+        if not key:
+            parts.append(f'<li class="pl"><div>{text}</div></li>')
+            continue
+        rationale = (f'<div class="text rationale">{_text(option["rationale"])}</div>'
+                     if option['rationale'] else '')
+        parts.append(f'<li class="{"ok" if option["correct"] else "no"}" title="option {_text(option["id"])}">'
+                     f'{marker(option["correct"])}<div>{text}{rationale}</div></li>')
     parts.extend(['</ol>', '</section>'])
     return '\n'.join(parts)
 
@@ -176,7 +210,7 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                          f'<td>{row["correct_tick"]:+d}</td><td>{row["wrong_tick"]:+d}</td></tr>')
         points += rule['points']
         minutes += Decimal(str(rule['minutes']))
-    summary = f'<p>{len(exam)} questions; {points} points; {minutes} planned minutes.</p>'
+    summary = f'<p class="lead">{len(exam)} questions; {points} points; {minutes} planned minutes.</p>'
     exam.insert(0, summary)
     exam.insert(1, '<p>Entry copy: item and option order follows the manifest. '
                 'The exam software handles shuffling.</p>')

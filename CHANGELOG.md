@@ -134,3 +134,8 @@ NEW: Choose a question-bank export from the Export menu.
 - Moodle quiz (XML), Question table (CSV) and Question page (HTML) keep their existing export behaviour, confirmations and default question folder.
 - Each option has a description; an amber Answer key chip marks the table and page. Unavailable options explain why in a tooltip.
 - Use Up, Down and Enter to choose an export, or Escape or click away to close the menu. The hint at the bottom points to the Exam tab for exams.
+
+v0.10.2 (2026-11-03, calmer pages): The exported HTML pages have a new look.
+
+NEW: The HTML pages look calmer.
+- Answers get a ✓ or ✗ marker, the heading is shorter, and status and slide appear as labels.

@@ -181,6 +181,7 @@ def test_exam_contains_no_key_even_in_hidden_metadata(tmp_path):
         for option in item['options']:
             assert option['rationale'] not in exam
     assert 'Scoring sheet' not in exam and 'Correct choices' not in exam
+    assert 'class="mk"' not in exam and '✓' not in exam and '✗' not in exam and 'aria-label' not in exam
     # No invented placeholders/markers for fields absent from the model.
     assert all(term not in exam.lower() for term in ('shared stem', 'exclusion', 'fixed option'))
 

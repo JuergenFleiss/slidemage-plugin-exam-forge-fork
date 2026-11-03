@@ -12,7 +12,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Callable, Iterable, Mapping
 
-from .elp_document import _page, _text, image_mime
+from .elp_document import _page, _text, chips, heading, image_mime, marker
 from .model import KINDS, USES, Item, Media
 from .table_export import STATUS, deck_order
 from .topics import Topic, topic_of
@@ -31,11 +31,10 @@ def _image(media: Media, read_media: Callable[[Media], bytes] | None) -> str:
     return f'<figure><img src="data:{mime};base64,{encoded}" alt="{alt}"><figcaption>{alt}</figcaption></figure>'
 
 
-def _question(item: Item, number: int, topic: str, slides: str, read_media) -> str:
-    meta = " · ".join(part for part in (STATUS[item.status], USES[item.use], KINDS[item.kind],
-                                        item.difficulty.title(), topic, slides) if part)
-    parts = ['<section class="question">', f'<h2>Question {number} — {_text(item.id)} r{item.revision}</h2>',
-             f'<p class="meta">{_text(meta)}</p>', f'<div class="text stem">{_text(item.stem)}</div>',
+def _question(item: Item, number: int, topic: str, slides: list[str], read_media) -> str:
+    labels = [STATUS[item.status], USES[item.use], KINDS[item.kind], item.difficulty.title(), topic, *slides]
+    parts = ['<section class="question">', heading(number, item.id, item.revision),
+             chips(labels, item.status == "reviewed"), f'<div class="text stem">{_text(item.stem)}</div>',
              *(_image(media, read_media) for media in item.media)]
     if item.assistant_note:
         parts.append('<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
@@ -45,16 +44,14 @@ def _question(item: Item, number: int, topic: str, slides: str, read_media) -> s
         if item.grading_notes:
             parts += ['<h3>Grading notes</h3>', f'<div class="text grading-notes">{_text(item.grading_notes)}</div>']
     else:
-        parts.append('<ol type="A">')
+        parts.append('<ol>')
         for option in item.options:
-            parts.append(f'<li><div class="text option">{_text(option.text)}</div>'
-                         f'<p>{"Correct" if option.correct else "Incorrect"}</p>')
-            if option.rationale:
-                parts.append(f'<div class="text rationale">{_text(option.rationale)}</div>')
-            parts.append('</li>')
+            rationale = f'<div class="text rationale">{_text(option.rationale)}</div>' if option.rationale else ''
+            parts.append(f'<li class="{"ok" if option.correct else "no"}">{marker(option.correct)}'
+                         f'<div><div class="text option">{_text(option.text)}</div>{rationale}</div></li>')
         parts.append('</ol>')
     if item.objective:
-        parts.append(f'<p class="meta">Learning objective: {_text(item.objective)}</p>')
+        parts.append(f'<p class="objective">Learning objective: {_text(item.objective)}</p>')
     parts.append('</section>')
     return "\n".join(parts)
 
@@ -67,12 +64,15 @@ def questions_html(items: Iterable[Item], topics: Iterable[Topic] = (),
     items.sort(key=lambda item: deck_order(item, {slide: pos for slide, (pos, _) in slides.items()}))
     counts = {status: sum(item.status == status for item in items) for status in STATUS}
     drafts = f'{counts["draft"]} draft{"" if counts["draft"] == 1 else "s"}'
-    body = [(f'<p>{len(items)} question{"" if len(items) == 1 else "s"}: {counts["reviewed"]} reviewed, {drafts}, '
-             f'{counts["retired"]} retired.</p>'),
-            '<p><strong>This page holds the answers. Keep it as private as the question folder.</strong></p>']
+    body = [(f'<p class="lead">{len(items)} question{"" if len(items) == 1 else "s"}: {counts["reviewed"]} reviewed, '
+             f'{drafts}, {counts["retired"]} retired.</p>'),
+            '<p class="private"><strong>This page holds the answers.</strong> '
+            'Keep it as private as the question folder.</p>']
     for number, item in enumerate(items, 1):
         topic = topic_of(item, topics)
-        names = "; ".join(f"Slide {slides[s][0]} · {slides[s][1]}" if s in slides else f"Slide {s}"
-                          for s in dict.fromkeys(link.slide_id for link in item.sources)) or "No slide linked"
+        names = []
+        for slide in dict.fromkeys(link.slide_id for link in item.sources):
+            names += [f"Slide {slides[slide][0]}", slides[slide][1]] if slide in slides else [f"Slide {slide}"]
+        names = names or ["No slide linked"]
         body.append(_question(item, number, topic.name if topic else "", names, read_media))
     return _page("All questions with answers", body, language)

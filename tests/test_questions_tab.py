@@ -800,5 +800,5 @@ def test_export_html_writes_every_question_into_the_question_folder(lab, tmp_pat
     host.drain()
     assert asked[0][2] == str(window.bank.folder / "questions.html")
     html = (tmp_path / "all.html").read_text(encoding="utf-8")
-    assert html.count('<section class="question">') == 8 and "Slide 1 · Title a" in html
+    assert html.count('<section class="question">') == 8 and '>Slide 1</span><span class="chip">Title a</span>' in html
     assert "Exported 8 questions" in window.notice.text() and not window.busy

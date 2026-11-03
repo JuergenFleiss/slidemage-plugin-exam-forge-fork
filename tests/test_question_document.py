@@ -34,9 +34,22 @@ def test_every_question_with_its_answers_in_deck_order(tmp_path):
     html = questions_html(items, topics, {"b": (2, "Bayes"), "c": (3, "Cells")}, bank.read_media, "de")
     assert html.index("Explain Bayes.") < html.index("On &lt;c&gt;") < html.index("Nowhere")
     assert '<html lang="de">' in html and "3 questions: 1 reviewed, 1 draft, 1 retired." in html
-    assert "Reviewed · Exam · Open answer · Hard · Probability · Slide 2 · Bayes" in html
+    chips = ['Reviewed', 'Exam', 'Open answer', 'Hard', 'Probability', 'Slide 2', 'Bayes']
+    assert "".join(f'<span class="chip{" reviewed" if n == 0 else ""}">{c}</span>' for n, c in enumerate(chips)) in html
     assert "Posterior ∝ likelihood × prior" in html and "Two points" in html and "Shared stem" in html
-    assert "Yes &amp; no</div><p>Correct</p>" in html and "Never</div><p>Incorrect</p>" in html
+    assert '<li class="ok"><span class="mk" aria-label="Correct">✓</span><div><div class="text option">Yes &amp; no' in html
+    assert '<li class="no"><span class="mk" aria-label="Incorrect">✗</span><div><div class="text option">Never' in html
     assert "Because" in html and "Learning objective: Read fractions" in html
     assert html.count("data:image/png;base64,") == 1 and f"Image not available: {gone.name} — Lost image" in html
     assert "No slide linked" in html and "<script" not in html
+
+
+def test_each_answer_has_one_marker_that_matches_it_and_the_heading_is_short():
+    import re
+    items = [Item("0123456789abcdef", 1, "Q", (Option("x", "A", True), Option("y", "B", False), Option("z", "C", False)))]
+    html = questions_html(items)
+    marks = re.findall(r'<li class="(ok|no)"><span class="mk" aria-label="(Correct|Incorrect)">', html)
+    assert marks == [("ok", "Correct"), ("no", "Incorrect"), ("no", "Incorrect")]
+    assert html.count('class="mk"') == 3 and "Correct</p>" not in html
+    heading = re.search(r"<h2>.*?</h2>", html).group(0)
+    assert "01234567 · r1" in heading and "0123456789abcdef" not in re.sub(r'title="[^"]*"', "", heading)
