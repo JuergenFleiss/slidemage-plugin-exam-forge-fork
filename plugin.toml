@@ -3,9 +3,9 @@ name = "Exam Forge"
 version = "0.10.2"
 api_version = 1
 requires_slidemage = ">=0.13.31"
-summary = "Create and manage exam questions for a SlideMage deck."
+summary = "Write exam questions from your slides, review them, export them, and assemble exams."
 author = "Jürgen Fleiß"
-homepage = "https://github.com/JuergenFleiss/slidemage-plugin-exam-forge"
+homepage = "https://github.com/slidemage/slidemage-plugin-exam-forge"
 license = "GPL-3.0-or-later"
 needs = []
 network = []
