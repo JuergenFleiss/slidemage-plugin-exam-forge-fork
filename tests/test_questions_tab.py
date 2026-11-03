@@ -322,7 +322,7 @@ def test_footer_title_tabs_and_buttons(env, tmp_path):
     host, deck, bank, controller, window = env
     assert window.windowTitle() == "Exam Forge · course"
     assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Questions", "Exam"]
-    assert window.check_button.text() == "Check slides" and window.export_button.text() == "Export to Moodle"
+    assert window.check_button.text() == "Check slides" and window.export_button.text() == "Export"
     assert window.folder_label.text() == str(bank.folder)
     assert re.fullmatch(r"Slides checked \d\d:\d\d · 0 changed", window.checked_label.text())
     other = FakeDeck("other", host.root / "other.tex")
@@ -617,6 +617,7 @@ def test_export_takes_every_reviewed_revision_question(lab, tmp_path, monkeypatc
                         lambda *a: asked.append(a) or (str(path), ""))
     pick(window.topic_list, "attention")  # No filter applies.
     window.export_button.click()
+    window.export_menu.moodle_action.trigger()
     host.drain()
     assert asked[0][2] == str(window.bank.folder / "revision-quiz.xml")
     assert sorted(i.id for i in exported) == ["q1", "q3"]
@@ -765,7 +766,8 @@ def test_export_table_writes_every_question(lab, tmp_path, monkeypatch):
     path, asked = tmp_path / "all", []
     monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
                         lambda *a: asked.append(a) or (str(path), ""))
-    window.table_button.click()
+    window.export_button.click()
+    window.export_menu.table_action.trigger()
     assert asked[0][2] == str(window.bank.folder / "questions.csv")
     host.drain()
     text = path.with_suffix(".csv").read_bytes().decode("utf-8-sig")
@@ -793,7 +795,8 @@ def test_export_html_writes_every_question_into_the_question_folder(lab, tmp_pat
     asked = []
     monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
                         lambda *a: asked.append(a) or (str(tmp_path / "all"), ""))
-    window.html_button.click()
+    window.export_button.click()
+    window.export_menu.html_action.trigger()
     host.drain()
     assert asked[0][2] == str(window.bank.folder / "questions.html")
     html = (tmp_path / "all.html").read_text(encoding="utf-8")

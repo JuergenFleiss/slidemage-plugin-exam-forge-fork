@@ -308,6 +308,7 @@ def test_export_includes_bank_media_and_excludes_elp_draft_and_retired(env, tmp_
     path.write_text("old content")
     monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     window.export_button.click()
+    window.export_menu.moodle_action.trigger()
     host.drain()
     xml = path.read_bytes()
     root = ET.fromstring(xml)

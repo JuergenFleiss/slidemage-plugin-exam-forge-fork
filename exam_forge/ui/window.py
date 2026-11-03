@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Non-modal window shell; worker completions alone update phase 2 widgets."""
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QSizePolicy,
@@ -15,6 +15,7 @@ from ..model import AnswerRules
 from ..topics import TopicStore, migrate, topic_name
 from .editor import ItemEditor
 from .exam_tab import ExamTab
+from .export_menu import ExportMenu
 from .questions_tab import QuestionsTab
 
 
@@ -66,12 +67,9 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.notice.setWordWrap(True)
         self.check_button = host.Button("Check slides")
         self.check_button.clicked.connect(self.check_sources)
-        self.export_button = host.Button("Export to Moodle")
-        self.export_button.clicked.connect(self.export)
-        self.table_button = host.Button("Export table")
-        self.table_button.clicked.connect(self.export_table)
-        self.html_button = host.Button("Export HTML")
-        self.html_button.clicked.connect(self.export_html)
+        self.export_button = host.Button("Export")
+        self.export_menu = ExportMenu(self)
+        self.export_button.clicked.connect(self.show_export_menu)
         questions = self.build_questions_tab()
         self.exam_tab = ExamTab(self)
         self.tabs = Tabs(host, (("Questions", questions), ("Exam", self.exam_tab)))
@@ -79,8 +77,6 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         top.addWidget(self.tabs.switch)
         top.addStretch()
         top.addWidget(self.check_button)
-        top.addWidget(self.table_button)
-        top.addWidget(self.html_button)
         top.addWidget(self.export_button)
         layout.addLayout(top)
         layout.addWidget(self.notice)
@@ -133,6 +129,9 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
     def toast(self, text):
         self.notice.setText(text)
         self.host.toast(self.shell, text)
+
+    def show_export_menu(self):
+        self.export_menu.popup(self.export_button.mapToGlobal(QPoint(0, self.export_button.height())))
 
     def switch_bank(self, bank):
         # Replace the window's bank only when there is no worker using it.
@@ -216,8 +215,10 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.draft_button.setEnabled(not busy)
         self.write_button.setEnabled(not busy)
         self.editor.setEnabled(not busy and self.current is not None)
-        for widget in (self.check_button, self.export_button, self.table_button, self.html_button, self.exam_tab):
+        for widget in (self.check_button, self.export_button, self.exam_tab):
             widget.setEnabled(not busy)
+        if busy:
+            self.export_menu.close()
         if not busy:
             callbacks, self.idle_callbacks = self.idle_callbacks, []
             for callback in callbacks:

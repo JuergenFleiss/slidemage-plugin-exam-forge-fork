@@ -130,6 +130,7 @@ def test_moodle_export_leaves_out_reviewed_questions_off_the_rules(lab, tmp_path
     host, _, bank, _, window, _, link, _ = lab
     bank.create(replace(question(3, 1), id="q9", sources=(link["a"],)))
     bank.set_status("q9", 1, "reviewed")
+    window.reload()
     AnswerRulesStore(bank.folder).save(AnswerRules(revision=AnswerRule(3, 8, 1, 1)))
     window.answer_rules_changed()
     exported = []
@@ -138,6 +139,7 @@ def test_moodle_export_leaves_out_reviewed_questions_off_the_rules(lab, tmp_path
     monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
                         lambda *a: (str(tmp_path / "o.xml"), ""))
     window.export_button.click()
+    window.export_menu.moodle_action.trigger()
     host.drain()
     assert [i.id for i in exported] == ["q9"]
     assert "2 reviewed questions that no longer fit the answer rules were left out." in window.notice.text()

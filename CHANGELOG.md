@@ -127,3 +127,10 @@ NEW: Switch the middle column between Slides and Questions, export every questio
 
 FIXED: Choosing another slide or topic while a question is open no longer leaves the right panel stuck.
 - It showed the closed question, disabled and ignoring every click, until you switched views.
+
+v0.10.1 (2026-11-03, export menu): One Export menu replaces the three export buttons in the window header.
+
+NEW: Choose a question-bank export from the Export menu.
+- Moodle quiz (XML), Question table (CSV) and Question page (HTML) keep their existing export behaviour, confirmations and default question folder.
+- Each option has a description; an amber Answer key chip marks the table and page. Unavailable options explain why in a tooltip.
+- Use Up, Down and Enter to choose an export, or Escape or click away to close the menu. The hint at the bottom points to the Exam tab for exams.
