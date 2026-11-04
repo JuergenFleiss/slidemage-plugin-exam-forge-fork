@@ -125,15 +125,15 @@ def test_moodle_export_has_bank_media_and_leaves_out_exam_draft_and_retired(env,
     bank.set_status("retired", 2, "retired")
     window.reload()
     path = tmp_path / "export.xml"
-    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
-    window.export()
+    monkeypatch.setattr("exam_forge.ui.export_menu.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    window.export_menu.export()
     host.drain()
     xml = path.read_bytes()
     root = ET.fromstring(xml)
     assert len(root) == 1 and root[0].find("questiontext/file").attrib["name"] == media.name
     assert b"PRIVATE" not in xml and b"DRAFT" not in xml and b"RETIRED" not in xml
     (bank.folder / "media" / media.name).write_bytes(b"changed")  # A hash failure keeps the old export.
-    window.export()
+    window.export_menu.export()
     host.drain()
     assert path.read_bytes() == xml and "hash mismatch" in host.messages[-1][0]
 
@@ -144,15 +144,15 @@ def test_export_rechecks_the_bank_and_the_slides(env, tmp_path, monkeypatch):
     window.approve_button.click()
     host.drain()
     path = tmp_path / "out.xml"
-    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
+    monkeypatch.setattr("exam_forge.ui.export_menu.QFileDialog.getSaveFileName", lambda *a: (str(path), ""))
     host.sources[source(host, deck)] = SlideSource(text="Changed after list loaded")
     notices = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: notices.append(a[2]) or QMessageBox.StandardButton.No)
-    window.export()
+    window.export_menu.export()
     host.drain()
     assert notices and item.stem in notices[0] and bank.get(item.id).source_changed and not path.exists()
     bank.save(replace(bank.get(item.id), stem="Changed elsewhere", status="draft", use="elp"))
-    window.export()
+    window.export_menu.export()
     host.drain()
     assert not path.exists() and "No reviewed" in host.messages[-1][0]
 

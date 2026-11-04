@@ -236,9 +236,9 @@ def test_moodle_export_takes_every_reviewed_revision_question(lab, tmp_path, mon
     host, _, bank, _, window, _, link, _ = lab
     add(bank, "elp", "Reviewed ELP", [link["a"]], "reviewed", use="elp")
     exported, asked = [], []
-    monkeypatch.setattr("exam_forge.ui.questions_tab.export_moodle_xml",
+    monkeypatch.setattr("exam_forge.ui.export_menu.export_moodle_xml",
                         lambda items, bank, rules: exported.extend(items) or b"<quiz/>")
-    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
+    monkeypatch.setattr("exam_forge.ui.export_menu.QFileDialog.getSaveFileName",
                         lambda *a: asked.append(a) or (str(tmp_path / "all"), ""))
     pick(window.topic_list, "attention")  # No filter applies.
     window.export_button.click()

@@ -121,9 +121,9 @@ def test_moodle_export_leaves_out_reviewed_questions_off_the_rules(lab, tmp_path
     AnswerRulesStore(bank.folder).save(AnswerRules(revision=AnswerRule(3, 8, 1, 1)))
     window.answer_rules_changed()
     exported = []
-    monkeypatch.setattr("exam_forge.ui.questions_tab.export_moodle_xml",
+    monkeypatch.setattr("exam_forge.ui.export_menu.export_moodle_xml",
                         lambda items, bank, rules: exported.extend(items) or b"<quiz/>")
-    monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
+    monkeypatch.setattr("exam_forge.ui.export_menu.QFileDialog.getSaveFileName",
                         lambda *a: (str(tmp_path / "o.xml"), ""))
     window.export_button.click()
     window.export_menu.moodle_action.trigger()

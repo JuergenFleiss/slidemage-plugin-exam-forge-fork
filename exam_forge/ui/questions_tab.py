@@ -5,11 +5,9 @@ export.
 The middle column lists the slides, each with its number of questions, or the questions themselves."""
 from dataclasses import replace
 from datetime import datetime
-from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -21,16 +19,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..bank import BankError, atomic_write_bytes
+from ..bank import BankError
 from ..drafting import ai_enabled
 from ..model import KINDS, STATUS, USES, agree, ai_draft, deck_order, plural, slide_ids, slide_label, topic_of
-from ..moodle_xml import export_moodle_xml
-from ..question_document import questions_html
 from ..rules import question_issues
 from ..sources import check_bank, fresh_deck, link_slide
-from ..table_export import questions_csv
 from .drafting import DraftDialog
-from .kit import Box, Fit, confirm, deck_language, dot, label, line, passive, row, slide_title, source_details, tone
+from .kit import Box, Fit, deck_language, dot, label, line, passive, row, slide_title, tone
 from .review_changes import ReviewChangesDialog
 from .topic_dialog import TopicDialog
 
@@ -731,90 +726,3 @@ class QuestionsTab:
                 then(report)
 
         host.run_in_background(lambda: check_bank(host, fresh_deck(deck), bank, item_ids), checked)
-
-    def export(self):
-        if not self.may_leave():
-            return
-        self.check_sources(then=self.export_checked)
-
-    def export_checked(self, report):
-        rules = self.answer_rules
-        reviewed = [checked.item for checked in report.items
-                    if checked.item.status == "reviewed" and checked.item.use == "revision"]
-        items = [item for item in reviewed if not question_issues(item, self.answer_rules)]
-        skipped = len(reviewed) - len(items)
-        left_out = (f" {plural(skipped, 'reviewed question')} that no longer fit the answer rules "
-                    f"{agree(skipped, 'was', 'were')} left out.") if skipped else ""
-        if not items:
-            self.error("No reviewed revision-quiz questions to export." + left_out)
-            return
-        changed = [checked for checked in report.items if checked.item in items and checked.source_changed]
-        if changed:
-            details = [f"• {checked.item.stem} ({checked.item.id}): {line}"
-                       for checked in changed for line in source_details(checked)]
-            if not confirm(self, "Source changed", "Changed sources:\n" + "\n".join(details) + "\n\nContinue exporting?",
-                           warning=True):
-                return
-        filename, _ = QFileDialog.getSaveFileName(self, "Export reviewed revision questions",
-                                                  str(self.bank.folder / "revision-quiz.xml"), "Moodle XML (*.xml)")
-        if not filename:
-            return
-        if not filename.lower().endswith(".xml"):
-            filename += ".xml"
-        self.set_busy(True)
-
-        def work():
-            if any(self.bank.get(item.id) != item for item in items):
-                raise BankError("A question changed during export. Check slides and try again.")
-            atomic_write_bytes(Path(filename), export_moodle_xml(items, bank=self.bank, rules=rules), ".moodle-")
-            return len(items)
-
-        def done(count, error):
-            self.set_busy(False)
-            if error:
-                self.error(error)
-            else:
-                self.toast(f"Exported {count} reviewed questions to {filename}.{left_out}")
-        self.host.run_in_background(work, done)
-
-    def export_table(self):
-        """Every question of the bank, with its answers and rationales, as a CSV table."""
-        self.export_all(".csv", "CSV table (*.csv)", questions_csv)
-
-    def export_html(self):
-        """Every question of the bank, with its answers and rationales, as one HTML page like the exam key."""
-        bank, language = self.bank, deck_language(self.host, self.deck)
-        self.export_all(".html", "HTML page (*.html)", lambda items, topics, slides: questions_html(
-            items, topics, slides, bank.read_media, language).encode("utf-8"))
-
-    def export_all(self, suffix, kind, render):
-        if not self.may_leave():
-            return
-        # The question folder is already private, like the export, which holds the answers.
-        filename, _ = QFileDialog.getSaveFileName(self, "Export all questions with answers",
-                                                  str(self.bank.folder / f"questions{suffix}"), kind)
-        if not filename:
-            return
-        if not filename.lower().endswith(suffix):
-            filename += suffix
-        topics = self.topics
-        slides = {ref.id: (ref.position, slide_title(ref)) for ref in self.slides or ()}
-        self.set_busy(True)
-
-        def work():
-            items, corrupt = self.bank.load()
-            atomic_write_bytes(Path(filename), render(items, topics, slides), ".questions-")
-            return len(items), len(corrupt)
-
-        def done(counts, error):
-            self.set_busy(False)
-            if error:
-                self.error(error)
-            elif counts[1]:
-                self.error(f"Exported {plural(counts[0], 'question')} to {filename}; {plural(counts[1], 'question')} "
-                           f"could not be read and {agree(counts[1], 'is', 'are')} missing.")
-            else:
-                self.toast(f"Exported {plural(counts[0], 'question')} to {filename}. "
-                           "It holds the answers: keep it private.")
-        self.host.run_in_background(work, done)
-
