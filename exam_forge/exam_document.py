@@ -66,30 +66,30 @@ _MATH_NOTE = (r'Math is shown as copyable source, including \( ... \) and \[ ...
               'delimiters. It is not typeset. Check that it enters correctly in the exam software.')
 
 
-def _text(value: str) -> str:
+def text(value: str) -> str:
     return escape(value, quote=True)
 
 
-def _page(title: str, body: list[str], language: str = "en") -> str:
+def page(title: str, body: list[str], language: str = "en") -> str:
     return '\n'.join([
-        '<!doctype html>', f'<html lang="{_text(language)}">', '<head>', '<meta charset="utf-8">',
+        '<!doctype html>', f'<html lang="{text(language)}">', '<head>', '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
          'img-src data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'">'),
-        f'<title>{_text(title)}</title>', f'<style>{_STYLE}</style>', '</head>', '<body>',
-        f'<h1>{_text(title)}</h1>', f'<p class="lead">{_text(_MATH_NOTE)}</p>', *body, '</body>', '</html>', '',
+        f'<title>{text(title)}</title>', f'<style>{_STYLE}</style>', '</head>', '<body>',
+        f'<h1>{text(title)}</h1>', f'<p class="lead">{text(_MATH_NOTE)}</p>', *body, '</body>', '</html>', '',
     ])
 
 
 def heading(number: int, item_id: str, revision: int) -> str:
     """"Question N" with the short id and revision as small monospace text; the full id stays in the title."""
-    return (f'<h2>Question {number} <span class="id" title="{_text(item_id)}">'
-            f'{_text(item_id[:8])} · r{revision}</span></h2>')
+    return (f'<h2>Question {number} <span class="id" title="{text(item_id)}">'
+            f'{text(item_id[:8])} · r{revision}</span></h2>')
 
 
 def chips(labels: list[str], reviewed: bool = False) -> str:
     """Small pills; the first is the status, green when reviewed."""
-    cells = [f'<span class="chip{" reviewed" if reviewed and not n else ""}">{_text(label)}</span>'
+    cells = [f'<span class="chip{" reviewed" if reviewed and not n else ""}">{text(label)}</span>'
              for n, label in enumerate(labels) if label]
     return f'<div class="chips">{"".join(cells)}</div>'
 
@@ -102,29 +102,29 @@ def marker(correct: bool) -> str:
 def figure(raw: bytes, mime: str, alt: str) -> str:
     """An embedded image with its description as alt text and caption."""
     encoded = base64.b64encode(raw).decode('ascii')
-    alt = _text(alt)
+    alt = text(alt)
     return (f'<figure><img src="data:{mime};base64,{encoded}" alt="{alt}">'
             f'<figcaption>{alt}</figcaption></figure>')
 
 
 def assistant_note(note: str) -> str:
     return ('<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
-            + _text(note) + '</aside>')
+            + text(note) + '</aside>')
 
 
 def model_answer(answer: str, grading_notes: str) -> list[str]:
-    parts = ['<h3>Model answer</h3>', f'<div class="text model-answer">{_text(answer)}</div>']
+    parts = ['<h3>Model answer</h3>', f'<div class="text model-answer">{text(answer)}</div>']
     if grading_notes:
-        parts += ['<h3>Grading notes</h3>', f'<div class="text grading-notes">{_text(grading_notes)}</div>']
+        parts += ['<h3>Grading notes</h3>', f'<div class="text grading-notes">{text(grading_notes)}</div>']
     return parts
 
 
-def key_option(text: str, correct: bool, rationale: str, title: str = '') -> str:
+def key_option(answer: str, correct: bool, rationale: str, title: str = '') -> str:
     """One answer as the key shows it: its marker, text and rationale."""
-    rationale = f'<div class="text rationale">{_text(rationale)}</div>' if rationale else ''
-    title = f' title="{_text(title)}"' if title else ''
+    rationale = f'<div class="text rationale">{text(rationale)}</div>' if rationale else ''
+    title = f' title="{text(title)}"' if title else ''
     return (f'<li class="{"ok" if correct else "no"}"{title}>{marker(correct)}'
-            f'<div><div class="text option">{_text(text)}</div>{rationale}</div></li>')
+            f'<div><div class="text option">{text(answer)}</div>{rationale}</div></li>')
 
 
 def _image(media: dict, attachments: dict) -> str:
@@ -146,7 +146,7 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
         '<section class="question">',
         heading(number, item["id"], item["revision"]),
         chips([f'{rule["points"]} points', f'{rule["minutes"]} planned minutes', item["difficulty"]]),
-        f'<div class="text stem">{_text(item["stem"])}</div>', *images, '<ol>',
+        f'<div class="text stem">{text(item["stem"])}</div>', *images, '<ol>',
     ]
     if item['assistant_note']:
         parts.insert(-1, assistant_note(item['assistant_note']))
@@ -162,7 +162,7 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
         if key:
             parts.append(key_option(option['text'], option['correct'], option['rationale'], f'option {option["id"]}'))
         else:
-            parts.append(f'<li class="pl"><div><div class="text option">{_text(option["text"])}</div></div></li>')
+            parts.append(f'<li class="pl"><div><div class="text option">{text(option["text"])}</div></div></li>')
     parts.extend(['</ol>', '</section>'])
     return '\n'.join(parts)
 
@@ -186,7 +186,7 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
         images = [_image(media, data['media_base64']) for media in item['media']]
         exam.append(_question(item, number, rule, images, key=False))
         key.append(_question(item, number, rule, images, key=True))
-        name = f'<td>{number} — {_text(item["id"])} r{item["revision"]}</td>'
+        name = f'<td>{number} — {text(item["id"])} r{item["revision"]}</td>'
         if item['kind'] == 'open':
             if not item['model_answer'].strip():
                 raise ValueError(f'{item["id"]}: an open-answer question needs a model answer')
@@ -204,7 +204,7 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                 raise ValueError(f'{item["id"]}: missing frozen scoring row')
             answers = ', '.join(f'{chr(65 + i)} ({option["id"]})'
                                 for i, option in enumerate(options) if option['correct'])
-            sheet.append(f'<tr>{name}<td>{_text(answers)}</td><td>{rule["points"]}</td>'
+            sheet.append(f'<tr>{name}<td>{text(answers)}</td><td>{rule["points"]}</td>'
                          f'<td>{row["correct_tick"]:+d}</td><td>{row["wrong_tick"]:+d}</td></tr>')
     rules = scoring['rules']
     points, minutes = exam_totals((item['difficulty'] for item in data['items']),
@@ -217,11 +217,11 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
     tables = []
     for p, rows in scoring['tables'].items():
         for row in rows:
-            tables.append(f'<tr><td>{_text(p)}</td><td>{row["correct_options"]}</td>'
+            tables.append(f'<tr><td>{text(p)}</td><td>{row["correct_options"]}</td>'
                           f'<td>{row["correct_tick"]:+d}</td><td>{row["wrong_tick"]:+d}</td></tr>')
     head = [summary, '<h2>Scoring sheet</h2>',
             ('<p>Add the frozen per-option values for ticked choices; unticked choices contribute 0. '
-             f'Floor per question: {_text(str(scoring["floor"]))} points. '
+             f'Floor per question: {text(str(scoring["floor"]))} points. '
              'This is a reference sheet; Exam Forge does not score students.</p>'),
             ('<table><thead><tr><th>Question / revision</th><th>Correct choices / option IDs</th>'
              '<th>Maximum points</th><th>Correct tick</th><th>Wrong tick</th></tr></thead><tbody>'),
@@ -235,4 +235,4 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                  '</tr></thead><tbody>'), *tables, '</tbody></table>']
     key[:0] = head
     # `language` is the deck's: the questions are written in it, so a screen reader reads the page in it.
-    return _page('Exam — entry copy', exam, language), _page('Exam key and scoring sheet', key, language)
+    return page('Exam — entry copy', exam, language), page('Exam key and scoring sheet', key, language)

@@ -9,10 +9,8 @@ from PySide6.QtWidgets import QFileDialog, QMenu, QWidgetAction
 
 from ..bank import BankError, atomic_write_bytes
 from ..model import agree, plural
-from ..moodle_xml import export_moodle_xml
-from ..question_document import questions_html
+from ..exports import export_moodle_xml, questions_csv, questions_html
 from ..rules import question_issues
-from ..table_export import questions_csv
 from .kit import confirm, deck_language, slide_title, source_details
 
 

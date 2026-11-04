@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..elp_document import export_elp_documents
+from ..exam_document import export_elp_documents
 from ..manifest import ChangedSourcesError, Manifest, append_correction, freeze, read_corrections
 from ..model import plural
 from ..rules import exam_totals

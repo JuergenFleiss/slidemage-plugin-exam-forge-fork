@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from exam_forge.bank import Bank
-from exam_forge.elp_document import export_elp_documents
+from exam_forge.exam_document import export_elp_documents
 from exam_forge.manifest import Manifest, freeze
 from exam_forge.model import Item, Option
 from exam_forge.rules import ExamRules
@@ -234,7 +234,7 @@ def test_unusable_snapshot_fails_instead_of_dropping_content(tmp_path, problem):
 def test_import_needs_only_standard_library():
     # -S removes site packages: importing Manifest at runtime would pull in the host.
     script = ('import sys; sys.path.insert(0, sys.argv[1]); '
-              'from exam_forge.elp_document import export_elp_documents; '
+              'from exam_forge.exam_document import export_elp_documents; '
               'assert not any(n.startswith(("slidemage", "PySide6")) for n in sys.modules)')
     subprocess.run([sys.executable, '-I', '-S', '-c', script, str(Path(__file__).resolve().parents[1])], check=True)
 

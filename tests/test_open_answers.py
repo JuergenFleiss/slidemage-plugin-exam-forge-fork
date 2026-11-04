@@ -10,11 +10,11 @@ from slidemage.plugin_api import AiChatResult, Route
 from exam_forge.assembly import Blueprint, assemble, available
 from exam_forge.bank import AnswerRulesStore, Bank
 from exam_forge.drafting import DraftReplyError, build_request, build_update_request, parse_reply
-from exam_forge.elp_document import export_elp_documents
+from exam_forge.exam_document import export_elp_documents
 from exam_forge.manifest import freeze
 from exam_forge.model import Item, Option, SourceLink
 from exam_forge.rules import AnswerRules, ExamRules, exam_issues, question_issues
-from exam_forge.table_export import questions_csv
+from exam_forge.exports import questions_csv
 
 BOTH = AnswerRules(exam_kinds=("choice", "open"))
 OPEN = AnswerRules(exam_kinds=("open",))

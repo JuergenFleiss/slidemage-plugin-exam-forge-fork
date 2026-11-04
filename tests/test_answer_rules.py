@@ -11,10 +11,10 @@ from PySide6.QtWidgets import QSpinBox
 from slidemage.plugin_api import Focus
 
 from exam_forge.bank import AnswerRulesStore, Bank, CorruptFileError
-from exam_forge.elp_document import export_elp_documents
+from exam_forge.exam_document import export_elp_documents
 from exam_forge.manifest import freeze
 from exam_forge.model import Item, Option
-from exam_forge.moodle_xml import export_moodle_xml
+from exam_forge.exports import export_moodle_xml
 from exam_forge.rules import AnswerRule, AnswerRules, ExamRules, exam_issues, question_issues, scoring_table
 
 
