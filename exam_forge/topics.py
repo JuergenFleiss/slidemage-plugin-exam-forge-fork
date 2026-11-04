@@ -4,13 +4,11 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 from .bank import CorruptFileError, SchemaError, _atomic_write
-from .model import plural
 
 TOPICS_SCHEMA_VERSION = 1
 # key: (light, dark). Kept clear of the reserved violet and amber accents.
@@ -59,9 +57,6 @@ def _validate(topics) -> None:
 class TopicStore:
     def __init__(self, folder):
         self.path = Path(folder) / "topics.json"
-
-    def exists(self) -> bool:
-        return self.path.exists()
 
     def load(self) -> tuple[Topic, ...]:
         if not self.path.exists():
@@ -132,30 +127,3 @@ def topic_name(item, topics) -> str:
     topic = topic_of(item, topics)
     return topic.name if topic else ""
 
-
-def migrate(items) -> tuple[tuple[Topic, ...], tuple[str, ...]]:
-    items = tuple(items)
-    names = sorted({i.topic.strip() for i in items if i.topic.strip()})
-    votes: dict[str, Counter] = {}
-    unlinked = 0
-    for item in items:
-        name = item.topic.strip()
-        slides = {s.slide_id for s in item.sources if s.slide_id}
-        unlinked += bool(name) and not slides
-        for slide in slides if name else ():
-            votes.setdefault(slide, Counter())[name] += 1
-    owned: dict[str, list[str]] = {n: [] for n in names}
-    notes = []
-    for slide in sorted(votes):
-        count = votes[slide]
-        top = max(count.values())
-        owned[min(n for n in count if count[n] == top)].append(slide)
-        if len(count) > 1:
-            parts = ", ".join(f"{n} ({count[n]})" for n in sorted(count))
-            notes.append(f"Slide {slide} is used by questions with different topics: {parts}.")
-    if unlinked:
-        notes.append(f"{plural(unlinked, 'question')} with a topic "
-                     "but no linked slide.")
-    topics = tuple(Topic(uuid4().hex, n, PALETTE[i % len(PALETTE)], tuple(owned[n]))
-                   for i, n in enumerate(names))
-    return topics, tuple(notes)

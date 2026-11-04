@@ -58,7 +58,7 @@ def test_issue_is_detached_and_persistent_after_edit_and_retirement(setup, tmp_p
     assert data == manifest.data()
     assert [q["stem"] for q in data["items"]] == ["Original", "Original"]
     assert data["blueprint"]["topics"]["x"] == 2
-    assert data["schema_version"] == 2 and [q["topic"] for q in data["items"]] == ["T-q1", "T-q2"]
+    assert data["schema_version"] == 1 and [q["topic"] for q in data["items"]] == ["T-q1", "T-q2"]
     assert base64.b64decode(next(iter(data["media_base64"].values()))) == b"image bytes"
     assert data["items"][0]["media"][0]["sha256"]
     assert data["scoring"]["tables"]["12"][0]["wrong_tick"] == -3
@@ -113,12 +113,12 @@ def test_checks_all_sources_before_issue(setup):
     host, deck, ref, bank = setup
     host.sources[ref] = SlideSource(text="changed")
     with pytest.raises(ChangedSourcesError) as error:
-        freeze(host, deck, bank, [("q1", 2), ("q2", 2)], {}, ElpRules(), topic_of=lambda i: i.topic)
+        freeze(host, deck, bank, [("q1", 2), ("q2", 2)], {}, ElpRules(), topic_of=lambda i: "t")
     assert [c.item.id for c in error.value.checks] == ["q1", "q2"]
     assert all(c.sources[0].status == "changed" for c in error.value.checks)
     host.slides[(deck.path, "instructor", "en")] = []
     with pytest.raises(ChangedSourcesError) as error:
-        freeze(host, deck, bank, [("q1", 2)], {}, ElpRules(), topic_of=lambda i: i.topic)
+        freeze(host, deck, bank, [("q1", 2)], {}, ElpRules(), topic_of=lambda i: "t")
     assert error.value.checks[0].sources[0].status == "missing"
 
 
@@ -130,7 +130,7 @@ def test_detects_edit_during_source_check(setup, monkeypatch):
         return read(ref)
     monkeypatch.setattr(host, "slide_source", edit)
     with pytest.raises(ConflictError):
-        freeze(host, deck, bank, [("q1", 2)], {}, ElpRules(), topic_of=lambda i: i.topic)
+        freeze(host, deck, bank, [("q1", 2)], {}, ElpRules(), topic_of=lambda i: "t")
 
 
 def test_corrections_survive_a_truncated_line_and_refuse_a_corrupt_one(tmp_path):
@@ -148,22 +148,7 @@ def test_corrections_survive_a_truncated_line_and_refuse_a_corrupt_one(tmp_path)
     assert path.read_bytes() == b"bad\n"
 
 
-def test_schema_versions_and_v1_manifest_still_open_and_render(tmp_path):
-    from exam_forge.elp_document import export_elp_documents
-    v1 = {"schema_version": 1, "bank_id": "b", "blueprint": {"counts": {"x": 1}, "difficulty_mix": {"easy": 1},
-          "minutes": 2.5, "avoid_last": 0, "seed": 5}, "media_base64": {},
-          "items": [{"id": "q", "revision": 1, "stem": "Stem", "difficulty": "easy", "topic": "x",
-                     "future_field": {"a": 1}, "media": [], "assistant_note": "",
-                     "options": [{"id": str(i), "text": f"O{i}", "correct": i == 0, "rationale": ""} for i in range(5)]}],
-          "scoring": {"rules": {"easy": {"points": 12, "minutes": 2.5}, "hard": {"points": 24, "minutes": 5}},
-                      "floor": 0, "tables": {"12": [{"correct_options": 1, "correct_tick": 12, "wrong_tick": -3}]}}}
-    path = tmp_path / "old.manifest.json"
-    path.write_text(json.dumps(v1), encoding="utf-8")
-    manifest = Manifest.read(path)
-    assert manifest.data()["blueprint"]["difficulty_mix"] == {"easy": 1}
-    exam, key = export_elp_documents(manifest)
-    assert "Stem" in exam and "Correct" in key
-    for bad in (0, 4, None):
+def test_only_the_current_format_opens():
+    for bad in (0, 2, None):
         with pytest.raises(ValueError):
             Manifest(json.dumps({"schema_version": bad}).encode())
-    assert Manifest(b'{"schema_version":2}') and Manifest(b'{"schema_version":3}')

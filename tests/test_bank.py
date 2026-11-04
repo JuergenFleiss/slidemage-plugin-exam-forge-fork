@@ -5,6 +5,7 @@ import json
 from dataclasses import replace
 
 import pytest
+from fake_host import revision
 
 from exam_forge import bank as storage
 from exam_forge.bank import Bank, BankError, ConflictError, SchemaError
@@ -18,7 +19,7 @@ def bank(tmp_path):
 
 def question(item_id="q1"):
     return Item(item_id, 1, "Question?", (Option("a", "Yes", True, "Why"), Option("b", "Also", True)),
-                "objective", "topic", "hard", "draft", "elp",
+                "objective", "hard", "draft", "elp",
                 (SourceLink("slide", "2", "en", "lecture", "hash", "Slide text"),), True,
                 Origin("ai", "route", "model"))
 
@@ -30,8 +31,12 @@ def stored(bank, item_id="q1"):
 def test_round_trip(bank):
     item = bank.create(question())
     reopened = Bank(bank.folder)
-    assert reopened.id == bank.id and reopened.load() == ([item], []) and reopened.get(item.id, 1) == item
-    assert json.loads((bank.folder / "bank.json").read_text())["schema_version"] == stored(bank)["schema_version"] == 2
+    assert reopened.id == bank.id and reopened.load() == ([item], []) and reopened.get(item.id) == item
+    assert json.loads((bank.folder / "bank.json").read_text())["schema_version"] == stored(bank)["schema_version"] == 1
+    assert set(stored(bank)["revisions"][0]) == {"id", "revision", "stem", "options", "objective", "difficulty",
+                                                 "status", "use", "sources", "origin", "media", "assistant_note",
+                                                 "ai_edit_route", "ai_edit_model", "kind", "model_answer",
+                                                 "grading_notes"}  # Every field, always.
 
 
 def test_status_cycle_refuses_other_transitions_and_stale_revisions(bank):
@@ -43,7 +48,7 @@ def test_status_cycle_refuses_other_transitions_and_stale_revisions(bank):
         before = current
         current = bank.set_status(current.id, current.revision, target)
         assert current == replace(before, revision=before.revision + 1, status=target)
-        assert bank.get(before.id, before.revision) == before
+        assert revision(bank, before.id, before.revision) == before
         with pytest.raises(ConflictError, match="stale"):
             bank.set_status(before.id, before.revision, target)
     for status in ("reviewed", "retired"):
@@ -55,7 +60,8 @@ def test_edits_are_new_draft_revisions_and_stale_saves_conflict(bank):
     original = bank.create(question())
     reviewed = bank.set_status(original.id, original.revision, "reviewed")
     edited = bank.save(replace(reviewed, stem="Changed", status="draft"))
-    assert edited.revision == 3 and bank.get(original.id, 2) == reviewed and bank.get(original.id, 1) == original
+    assert edited.revision == 3 and revision(bank, original.id, 2) == reviewed
+    assert revision(bank, original.id, 1) == original
     with pytest.raises(ConflictError):
         bank.save(replace(reviewed, stem="Stale", status="draft"))
 
@@ -68,7 +74,7 @@ def test_ai_provenance_is_permanent(bank):
     with pytest.raises(ValueError, match="AI-assisted"):
         bank.save(replace(ai, ai_edit_route="", ai_edit_model=""))
     assert bank.save(replace(ai, stem="Human edit")).ai_edit_route == "route-a"
-    assert bank.set_status("q1", 3, "reviewed").ai_edit_route == "route-a" and bank.get("q1", 1).ai_edit_route == ""
+    assert bank.set_status("q1", 3, "reviewed").ai_edit_route == "route-a" and revision(bank, "q1", 1).ai_edit_route == ""
 
 
 def test_ids_are_never_reused_even_after_a_failed_creation(bank, monkeypatch):
@@ -123,15 +129,15 @@ def test_rebaseline_refusals(bank):
 
 
 def test_media_is_stored_by_hash_and_a_reviewed_image_never_changes(bank):
-    first = bank.store_media("first.png", b"first picture", "First image")
+    first = replace(bank.store_media("first.png", b"first picture"), alt="First image")
     assert first.sha256 in first.name
-    assert bank.store_media("same.png", b"first picture", "New alt text").name == first.name
+    assert bank.store_media("same.png", b"first picture").name == first.name
     bank.create(replace(question(), media=(first,)))
     reviewed = bank.set_status("q1", 1, "reviewed")
-    second = bank.store_media("replacement.png", b"second picture", "Second image")
+    second = bank.store_media("replacement.png", b"second picture")
     bank.save(replace(reviewed, status="draft", media=(second,)))
     reopened = Bank(bank.folder)
-    assert reopened.get("q1").media == (second,) and reopened.get("q1", reviewed.revision).media == (first,)
+    assert reopened.get("q1").media == (second,) and revision(reopened, "q1", reviewed.revision).media == (first,)
     assert reopened.read_media(first) == b"first picture"
     (bank.folder / "media" / first.name).write_bytes(b"tampered")
     with pytest.raises(BankError, match="hash mismatch"):
@@ -183,27 +189,3 @@ def test_newer_schemas_and_a_missing_index_are_refused(bank):
     with pytest.raises(BankError, match="bank.json is missing"):
         Bank(bank.folder, create=True)
 
-
-V1_REVISION = {"id": "old", "revision": 1, "stem": "Q1", "objective": "", "topic": "t", "difficulty": "easy",
-               "status": "draft", "use": "revision", "origin": {"kind": "author", "route": "", "model": ""},
-               "media": [], "assistant_note": "", "options": [
-                   {"id": "a", "text": "A", "correct": True, "rationale": ""},
-                   {"id": "b", "text": "B", "correct": False, "rationale": ""}],
-               "sources": [{"slide_id": "s", "version": "1", "language": "en", "view": "instructor", "fingerprint": "f"}]}
-
-
-def test_a_v1_file_reads_without_rewrite_and_is_saved_as_v2(tmp_path):
-    Bank(tmp_path, create=True)
-    index = json.loads((tmp_path / "bank.json").read_text())
-    (tmp_path / "bank.json").write_text(json.dumps({**index, "schema_version": 1, "items": index["items"] + ["old"]}))
-    path = tmp_path / "old.json"
-    path.write_text(json.dumps({"schema_version": 1, "source_changed": False, "revisions": [V1_REVISION]}))
-    before = (path.read_bytes(), (tmp_path / "bank.json").read_bytes())
-    bank = Bank(tmp_path)
-    first = bank.get("old")
-    assert first.sources[0].text == "" and first.ai_edit_route == ""
-    assert (path.read_bytes(), (tmp_path / "bank.json").read_bytes()) == before
-    saved = bank.save(replace(first, stem="Q2"))
-    data = json.loads(path.read_text())
-    assert data["schema_version"] == 2 and [r["stem"] for r in data["revisions"]] == ["Q1", "Q2"]
-    assert bank.get("old", 1) == first and bank.get("old") == saved

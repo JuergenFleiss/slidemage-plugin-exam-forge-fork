@@ -20,21 +20,21 @@ from exam_forge.topics import add_topic, assign_slide
 from exam_forge.ui.corrections import _SHEETS
 
 
-class PhaseHost(GuiHost):
+class ExamHost(GuiHost):
     def slide_source(self, ref):
         assert get_ident() != self.ui_thread
         return super().slide_source(ref)
 
 
 @pytest.fixture
-def phase(app, tmp_path, monkeypatch):
+def issuing(app, tmp_path, monkeypatch):
     """One reviewed easy ELP question on slide s1 in topic Arithmetic, and an Exam tab asking for it."""
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes)
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: warnings.append(a[2]) or QMessageBox.StandardButton.Yes)
     root = tmp_path / "course"
     root.mkdir()
-    host = PhaseHost(root)
+    host = ExamHost(root)
     deck = FakeDeck("Course", root / "course.tex")
     deck.path.write_text("Fresh deck text")
     (tmp_path / "bank").mkdir()
@@ -107,8 +107,8 @@ def no_manifest(bank):
     return not list(bank.folder.glob("*.manifest.json"))
 
 
-def test_swap_freeze_and_documents_keep_the_key_private(phase, monkeypatch):
-    host, _, bank, window, _, warnings = phase
+def test_swap_freeze_and_documents_keep_the_key_private(issuing, monkeypatch):
+    host, _, bank, window, _, warnings = issuing
     add_reviewed(bank, window, "replacement")
     exam = propose(host, window)
     outgoing = exam.selection.items[0]
@@ -133,8 +133,8 @@ def test_swap_freeze_and_documents_keep_the_key_private(phase, monkeypatch):
     assert "Correct" in (host.root / "key.html").read_text() and any("holds answers" in w for w in warnings)
 
 
-def test_an_infeasible_blueprint_is_reported_without_relaxing(phase):
-    host, _, _, window, _, _ = phase
+def test_an_infeasible_blueprint_is_reported_without_relaxing(issuing):
+    host, _, _, window, _, _ = issuing
     exam = window.exam_tab
     exam.propose(Blueprint({"Arithmetic": {"easy": 2}}))  # Bypasses the disabled button.
     host.drain()
@@ -142,8 +142,8 @@ def test_an_infeasible_blueprint_is_reported_without_relaxing(phase):
     assert "needs 2 easy questions; only 1 is eligible" in exam.reason.text()
 
 
-def test_a_new_pick_changes_the_seed_and_a_topic_save_discards_the_proposal(phase):
-    host, _, _, window, _, _ = phase
+def test_a_new_pick_changes_the_seed_and_a_topic_save_discards_the_proposal(issuing):
+    host, _, _, window, _, _ = issuing
     exam = propose(host, window)
     seed, blueprint = exam.selection.seed, exam.selection.blueprint
     exam.again_button.click()
@@ -154,8 +154,8 @@ def test_a_new_pick_changes_the_seed_and_a_topic_save_discards_the_proposal(phas
     assert exam.cells["Arithmetic"]["easy"].value() == 1
 
 
-def test_a_changed_source_blocks_approval_without_a_way_around(phase):
-    host, _, bank, window, _, _ = phase
+def test_a_changed_source_blocks_approval_without_a_way_around(issuing):
+    host, _, bank, window, _, _ = issuing
     exam = propose(host, window)
     bank.set_source_changed(window.current.id, True, expected_sources=window.current.sources)
     exam.sync_flags()  # As on returning to the tab.
@@ -168,8 +168,8 @@ def test_a_changed_source_blocks_approval_without_a_way_around(phase):
 
 
 @pytest.mark.parametrize("when", ["approve", "freeze"])
-def test_a_fresh_check_finding_a_change_blocks_the_freeze(phase, when):
-    host, deck, bank, window, ref, _ = phase
+def test_a_fresh_check_finding_a_change_blocks_the_freeze(issuing, when):
+    host, deck, bank, window, ref, _ = issuing
     exam = propose(host, window)
     host.sources[ref] = SlideSource(text="Overwritten source")
     deck.path.write_text("Reread this fresh text before approval")
@@ -183,8 +183,8 @@ def test_a_fresh_check_finding_a_change_blocks_the_freeze(phase, when):
     assert exam.blocked.text().startswith("1 picked question is linked to a changed slide.")
 
 
-def test_a_conflict_at_approval_stays_on_review(phase, monkeypatch):
-    host, _, bank, window, _, _ = phase
+def test_a_conflict_at_approval_stays_on_review(issuing, monkeypatch):
+    host, _, bank, window, _, _ = issuing
     exam = propose(host, window)
     bank.set_status(window.current.id, window.current.revision, "retired")
     errors = []
@@ -194,8 +194,8 @@ def test_a_conflict_at_approval_stays_on_review(phase, monkeypatch):
     assert errors and exam.stack.currentIndex() == 1 and exam.issue.manifest is None
 
 
-def test_editing_after_issue_leaves_the_manifest_and_documents_alone(phase):
-    host, _, bank, window, _, _ = phase
+def test_editing_after_issue_leaves_the_manifest_and_documents_alone(issuing):
+    host, _, bank, window, _, _ = issuing
     view = approve(host, window)
     view.documents(0)
     host.drain()
@@ -205,21 +205,9 @@ def test_editing_after_issue_leaves_the_manifest_and_documents_alone(phase):
     assert view.manifest_path.read_bytes() == before and (host.root / "exam.html").read_bytes() == exam_before
 
 
-@pytest.mark.parametrize("v1", [True, False])
-def test_opening_a_manifest_lands_on_the_frozen_step(phase, monkeypatch, v1):
-    host, _, bank, window, _, _ = phase
-    path = bank.folder / "20260102T030405000000Z-abcd1234.manifest.json"
-    if v1:
-        options = [{"id": str(i), "text": f"O{i}", "correct": i == 0, "rationale": ""} for i in range(5)]
-        Manifest(json.dumps({"schema_version": 1, "bank_id": bank.id, "media_base64": {},
-                             "blueprint": {"counts": {"x": 1}, "difficulty_mix": {"easy": 1}, "seed": 5},
-                             "items": [{"id": "q", "revision": 1, "stem": "Stem", "difficulty": "easy",
-                                        "topic": "x", "media": [], "assistant_note": "", "options": options}],
-                             "scoring": {"rules": {"easy": {"points": 12, "minutes": 2.5},
-                                                   "hard": {"points": 24, "minutes": 5}}, "floor": 0,
-                                         "tables": {}}}).encode()).write(path)
-    else:
-        path = approve(host, window).manifest_path
+def test_opening_a_manifest_lands_on_the_frozen_step(issuing, monkeypatch):
+    host, _, bank, window, _, _ = issuing
+    path = approve(host, window).manifest_path
     exam = window.exam_tab
     exam.reset()
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a: (str(path), ""))
@@ -229,13 +217,13 @@ def test_opening_a_manifest_lands_on_the_frozen_step(phase, monkeypatch, v1):
     assert exam.issue.summary.text().startswith("1 question · 12 points · 2.5 min")
 
 
-def test_corrections_go_to_a_separate_journal_and_a_failed_save_keeps_the_input(phase, monkeypatch):
-    host, _, _, window, _, _ = phase
+def test_corrections_go_to_a_separate_journal_and_a_failed_save_keeps_the_input(issuing, monkeypatch):
+    host, _, _, window, _, _ = issuing
     view = approve(host, window)
     before = view.manifest_path.read_bytes()
     view.corrections()
     host.drain()
-    sheet = view.correction_sheet
+    sheet = _SHEETS[view.journal_path.resolve()]
     sheet.change.setPlainText("Accept option B too")
     sheet.reason.setPlainText("Ambiguous wording")
     sheet.append.click()
@@ -243,7 +231,7 @@ def test_corrections_go_to_a_separate_journal_and_a_failed_save_keeps_the_input(
     QTest.keyClicks(sheet.change, "New text while saving")
     assert sheet.change.toPlainText() == "Accept option B too"
     view.corrections()  # Reopening cannot create a concurrent writer.
-    assert view.correction_sheet is sheet
+    assert list(_SHEETS.values()) == [sheet]
     host.drain()
     assert [row["change"] for row in read_corrections(view.journal_path)] == ["Accept option B too"]
     assert view.manifest_path.read_bytes() == before and sheet.change.toPlainText() == ""
@@ -259,8 +247,8 @@ def test_corrections_go_to_a_separate_journal_and_a_failed_save_keeps_the_input(
     assert sheet.change.isEnabled() and sheet.change.toPlainText() == "Second" and "disk full" in sheet.message.text()
 
 
-def test_unreadable_history_is_reported_and_valid_history_still_applies(phase):
-    host, _, bank, window, _, _ = phase
+def test_unreadable_history_is_reported_and_valid_history_still_applies(issuing):
+    host, _, bank, window, _, _ = issuing
     question = window.current
     replacement = add_reviewed(bank, window, "replacement")
     Manifest(json.dumps({"schema_version": 1, "bank_id": bank.id,
@@ -275,8 +263,8 @@ def test_unreadable_history_is_reported_and_valid_history_still_applies(phase):
     assert [i.id for i in exam.selection.items] == [replacement.id]
 
 
-def test_exam_and_key_cannot_share_a_file(phase, monkeypatch):
-    host, _, _, window, _, _ = phase
+def test_exam_and_key_cannot_share_a_file(issuing, monkeypatch):
+    host, _, _, window, _, _ = issuing
     view = approve(host, window)
     errors = []
     monkeypatch.setattr(window, "error", errors.append)

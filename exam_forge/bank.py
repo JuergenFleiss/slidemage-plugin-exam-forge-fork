@@ -15,11 +15,7 @@ from typing import Literal, get_type_hints
 
 from .model import Item, Media, Option, Origin, SourceLink
 
-SCHEMA_VERSION = 3
-_READABLE = (1, 2, 3)
-# A question file is version 3 only when it holds an open-answer question; other files and the index stay version 2,
-# so an older Exam Forge keeps reading a bank that does not use open answers.
-_OPEN_FIELDS = {"kind": "choice", "model_answer": "", "grading_notes": ""}
+SCHEMA_VERSION = 1
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 
@@ -68,7 +64,7 @@ def _read(path: Path) -> dict:
             raise ValueError("missing schema version")
         if data["schema_version"] > SCHEMA_VERSION:
             raise SchemaError(f"{path}: newer schema {data['schema_version']}")
-        if data["schema_version"] not in _READABLE:
+        if data["schema_version"] != SCHEMA_VERSION:
             raise ValueError("unsupported schema version")
         return data
     except (OSError, ValueError, TypeError) as exc:
@@ -96,7 +92,7 @@ def _item(data: dict) -> Item:
     data["options"] = tuple(_typed(Option, option) for option in data["options"])
     data["sources"] = tuple(_typed(SourceLink, source) for source in data["sources"])
     data["origin"] = _typed(Origin, data["origin"])
-    data["media"] = tuple(_typed(Media, entry) for entry in data.get("media", ()))
+    data["media"] = tuple(_typed(Media, entry) for entry in data["media"])
     return _typed(Item, data)
 
 
@@ -104,9 +100,6 @@ def _revision_data(item: Item) -> dict:
     """Serialize revision content without the item-level source check flag."""
     data = asdict(item)
     del data["source_changed"]
-    for name, default in _OPEN_FIELDS.items():
-        if data[name] == default:
-            del data[name]
     return data
 
 
@@ -120,8 +113,7 @@ class Bank:
         if create and not self._index_path.exists():
             if any(p.name != "bank.json" for p in self.folder.glob("*.json")):
                 raise BankError("bank.json is missing but question files exist in this folder")
-            _atomic_write(self._index_path, {"schema_version": 2,
-                                            "id": str(uuid4()), "items": []})
+            _atomic_write(self._index_path, {"schema_version": SCHEMA_VERSION, "id": str(uuid4()), "items": []})
         self._index()
 
     @property
@@ -168,21 +160,16 @@ class Bank:
         return self._document(item_id)[1]
 
     def _write_item(self, item_id: str, data: dict, revisions: list[Item], changed: bool) -> None:
-        data["schema_version"] = 3 if any(row.kind == "open" for row in revisions) else 2
+        data["schema_version"] = SCHEMA_VERSION
         data["source_changed"] = changed
         data["revisions"] = [_revision_data(row) for row in revisions]
         _atomic_write(self._path(item_id), data)
 
-    def get(self, item_id: str, revision: int | None = None) -> Item:
-        """Read a revision with the current source flag."""
+    def get(self, item_id: str) -> Item:
+        """Read the current revision with the current source flag."""
         if item_id not in self._index()["items"]:
             raise KeyError(item_id)
-        revisions = self._revisions(item_id)
-        if revision is None:
-            return revisions[-1]
-        if type(revision) is not int or not 1 <= revision <= len(revisions):
-            raise KeyError((item_id, revision))
-        return revisions[revision - 1]
+        return self._revisions(item_id)[-1]
 
     def load(self) -> tuple[list[Item], list[CorruptFileError]]:
         """Return current items and per-file errors; refuse newer schemas."""
@@ -290,14 +277,14 @@ class Bank:
         paths += [p for p in (folder / "media").glob("*") if not p.name.startswith(".")]
         return [p for p in paths if p.is_file()] + [self._index_path]
 
-    def store_media(self, name: str, data: bytes, alt: str = "") -> Media:
+    def store_media(self, name: str, data: bytes) -> Media:
         """Atomically store content by hash; replacing an image never changes old revisions."""
         if not isinstance(data, bytes) or not data:
             raise ValueError("media data must be nonempty bytes")
         digest = hashlib.sha256(data).hexdigest()
         # Validate the supplied filename before using its suffix.
-        Media(name, digest, alt)
-        media = Media(digest + Path(name).suffix.lower(), digest, alt)
+        Media(name, digest)
+        media = Media(digest + Path(name).suffix.lower(), digest)
         folder = self.folder / "media"
         folder.mkdir(exist_ok=True)
         path = folder / media.name

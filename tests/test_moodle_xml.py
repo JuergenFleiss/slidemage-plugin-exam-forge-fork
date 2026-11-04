@@ -3,17 +3,20 @@
 import base64
 import struct
 import zlib
+from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
 
-from exam_forge.model import Item, Option
-from exam_forge.moodle_xml import Image, _fraction, export_moodle_xml
+from exam_forge.bank import Bank
+from exam_forge.model import REVISION_ANSWERS, Item, Option
+from exam_forge.moodle_xml import _fraction, export_moodle_xml
 
 
-def sample():
+def sample(tmp_path):
+    """A question with one bank image, and its bank."""
     # A small, self-contained PNG: blue rectangle with a gold square.
     def chunk(kind, data):
         return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
@@ -22,12 +25,14 @@ def sample():
         for x in range(96)) for y in range(64))
     png = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 96, 64, 8, 2, 0, 0, 0))
            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+    bank = Bank(tmp_path / 'bank', create=True)
+    image = replace(bank.store_media('sample.png', png), alt='A gold square on a blue background')
     item = Item('sample-math-image', 1, r'In the image, what is \( 2^3 \)?', (
         Option('a', '8', True, 'Correct: 2 × 2 × 2 = 8.'),
         Option('b', '6', False, 'Multiply, rather than add.'),
         Option('c', '9', False, 'Recalculate the power.'),
-    ))
-    return item, Image('sample.png', png, 'A gold square on a blue background')
+    ), media=(image,))
+    return item, bank, png
 
 
 class ExtractHTML(HTMLParser):
@@ -44,17 +49,18 @@ class ExtractHTML(HTMLParser):
             self.images.append(dict(attrs))
 
 
-def test_sample_matches_fixed_structure_and_fixture():
-    item, image = sample()
-    xml = export_moodle_xml([item], images={(item.id, item.revision): [image]})
+def test_sample_matches_fixed_structure_and_fixture(tmp_path):
+    item, bank, png = sample(tmp_path)
+    image = item.media[0]
+    xml = export_moodle_xml([item], rule=REVISION_ANSWERS, bank=bank)
     assert xml == (Path(__file__).parent / 'fixtures/sample_moodle.xml').read_bytes()
     # The fixture is what Moodle imports; these say why it is right.
     q = ET.fromstring(xml).find('question')
     assert q.findtext('name/text') == 'sample-math-image r1' and q.findtext('single') == 'true'
     html = ExtractHTML()
     html.feed(q.findtext('questiontext/text'))
-    assert html.images == [{'src': '@@PLUGINFILE@@/sample.png', 'alt': image.alt}]
-    assert base64.b64decode(q.find('questiontext/file').text, validate=True) == image.data
+    assert html.images == [{'src': f'@@PLUGINFILE@@/{image.name}', 'alt': image.alt}]
+    assert base64.b64decode(q.find('questiontext/file').text, validate=True) == png
     assert [a.attrib['fraction'] for a in q.findall('answer')] == ['100', '0', '0']
     assert [a.findtext('feedback/text') for a in q.findall('answer')] == [o.rationale for o in item.options]
 
@@ -62,7 +68,7 @@ def test_sample_matches_fixed_structure_and_fixture():
 def test_escaping_html_xml_and_math():
     item = Item('id<&', 1, 'Less < & >\n' + r'\( x < y \)', (
         Option('a', '<b> &', True, 'why < &'), Option('b', 'no', False)))
-    q = ET.fromstring(export_moodle_xml([item]))[0]
+    q = ET.fromstring(export_moodle_xml([item], rule=REVISION_ANSWERS))[0]
     assert q.findtext('name/text') == 'id<& r1'
     html = ExtractHTML()
     html.feed(q.findtext('questiontext/text'))
@@ -71,27 +77,16 @@ def test_escaping_html_xml_and_math():
     assert q.findtext('answer/feedback/text') == 'why &lt; &amp;'
 
 
-def test_elp_requires_explicit_revision_release():
-    options = (Option('a', 'yes', True), Option('b', 'no'))
-    revision = Item('rev', 1, 'revision', options)
-    elp = Item('secret', 2, 'SECRET STEM', options, use='elp')
-    assert b'SECRET STEM' not in export_moodle_xml([revision, elp], released_elp={('secret', 1)})
-    assert b'SECRET STEM' in export_moodle_xml([elp], released_elp={('secret', 2)})
-
-
-def test_invalid_inputs_fail_closed():
+def test_invalid_inputs_fail_closed(tmp_path):
     opts = (Option('a', 'a', True), Option('b', 'b', True))
-    with pytest.raises(ValueError):
-        export_moodle_xml([Item('bad', 1, options=opts)])
-    with pytest.raises(ValueError):
-        export_moodle_xml([Item('bad', 1, options=(opts[0],))])
-    with pytest.raises(ValueError):
-        export_moodle_xml([Item('bad', 1, '\x01', (opts[0], Option('b', 'b')))])
-    item, image = sample()
-    with pytest.raises(ValueError):
-        export_moodle_xml([item], images={(item.id, 1): [image, image]})
-    with pytest.raises(ValueError):
-        export_moodle_xml([item], images={(item.id, 1): [Image('../x.png', b'x', '')]})
+    for bad in (Item('bad', 1, options=opts), Item('bad', 1, options=(opts[0],)),
+                Item('bad', 1, '\x01', (opts[0], Option('b', 'b'))),
+                Item('secret', 1, 'SECRET STEM', (opts[0], Option('b', 'b')), use='elp')):
+        with pytest.raises(ValueError):
+            export_moodle_xml([bad], rule=REVISION_ANSWERS)
+    item, bank, _ = sample(tmp_path)
+    with pytest.raises(ValueError, match='requires its bank'):
+        export_moodle_xml([item], rule=REVISION_ANSWERS)
     assert _fraction(0) == '0' and _fraction(1) == '100' and _fraction(3) == '33.33333'
     assert _fraction(2, -1) == '-50' and _fraction(0, -1) == '0'
     for value in (-1, 33.33333, 10, True):

@@ -15,7 +15,7 @@ from exam_forge.bank import Bank, CorruptFileError
 from exam_forge.elp import ElpRules, check_elp, scoring_table
 from exam_forge.elp_document import export_elp_documents
 from exam_forge.manifest import freeze
-from exam_forge.model import AnswerRule, AnswerRules, Item, Option, check_phase1
+from exam_forge.model import REVISION_ANSWERS, AnswerRule, AnswerRules, Item, Option, question_issues
 from exam_forge.moodle_xml import export_moodle_xml
 
 
@@ -36,11 +36,12 @@ def test_rules_refuse_what_cannot_work():
 
 
 def test_checks_follow_the_rule():
-    multi = AnswerRule(3, 6, 1, 2)
-    assert check_phase1(question(4, 2), multi) == [] and check_phase1(question(4, 2))
-    assert check_phase1(question(2, 1), multi) == ["A revision-quiz question must have three to six answers."]
-    assert check_phase1(question(3, 3), multi) == ["A revision-quiz question must mark one to two correct answers."]
-    assert check_elp(question(4, 2, "elp"), AnswerRule(4, 4, 1, 3)) == [] and check_elp(question(4, 2, "elp"))
+    multi = AnswerRules(revision=AnswerRule(3, 6, 1, 2))
+    assert question_issues(question(4, 2), multi) == [] and question_issues(question(4, 2), AnswerRules())
+    assert question_issues(question(2, 1), multi) == ["have three to six answers"]
+    assert question_issues(question(3, 3), multi) == ["mark one to two correct answers"]
+    assert check_elp(question(4, 2, "elp"), AnswerRule(4, 4, 1, 3), ("choice",)) == []
+    assert check_elp(question(4, 2, "elp"), AnswerRules().elp, ("choice",))
 
 
 def test_scoring_follows_the_number_of_answers():
@@ -66,14 +67,14 @@ def test_store_defaults_round_trip_and_corrupt_file(tmp_path):
 
 
 def test_moodle_single_and_multiple_response():
-    xml = export_moodle_xml([question(3, 1)]).decode()
+    xml = export_moodle_xml([question(3, 1)], rule=REVISION_ANSWERS).decode()
     assert "<single>true</single>" in xml and re.findall(r'fraction="([^"]+)"', xml) == ["100", "0", "0"]
     xml = export_moodle_xml([question(4, 2)], rule=AnswerRule(3, 6, 1, 2)).decode()
     assert "<single>false</single>" in xml and re.findall(r'fraction="([^"]+)"', xml) == ["50", "50", "-50", "-50"]
     xml = export_moodle_xml([question(3, 1)], rule=AnswerRule(3, 6, 1, 2)).decode()
     assert re.findall(r'fraction="([^"]+)"', xml) == ["100", "-50", "-50"]
     with pytest.raises(ValueError, match="mark exactly one correct answer"):
-        export_moodle_xml([question(4, 2)])
+        export_moodle_xml([question(4, 2)], rule=REVISION_ANSWERS)
 
 
 def test_an_elp_exam_with_four_answers(tmp_path):

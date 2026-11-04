@@ -31,7 +31,6 @@ from .model import Item, SourceLink
 class SourceCheck:
     source: SourceLink
     status: Literal["unchanged", "changed", "missing", "error"]
-    fingerprint: str | None = None
     message: str = ""
 
 
@@ -170,7 +169,7 @@ class _Checker:
         current = self.fingerprints[key]
         if isinstance(current, Exception):
             return SourceCheck(link, "error", message=str(current))
-        return SourceCheck(link, "unchanged" if current == link.fingerprint else "changed", current)
+        return SourceCheck(link, "unchanged" if current == link.fingerprint else "changed")
 
     def item(self, item: Item) -> ItemCheck:
         return ItemCheck(item, tuple(self.source(link) for link in item.sources))

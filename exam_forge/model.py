@@ -68,7 +68,6 @@ class Item:
     stem: str = ""
     options: tuple[Option, ...] = ()
     objective: str = ""
-    topic: str = ""
     difficulty: str = ""
     status: Literal["draft", "reviewed", "retired"] = "draft"
     use: Literal["elp", "revision"] = "revision"
@@ -154,8 +153,6 @@ class AnswerRules:
         return self.exam_kinds if use == "elp" else ("choice",)
 
 
-DEFAULT_RULES = AnswerRules()
-
 
 def number_word(n: int) -> str:
     return _WORDS[n] if 0 <= n < len(_WORDS) else str(n)
@@ -222,7 +219,3 @@ def question_issues(item: Item, rules: AnswerRules) -> list[str]:
     """What breaks the deck's rules for this question's use and type."""
     return type_issues(item, rules.kinds(item.use), rules.of(item.use))
 
-
-def check_phase1(item: Item, rule: AnswerRule = REVISION_ANSWERS) -> list[str]:
-    """Return revision-quiz answer errors; storing incomplete drafts is allowed."""
-    return [f"A revision-quiz question must {issue}." for issue in type_issues(item, ("choice",), rule)]

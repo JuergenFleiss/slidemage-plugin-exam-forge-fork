@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import struct
 import zlib
+from dataclasses import replace
 
 from exam_forge.bank import Bank
 from exam_forge.model import Item, Option, SourceLink
@@ -18,8 +19,8 @@ def png():
 
 def test_every_question_with_its_answers_in_deck_order(tmp_path):
     bank = Bank(tmp_path / "bank", create=True)
-    image = bank.store_media("cells.png", png(), alt="Two blue cells")
-    gone = bank.store_media("gone.png", png() + b"x", alt="Lost image")
+    image = replace(bank.store_media("cells.png", png()), alt="Two blue cells")
+    gone = replace(bank.store_media("gone.png", png() + b"x"), alt="Lost image")
     (bank.folder / "media" / gone.name).unlink()
     topics = add_topic((), "Probability")
     topics = assign_slide(topics, topics[0].id, "b")

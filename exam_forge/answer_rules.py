@@ -33,7 +33,9 @@ class AnswerRulesStore:
                 raise ValueError("missing schema version")
             if data["schema_version"] > RULES_SCHEMA_VERSION:
                 raise SchemaError(f"{self.path}: newer schema {data['schema_version']}")
-            kinds = data.get("exam_kinds", ["choice"])
+            if data["schema_version"] != RULES_SCHEMA_VERSION:
+                raise ValueError("unsupported schema version")
+            kinds = data["exam_kinds"]
             if type(kinds) is not list or not set(kinds) <= set(KINDS):
                 raise ValueError("invalid exam question types")
             rules = AnswerRules(**{use: AnswerRule(**data[use]) for use in ("revision", "elp")},

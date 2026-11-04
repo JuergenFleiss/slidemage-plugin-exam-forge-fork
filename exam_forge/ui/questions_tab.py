@@ -41,7 +41,6 @@ KEY = Qt.ItemDataRole.UserRole
 REVIEW = ("attention", "unlinked")
 STATUS = {"draft": ("Draft", "neutral"), "reviewed": ("Reviewed", "ok"), "retired": ("Retired", "muted")}
 FOCUS = (("slides", "Slides"), ("questions", "Questions"))
-ELP_NOTE = "Exam questions without a linked slide are left out of exam counts until they are linked."
 
 
 def ai_draft(item):
@@ -66,13 +65,9 @@ def passive(widget):
     return widget
 
 
-def label(host, text="", *, role="body", bold=False, wrap=False, clip=False):
+def label(host, text="", *, role="body", wrap=False, clip=False):
     widget = host.Label(text, role)
     widget.setWordWrap(wrap)
-    if bold:
-        font = widget.font()
-        font.setBold(True)
-        widget.setFont(font)
     if clip:  # A long title is cut off by the column instead of widening it.
         widget.setMinimumWidth(0)
         widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -88,8 +83,8 @@ def line(*parts):
     return box
 
 
-def row(lead=(), body=(), trail=()):
-    """A list row: leading widgets, a column of lines, trailing widgets."""
+def row(lead=(), body=()):
+    """A list row: leading widgets, then a column of lines."""
     widget = Box()
     outer = QHBoxLayout(widget)
     outer.setContentsMargins(6, 4, 6, 4)
@@ -100,8 +95,6 @@ def row(lead=(), body=(), trail=()):
     for part in body:
         column.addLayout(part) if isinstance(part, QHBoxLayout) else column.addWidget(part)
     outer.addLayout(column, 1)
-    for part in trail:
-        outer.addWidget(part)
     return widget
 
 
@@ -138,7 +131,6 @@ class QuestionsTab:
         self.slides = None
         self.slide_gen = 0
         self.changed_links, self.checked_at = {}, None
-        self.elp_told, self.elp_text = False, ""
         self.syncing = False
         self.topic_dialog = self.review_dialog = None
         split = QSplitter()
@@ -626,13 +618,11 @@ class QuestionsTab:
         self.stack.setCurrentWidget(self.placeholder)
         self.render()
 
-    def select(self, slide_id, view=None):
+    def select(self, slide_id):
         """Show a slide without asking; the caller has already left the editor."""
-        if view is None:
-            owner = self.owner(slide_id)
-            fits = self.view == "all" or (owner is None and self.view == "none") or (owner and self.view == owner.id)
-            view = self.view if fits else "all"
-        self.view, self.sel_slide = view, slide_id
+        owner = self.owner(slide_id)
+        fits = self.view == "all" or (owner is None and self.view == "none") or (owner and self.view == owner.id)
+        self.view, self.sel_slide = self.view if fits else "all", slide_id
         self.render()
 
     def open_question(self, item_id):
@@ -746,8 +736,8 @@ class QuestionsTab:
         if not self.host.settings().get("ai_support", False) or not self.may_leave():
             return
         topic = self.topic_by_id(self.view)
-        dialog = DraftDialog(self.host, self.deck, self.bank, self, topics=self.topics,
-                             topic_id=topic.id if topic else None, preselect=self.sel_slide, rules=self.answer_rules)
+        dialog = DraftDialog(self.host, self.deck, self.bank, self, self.answer_rules, topics=self.topics,
+                             topic_id=topic.id if topic else None, preselect=self.sel_slide)
         self.drafting_dialog = dialog
         self.set_busy(True)
 
@@ -780,9 +770,6 @@ class QuestionsTab:
             self.items, errors = self.bank.load()
             if errors:
                 self.error("\n".join(map(str, errors)))
-            if not self.elp_told and any(i.use == "elp" and not i.sources and i.status != "retired" for i in self.items):
-                self.elp_told, self.elp_text = True, ELP_NOTE
-                self.notice.setText(ELP_NOTE)
             self.render()
             self.update_footer()
             self.changed(self.items)
@@ -846,9 +833,7 @@ class QuestionsTab:
                     self.current = replace(self.current, source_changed=latest.source_changed)
                     self.baseline = replace(self.baseline, source_changed=latest.source_changed)
                     self.update_header(self.current)
-            text = f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}."
-            self.notice.setText(f"{text} {self.elp_text}".strip())
-            self.elp_text = ""
+            self.notice.setText(f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}.")
             if then:
                 then(report)
 

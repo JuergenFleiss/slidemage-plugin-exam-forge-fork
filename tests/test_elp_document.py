@@ -21,7 +21,7 @@ from exam_forge.model import Item, Option
 
 
 def sample(tmp_path, rules=None):
-    """A real frozen bank; this same input produces the J4 fixture pair."""
+    """A real frozen bank; this same input produces the fixture pair."""
     def chunk(kind, data):
         return (struct.pack('>I', len(data)) + kind + data
                 + struct.pack('>I', zlib.crc32(kind + data)))
@@ -33,8 +33,8 @@ def sample(tmp_path, rules=None):
     png = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 200, 60, 8, 2, 0, 0, 0))
            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
     bank = Bank(tmp_path / 'bank', create=True)
-    media = bank.store_media('cells.png', png,
-                             alt='Five equal cells; the first two are blue and the other three are white.')
+    media = replace(bank.store_media('cells.png', png),
+                    alt='Five equal cells; the first two are blue and the other three are white.')
     items = [
         Item('shaded-fraction', 1,
              r'Two of the five equal cells are shaded. Select all true statements about the shaded fraction \( p \).',
@@ -57,7 +57,7 @@ def sample(tmp_path, rules=None):
         bank.set_status(item.id, 1, 'reviewed')
     # Reverse lexical ID order deliberately; the renderer must not sort either list.
     manifest = freeze(None, None, bank, [(i.id, 2) for i in items],
-                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, rules or ElpRules(), topic_of=lambda i: i.topic)
+                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, rules or ElpRules(), topic_of=lambda i: 'Numbers')
     return manifest, bank, png
 
 
@@ -104,7 +104,7 @@ def altered(manifest, change):
     return Manifest(json.dumps(data).encode('utf-8'))
 
 
-def test_j4_samples_and_fidelity_after_bank_edits(tmp_path):
+def test_samples_and_fidelity_after_bank_edits(tmp_path):
     manifest, bank, png = sample(tmp_path)
     before = manifest.encoded
     documents = export_elp_documents(manifest)
@@ -175,7 +175,7 @@ def test_frozen_rules_tables_floor_and_option_ids(tmp_path):
         for row in frozen:
             assert [points, str(row['correct_options']), f'{row["correct_tick"]:+d}', f'{row["wrong_tick"]:+d}'] in rows
     def change(data):
-        # Distinguish reading the frozen values from recomputing using today's G1.
+        # Distinguish reading the frozen values from recomputing them with today's rules.
         data['scoring']['tables']['36'][1]['correct_tick'] = 17
         data['scoring']['floor'] = 2
     changed_exam, changed_key = export_elp_documents(altered(manifest, change))

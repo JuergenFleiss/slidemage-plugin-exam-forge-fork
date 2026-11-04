@@ -323,12 +323,16 @@ def fill(window, link=True):
     first.tick.click()
     first.why.setPlainText("Two pairs.")
     second.text.setPlainText("3")
-    window.current = replace(window.current, topic="Arithmetic")
     window.objective.setText("Add two numbers")
     if link:
         window.links = (link_slide(window.host, source(window.host, window.deck), "instructor"),)
     assert window.save()
     return window.current
+
+
+def revision(bank, item_id, number):
+    """An earlier revision of a question, as its file holds it."""
+    return bank._revisions(item_id)[number - 1]
 
 
 def keys(listw):

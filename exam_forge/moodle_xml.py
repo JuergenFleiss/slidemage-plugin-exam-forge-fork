@@ -1,32 +1,21 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Export phase 1 items to Moodle XML without Qt. Bank attachments are verified before export.
+"""Export revision-quiz questions to Moodle XML without Qt. Bank attachments are verified before export.
 
 Stems, options and rationales are plain text, not HTML. Write inline TeX as
 \\( ... \\); it is passed through for Moodle's enabled MathJax filter. Images
-are appended to the stem in the order supplied. Moodle must render the sample
-at gate J2; XML tests cannot verify the site's filters or import behaviour.
+are appended to the stem in the order attached. XML tests cannot verify a Moodle
+site's filters or import behaviour.
 """
 from __future__ import annotations
 
 import base64
-import re
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable
 from html import escape
 from xml.etree import ElementTree as ET
 
 from .bank import Bank
-from .model import REVISION_ANSWERS, AnswerRule, Item, answer_issues
-
-
-@dataclass(frozen=True)
-class Image:
-    """An image to append to a stem, with a simple filename and alt text."""
-
-    name: str
-    data: bytes
-    alt: str
+from .model import AnswerRule, Item, answer_issues
 
 
 def _text(value: str) -> str:
@@ -51,30 +40,20 @@ def _fraction(share: int, sign: int = 1) -> str:
     return f'{sign * round(100 / share, 5):.5f}'.rstrip('0').rstrip('.')
 
 
-def export_moodle_xml(
-    items: Iterable[Item], *,
-    released_elp: Iterable[tuple[str, int]] = (),
-    images: Mapping[tuple[str, int], Iterable[Image]] | None = None,
-    bank: Bank | None = None,
-    rule: AnswerRule = REVISION_ANSWERS,
-) -> bytes:
-    """Return UTF-8 XML. ELP release is explicit and specific to a revision.
+def export_moodle_xml(items: Iterable[Item], *, rule: AnswerRule, bank: Bank | None = None) -> bytes:
+    """Return UTF-8 XML. Only revision-quiz questions go to Moodle; an exam question is refused.
 
-    Images are keyed by (item id, revision). The caller decides which items to
-    export; status does not imply release or approval. Each selected item must
-    follow `rule`. A rule that allows one correct answer makes single-answer
+    The caller decides which items to export; status does not imply release or
+    approval. Each selected item must follow `rule`; its images are read from `bank`. A rule that allows one correct answer makes single-answer
     questions; otherwise every question is multiple-response: the correct
     answers share 100% and the wrong ones -100%, so the format does not tell how
     many are correct. Only answer fractions encode the correctness flag.
     Rationales become per-answer feedback.
     """
-    released = set(released_elp)
-    image_map = images if images is not None else {}
     root = ET.Element('quiz')
     for item in items:
-        key = (item.id, item.revision)
-        if item.use == 'elp' and key not in released:
-            continue
+        if item.use != 'revision':
+            raise ValueError(f'{item.id}: exam questions never go to Moodle')
         issues = answer_issues(item, rule)
         if issues:
             raise ValueError(f'{item.id}: the question must {" and ".join(issues)}')
@@ -82,19 +61,12 @@ def export_moodle_xml(
         ET.SubElement(ET.SubElement(question, 'name'), 'text').text = _text(f'{item.id} r{item.revision}')
         questiontext = ET.SubElement(question, 'questiontext', {'format': 'html'})
         html = _html(item.stem)
-        filenames: set[str] = set()
         if item.media and bank is None:
             raise ValueError(f'{item.id}: attached media requires its bank')
-        attached = [Image(media.name, bank.read_media(media), media.alt) for media in item.media]
-        for image in (*attached, *image_map.get(key, ())):
-            if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', image.name) or image.name in filenames:
-                raise ValueError(f'{item.id}: image filename must be simple and unique')
-            if not isinstance(image.data, bytes) or not image.data:
-                raise ValueError(f'{item.id}: image data must be nonempty bytes')
-            filenames.add(image.name)
-            html += f'<br /><img src="@@PLUGINFILE@@/{image.name}" alt="{escape(_text(image.alt), quote=True)}" />'
-            node = ET.SubElement(questiontext, 'file', {'name': image.name, 'path': '/', 'encoding': 'base64'})
-            node.text = base64.b64encode(image.data).decode('ascii')
+        for media in item.media:     # Media names are simple and unique within an item.
+            html += f'<br /><img src="@@PLUGINFILE@@/{media.name}" alt="{escape(_text(media.alt), quote=True)}" />'
+            node = ET.SubElement(questiontext, 'file', {'name': media.name, 'path': '/', 'encoding': 'base64'})
+            node.text = base64.b64encode(bank.read_media(media)).decode('ascii')
         ET.SubElement(questiontext, 'text').text = html
         ET.SubElement(question, 'defaultgrade').text = '1.0000000'
         ET.SubElement(question, 'single').text = 'true' if rule.max_correct == 1 else 'false'

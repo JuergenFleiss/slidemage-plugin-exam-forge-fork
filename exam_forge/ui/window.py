@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Non-modal window shell; worker completions alone update phase 2 widgets."""
+"""Non-modal window shell: the Questions and Exam tabs, the top bar and the footer."""
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from ..answer_rules import AnswerRulesStore, exam_rules
 from ..bank import BankError
 from ..model import AnswerRules
-from ..topics import TopicStore, migrate, topic_name
+from ..topics import TopicStore
 from .editor import ItemEditor
 from .exam_tab import ExamTab
 from .export_menu import ExportMenu
@@ -36,9 +36,6 @@ class Tabs(QStackedWidget):
 
     def setCurrentWidget(self, page):
         self.setCurrentIndex(self.indexOf(page))
-
-    def tabText(self, index):
-        return self.names[index]
 
 
 class BankWindow(QuestionsTab, ItemEditor, QWidget):
@@ -141,7 +138,6 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.stack.setCurrentWidget(self.placeholder)
         self.view, self.sel_slide, self.slides = "all", None, None
         self.changed_links, self.checked_at = {}, None
-        self.elp_told, self.elp_text = False, ""
         self.exam_tab.reset()
         self.load_topics()
         self.load_answer_rules()
@@ -149,21 +145,9 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.load_slides()
 
     def load_topics(self):
-        """Read topics.json; on a bank's first open, create it from legacy question topics."""
-        store = TopicStore(self.bank.folder)
+        """Read topics.json; a bank without one has no topics yet."""
         try:
-            if store.exists():
-                self.topics = store.load()
-                return
-            items, errors = self.bank.load()
-            # An unreadable question could hold a topic, so migrate only from a complete bank.
-            if errors:
-                self.topics = ()
-                return
-            self.topics, notes = migrate(items)
-            store.save(self.topics)
-            if notes:
-                self.notice.setText(" ".join(notes))
+            self.topics = TopicStore(self.bank.folder).load()
         except (OSError, BankError, ValueError) as exc:
             self.topics = ()
             self.error(exc)
@@ -196,9 +180,6 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.topics = tuple(topics)
         self.exam_tab.invalidate()
         return True
-
-    def topic_name_of(self, item):
-        return topic_name(item, self.topics)
 
     def error(self, error):
         self.notice.setText(str(error))

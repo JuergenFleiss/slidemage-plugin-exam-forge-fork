@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from fake_host import enable_ai, source
+from fake_host import enable_ai, revision, source
 from PySide6.QtCore import QCoreApplication, QEvent
 from slidemage.plugin_api import AiChatError, AiChatResult, Route, SlideSource
 
@@ -107,7 +107,7 @@ def test_an_ai_update_of_an_author_question_keeps_its_origin_and_records_the_rou
     saved = bank.get("q1")
     assert saved.origin == Origin() and saved.status == "draft" and saved.stem == "What is two plus three?"
     assert (saved.ai_edit_route, saved.ai_edit_model) == ("upd-route", "upd-model")
-    assert not saved.source_changed and bank.get("q1", 2).status == "reviewed" and len(bank.load()[0]) == 1
+    assert not saved.source_changed and revision(bank, "q1", 2).status == "reviewed" and len(bank.load()[0]) == 1
     dialog.reject()
 
 

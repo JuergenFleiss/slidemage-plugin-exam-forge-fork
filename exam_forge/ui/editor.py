@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
 from ..bank import BankError
 from ..elp_document import image_mime
 from ..model import (
-    DEFAULT_RULES,
     KINDS,
     USES,
     Item,
@@ -68,7 +67,7 @@ def accent(widget, amber=False):
     widget.setStyleSheet(f"color: {accent_color(widget, amber)};")
 
 
-def reviewed_issues(item, rules=DEFAULT_RULES):
+def reviewed_issues(item, rules):
     """What still stops a question from being marked reviewed, in the footer's wording."""
     issues = []
     if not item.stem.strip():
@@ -283,8 +282,6 @@ class AnswerRow(QWidget):
 
 
 class ItemEditor:
-    answer_rules = DEFAULT_RULES   # the deck's; the window reads them from the bank folder
-
     def build_editor(self, host, split):
         self._loading = False
         self.labels, self.labels_tried, self.context_gen, self.context_key = {}, set(), 0, None
@@ -701,9 +698,6 @@ class ItemEditor:
     def change_status(self, target):
         if self.current is None or not self.save():
             return
-        if target == "retired" and self.current.status != "reviewed":
-            self.error("Saved edits as a draft. Review this revision before retiring it.")
-            return
         if target == "draft" and self.current.status == "draft":
             return
         if target == "reviewed":
@@ -711,13 +705,6 @@ class ItemEditor:
             if issues:
                 self.error("Before marking reviewed: " + " · ".join(issues))
                 return
-            if self.current.status == "reviewed":
-                try:
-                    self.populate(self.bank.save(replace(self.current, status="draft")))
-                    self.reload()
-                except (OSError, BankError, ValueError) as exc:
-                    self.error(exc)
-                    return
         item = self.current
 
         def proceed(report):
@@ -841,7 +828,6 @@ class ItemEditor:
         self.render_links()
 
     def open_source(self, link, *_):
-        from .work import fresh_deck
         deck = self.deck
 
         def work():

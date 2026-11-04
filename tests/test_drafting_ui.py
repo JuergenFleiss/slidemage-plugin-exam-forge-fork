@@ -145,7 +145,8 @@ def slides(host, deck, n=3):
 
 def scoped(host, deck, window, *slide_ids, preselect=None):
     topics = (Topic("t1", "Probability", "blue", tuple(slide_ids)),)
-    dialog = DraftDialog(host, deck, window.bank, window, topics=topics, topic_id="t1", preselect=preselect)
+    dialog = DraftDialog(host, deck, window.bank, window, window.answer_rules, topics=topics, topic_id="t1",
+                         preselect=preselect)
     host.drain()
     return dialog
 
@@ -171,7 +172,7 @@ def test_bulk_drafts_link_to_their_slides(env):
     host.drain()
     drafts, errors = bank.load()
     assert [item.sources[0].slide_id for item in drafts] == [first.id, second.id] and not errors
-    assert all(item.origin.kind == "ai" and item.topic == "" for item in drafts)
+    assert all(item.origin.kind == "ai" for item in drafts)
     assert host.messages[-1] == ("2 AI drafts added · review before use", False)
 
 

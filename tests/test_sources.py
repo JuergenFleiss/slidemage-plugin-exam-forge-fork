@@ -186,7 +186,7 @@ def test_a_removed_slide_is_missing_and_never_read_from_the_old_file(env):
     env.host.source_reads.clear()
     report, error = run_bank(env, bank)
     result = report.items[0]
-    assert error is None and result.sources[0].status == "missing" and result.sources[0].fingerprint is None
+    assert error is None and result.sources[0].status == "missing"
     assert bank.get(item.id).source_changed and not env.host.source_reads
 
 
@@ -206,7 +206,7 @@ def test_read_failures_are_reported_and_set_the_marker(env, monkeypatch, failure
         monkeypatch.setattr(env.host, "slide_source" if failure == "source" else "deck_slides", unreadable)
     report, error = run_bank(env, bank)
     source = report.items[0].sources[0]
-    assert error is None and source.status == "error" and source.fingerprint is None
+    assert error is None and source.status == "error"
     assert (failure == "media" and source.message) or str(problem) in source.message
     assert bank.get(item.id).source_changed
 

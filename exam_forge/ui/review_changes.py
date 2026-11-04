@@ -18,8 +18,6 @@ from .editor import accent, accent_color
 from .sheet import Sheet
 from .work import fresh_deck
 
-NO_SNAPSHOT = "Earlier text not stored"
-
 
 def ordered(item, slide_id):
     """The item's links, the one for `slide_id` first."""
@@ -165,9 +163,6 @@ class ReviewChangesDialog(Sheet):
                 note = f"<p>{escape(str(text))}</p>"
                 old.append(head + note)
                 new.append(head + note)
-            elif not link.text:
-                old.append(head + f"<p><i>{NO_SNAPSHOT}</i></p>")
-                new.append(head + self.html([(text, False)], None))
             elif link.text != text:
                 left, right = word_diff(link.text, text)
                 old.append(head + self.html(left, "old"))
@@ -251,7 +246,7 @@ class ReviewChangesDialog(Sheet):
         def work():
             links = rebaseline_links(host, fresh_deck(self.shell.deck), item)
             return links, build_update_request(item, "\n\n".join(link.text for link in links),
-                                               rules=self.shell.answer_rules)
+                                               self.shell.answer_rules)
 
         def ready(prepared, error):
             if not self.state["active"]:

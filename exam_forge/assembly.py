@@ -17,30 +17,19 @@ from .elp import ElpRules, check_elp
 from .model import Item, plural
 from .sources import BankCheck, ItemCheck, check_bank
 
-_DEFAULT_RULES = ElpRules()
-
-
-@dataclass(frozen=True)
-class ExcludedItem:
-    item: Item
-    reasons: tuple[str, ...]
-
-
 _DIFFICULTIES = ("easy", "hard")
-# A blueprint cell: a difficulty for multiple choice, as before open answers; "open easy" and "open hard" otherwise.
+# A blueprint cell: a difficulty for multiple choice; "open easy" and "open hard" for open answers.
 CELLS = ("easy", "hard", "open easy", "open hard")
 CELL_NAMES = {"easy": "easy", "hard": "hard", "open easy": "easy open-answer", "open hard": "hard open-answer"}
 
 
 def cell_of(item: Item) -> str:
     return item.difficulty if item.kind == "choice" else f"open {item.difficulty}"
-_NO_TOPIC = "Question has no topic; link it to a slide in a topic."
 
 
 @dataclass(frozen=True)
 class Blueprint:
-    """Exact counts per topic and cell (CELLS); minutes follow from ElpRules. Open-answer cells are kept only when
-    given, so a multiple-choice blueprint reads as before."""
+    """Exact counts per topic and cell (CELLS); minutes follow from ElpRules."""
 
     counts: Mapping[str, Mapping[str, int]]
     avoid_last: int = 0
@@ -51,7 +40,7 @@ class Blueprint:
             if (not isinstance(name, str) or not name or set(cell) - set(CELLS)
                     or any(type(v) is not int or v < 0 for v in cell.values())):
                 raise ValueError("Blueprint counts need topic names and nonnegative easy/hard integers")
-            counts[name] = {d: cell.get(d, 0) for d in CELLS if d in _DIFFICULTIES or d in cell}
+            counts[name] = {d: cell.get(d, 0) for d in CELLS}
         if type(self.avoid_last) is not int or self.avoid_last < 0:
             raise ValueError("avoid_last must be a nonnegative integer")
         object.__setattr__(self, "counts", counts)
@@ -71,7 +60,6 @@ class Assembly:
     seed: int
     items: tuple[Item, ...]
     candidates: tuple[Item, ...]
-    excluded: tuple[ExcludedItem, ...]
     topic_of: Callable[[Item], str]
     problems: tuple[str, ...] = ()
 
@@ -99,42 +87,25 @@ class Assembly:
                      and (self.topic_of(c), cell_of(c)) == cell)
 
 
-def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams,
-            avoid_last: int, wanted: Callable[[str, str], bool] | None = None, rules: ElpRules = _DEFAULT_RULES):
-    """Split items into eligible candidates and explained exclusions, ordered by ID."""
+def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams, avoid_last: int,
+            rules: ElpRules) -> list[Item]:
+    """The eligible questions, ordered by ID: reviewed exam questions that fit the rules, have a topic and a
+    difficulty, and were not used in the last `avoid_last` exams."""
     if len({i.id for i in items}) != len(items):
         raise ValueError("Supply one current revision per item ID")
     recent = {id_ for exam in previous_exams[-avoid_last:] for id_ in exam} if avoid_last else set()
-    candidates, excluded = [], []
-    for item in sorted(items, key=lambda i: i.id):
-        topic, reasons = topic_of(item), []
-        if item.status != "reviewed":
-            reasons.append("Item is not reviewed.")
-        if item.use != "elp":
-            reasons.append("Item is not an exam question.")
-        reasons.extend(check_elp(item, rules.answers, rules.kinds))
-        if item.difficulty not in _DIFFICULTIES:
-            reasons.append("Item has no supported difficulty class.")
-        if not topic:
-            reasons.append(_NO_TOPIC)
-        elif wanted and item.difficulty in _DIFFICULTIES and not wanted(topic, cell_of(item)):
-            reasons.append("Item is outside the requested topic counts.")
-        if item.id in recent:
-            reasons.append(f"Item was used in the last {avoid_last} exams.")
-        if reasons:
-            excluded.append(ExcludedItem(item, tuple(reasons)))
-        else:
-            candidates.append(item)
-    return candidates, excluded
+    return [item for item in sorted(items, key=lambda i: i.id)
+            if item.status == "reviewed" and item.use == "elp" and not check_elp(item, rules.answers, rules.kinds)
+            and item.difficulty in _DIFFICULTIES and topic_of(item) and item.id not in recent]
 
 
-def available(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams=(),
-              avoid_last: int = 0, rules: ElpRules = _DEFAULT_RULES) -> dict[str, dict[str, int]]:
-    """Eligible counts per topic and cell, as assemble would see them; open-answer cells only when there are some."""
+def available(items: Sequence[Item], topic_of: Callable[[Item], str], rules: ElpRules, previous_exams=(),
+              avoid_last: int = 0) -> dict[str, dict[str, int]]:
+    """Eligible counts per topic and cell, as assemble would see them."""
     result: dict[str, dict[str, int]] = {}
-    for item in _screen(items, topic_of, previous_exams, avoid_last, rules=rules)[0]:
-        cells = result.setdefault(topic_of(item), dict.fromkeys(_DIFFICULTIES, 0))
-        cells[cell_of(item)] = cells.get(cell_of(item), 0) + 1
+    for item in _screen(items, topic_of, previous_exams, avoid_last, rules):
+        cells = result.setdefault(topic_of(item), dict.fromkeys(CELLS, 0))
+        cells[cell_of(item)] += 1
     return result
 
 
@@ -145,7 +116,7 @@ def waiting_elp_drafts(items: Sequence[Item], topic_of: Callable[[Item], str]) -
 
 
 def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
-             topic_of: Callable[[Item], str], rules: ElpRules = _DEFAULT_RULES,
+             topic_of: Callable[[Item], str], rules: ElpRules,
              previous_exams: Sequence[Sequence[str]] = ()) -> Assembly:
     """Select reviewed exam questions, with no relaxed constraints or partial result.
 
@@ -156,9 +127,9 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
     """
     if type(seed) is not int:
         raise ValueError("Seed must be an integer")
-    candidates, excluded = _screen(items, topic_of, previous_exams, blueprint.avoid_last,
-                                   lambda t, d: blueprint.counts.get(t, {}).get(d, 0) > 0, rules)
-    result = Assembly(blueprint, rules, seed, (), tuple(candidates), tuple(excluded), topic_of)
+    candidates = [item for item in _screen(items, topic_of, previous_exams, blueprint.avoid_last, rules)
+                  if blueprint.counts.get(topic_of(item), {}).get(cell_of(item), 0) > 0]
+    result = Assembly(blueprint, rules, seed, (), tuple(candidates), topic_of)
     problems = [] if blueprint.total else ["The blueprint requests no items."]
     cells = []
     for name, cell in sorted(blueprint.counts.items()):
@@ -199,17 +170,10 @@ class ApprovalCheck:
     def changed(self) -> tuple[ItemCheck, ...]:
         return tuple(row for row in self.sources.items if row.source_changed)
 
-    def approve(self, *, accept_changed: bool = False) -> Assembly:
-        """Call after the lecturer approves and sees the changed-question list."""
-        if self.changed and not accept_changed:
-            raise ValueError("Acknowledge changed sources before approving: " +
-                             ", ".join(row.item.id for row in self.changed))
-        return self.selection
-
 
 def check_approval(host, deck, bank: Bank, selection: Assembly,
                    done: Callable[[ApprovalCheck | None, BaseException | None], None]) -> None:
-    """D10: always check afresh, report changes, reject stale selected revisions.
+    """Always check afresh, report changes, reject stale selected revisions.
 
     Uses sources.check_bank's worker and callback convention. A failed check
     produces no approval object. No status transition or manifest is written.

@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .bank import Bank, ConflictError
+from .bank import SCHEMA_VERSION, Bank, ConflictError
 from .elp import SCORING_FLOOR, ElpRules, check_elp, scoring_table
 from .model import Item
 from .sources import ItemCheck, check_item
@@ -38,7 +38,7 @@ class Manifest:
 
     def __post_init__(self) -> None:
         data = json.loads(self.encoded)
-        if not isinstance(data, dict) or data.get("schema_version") not in (1, 2, 3):
+        if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
             raise ValueError("unsupported manifest schema")
 
     def data(self) -> dict:
@@ -103,8 +103,7 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
         if bank.get(item.id) != item:
             raise ConflictError(f"question changed during freeze: {item.id}")
     data = {
-        # Version 3 only for open-answer questions, which an older Exam Forge cannot print.
-        "schema_version": 3 if any(item.kind == "open" for item in items) else 2,
+        "schema_version": SCHEMA_VERSION,
         "bank_id": bank.id,
         "items": [{**asdict(item), "topic": topic_of(item)} for item in items],
         "media_base64": attachments,

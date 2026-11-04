@@ -32,17 +32,12 @@ def issued_at(path):
 
 
 def manifest_totals(data):
-    """'N questions · P points · M min' from the frozen items and rules, as far as they say."""
-    items = data["items"]
-    text = plural(len(items), "question")
-    rules = data.get("scoring", {}).get("rules", {})
-    try:
-        rows = [rules[i["difficulty"]] for i in items]
-        points = sum(r["points"] for r in rows)
-        minutes = float(sum((Decimal(str(r["minutes"])) for r in rows), Decimal(0)))
-    except (KeyError, TypeError, ValueError, ArithmeticError):
-        return text
-    return f"{text} · {points} points · {minutes:g} min"
+    """'N questions · P points · M min' from the frozen items and rules."""
+    items, rules = data["items"], data["scoring"]["rules"]
+    rows = [rules[i["difficulty"]] for i in items]
+    points = sum(r["points"] for r in rows)
+    minutes = float(sum((Decimal(str(r["minutes"])) for r in rows), Decimal(0)))
+    return f"{plural(len(items), 'question')} · {points} points · {minutes:g} min"
 
 
 class IssueView(QWidget):
@@ -196,4 +191,4 @@ class IssueView(QWidget):
 
     def corrections(self):
         if self.manifest is not None:
-            self.correction_sheet = open_corrections(self.host, self.manifest, self.journal_path, self.window)
+            open_corrections(self.host, self.manifest, self.journal_path, self.window)

@@ -234,7 +234,7 @@ class ExamTab(QWidget):
         of = lambda item: topic_name(item, topics)  # noqa: E731
         avoid = self.avoid.value()
         previous = self.history[0] if self.history and avoid else []
-        self.avail = available(items, of, previous, avoid, rules=self.rules)
+        self.avail = available(items, of, self.rules, previous, avoid)
         waiting = waiting_elp_drafts(items, of)
         for name, cell in self.cells.items():
             have = self.avail.get(name, {})

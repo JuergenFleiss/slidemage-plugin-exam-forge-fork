@@ -15,7 +15,7 @@ from slidemage.plugin_api import AiChatError
 
 from ..ai_support import NO_REPLY, ai_service
 from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
-from ..model import DEFAULT_RULES, KINDS, SourceLink, plural
+from ..model import KINDS, SourceLink, plural
 from ..sources import fingerprint
 from .sheet import Sheet
 from .work import fresh_deck, slide_title
@@ -28,7 +28,7 @@ def key(ref):
 
 
 class DraftDialog(Sheet):
-    def __init__(self, host, deck, bank, parent, *, topics=(), topic_id=None, preselect=None, rules=DEFAULT_RULES):
+    def __init__(self, host, deck, bank, parent, rules, *, topics=(), topic_id=None, preselect=None):
         super().__init__(host, "Draft with AI", parent)
         self.host, self.deck, self.rules = host, deck, rules
         self.items = ()
@@ -233,7 +233,7 @@ class DraftDialog(Sheet):
                     raise source
                 link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source), source.text)
                 slides.append(DraftSlide(link, source))
-            request = build_request(tuple(slides), use=use, guidance=guidance, count=count, rules=self.rules, kind=kind)
+            request = build_request(tuple(slides), self.rules, use=use, guidance=guidance, count=count, kind=kind)
             return request, tuple(s.link for s in slides)
 
         def ready(prepared, error):
@@ -273,7 +273,7 @@ class DraftDialog(Sheet):
             return
         if error is None:
             try:
-                self.items = parse_reply(result, sources=sources, use=use, count=count, rules=self.rules, kind=kind)
+                self.items = parse_reply(result, self.rules, sources=sources, use=use, count=count, kind=kind)
             except DraftReplyError as exc:
                 error = exc
         if error is not None:

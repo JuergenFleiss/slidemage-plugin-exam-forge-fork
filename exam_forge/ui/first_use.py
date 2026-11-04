@@ -23,17 +23,17 @@ def accept_risks(host, deck, selected, parent=None):
     return answer == QMessageBox.StandardButton.Yes
 
 
-def choose_bank(host, deck, parent=None):
+def choose_bank(host, deck):
     """Open the remembered bank or ask for a folder. Return None on cancellation.
 
     A newly chosen risky folder needs explicit confirmation before any bank is written.
     Errors opening a bank or saving settings are allowed to reach the caller.
     """
     folder = remembered_folder(host, deck)
-    selected = folder if folder is not None and (folder / "bank.json").is_file() else QFileDialog.getExistingDirectory(parent, "Choose a folder for the question bank")
+    selected = folder if folder is not None and (folder / "bank.json").is_file() else QFileDialog.getExistingDirectory(None, "Choose a folder for the question bank")
     if not selected:
         return None
-    if not accept_risks(host, deck, selected, parent):
+    if not accept_risks(host, deck, selected):
         return None
     if folder is not None and selected == folder:
         return Bank(folder)

@@ -59,7 +59,8 @@ def test_every_view_runs_on_the_hosts_widgets(real):
 
     window.host.settings().set("ai_support", True)
     for dialog in (TopicDialog(window, None), ReviewChangesDialog(window, [bank.get(item.id)], link.slide_id),
-                   DraftDialog(host, deck, bank, window, topics=window.topics, preselect=link.slide_id)):
+                   DraftDialog(host, deck, bank, window, window.answer_rules, topics=window.topics,
+                               preselect=link.slide_id)):
         host.drain()
         dialog.reject()
 

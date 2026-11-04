@@ -2,15 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 r"""Offline entry copies for the teaching assistant, generated only from a Manifest.
 
-Math decision (G6 / gate J4): preserve plain text exactly, including visible
-\( ... \) and \[ ... \] source. The assistant must read and copy it into the
-exam software, whose math input has not been verified. Escaped, selectable source
-is more honest than a partial TeX conversion. There is no TeX compilation, math
-parser, JavaScript, network access, or vendored renderer (zero added library
-bytes or third-party licence obligations). Both documents explain this choice.
-Needs a decision at J4: is source readable and transferable in the actual exam
-software? If typesetting is required, choose a renderer only after reviewing its
-bundled size, licence and copy/paste behaviour; none is silently included here.
+Maths stays plain text, exactly as written, including visible \( ... \) and
+\[ ... \] source. The assistant reads and copies it into the exam software.
+Escaped, selectable source is more honest than a partial TeX conversion. There is
+no TeX compilation, math parser, JavaScript, network access, or vendored renderer
+(zero added library bytes or third-party licence obligations). Both documents
+explain this choice.
 
 Item, option and media order is preserved; the exam software handles shuffling.
 Author-written assistant notes mark shared stems, exclusions and fixed option
@@ -66,7 +63,7 @@ table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #
 @media print{body{max-width:none;margin:0}.private{break-inside:avoid}}
 """
 _MATH_NOTE = (r'Math is shown as copyable source, including \( ... \) and \[ ... \] '
-              'delimiters. It is not typeset. Check entry in the exam software at gate J4.')
+              'delimiters. It is not typeset. Check that it enters correctly in the exam software.')
 
 
 def _text(value: str) -> str:
@@ -164,12 +161,12 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
         chips([f'{rule["points"]} points', f'{rule["minutes"]} planned minutes', item["difficulty"]]),
         f'<div class="text stem">{_text(item["stem"])}</div>', *images, '<ol>',
     ]
-    if item.get('assistant_note'):
+    if item['assistant_note']:
         parts.insert(-1, assistant_note(item['assistant_note']))
-    if item.get('kind') == 'open':
+    if item['kind'] == 'open':
         parts.pop()     # no answers to list: room to write, or the model answer in the key
         if key:
-            parts += model_answer(item['model_answer'], item.get('grading_notes'))
+            parts += model_answer(item['model_answer'], item['grading_notes'])
         else:
             parts.append('<div class="answer-space"></div>')
         parts.append('</section>')
@@ -186,14 +183,13 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
 def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str, str]:
     """Return (exam_html, key_html), to write as UTF-8; no I/O or live bank reads.
 
-    Expects a G5 schema-1 or schema-2 snapshot; unknown item keys are ignored. Unknown difficulty classes, missing frozen
-    scoring rows and unavailable/unsupported media fail rather than being omitted.
+    Unknown difficulty classes, missing frozen scoring rows and unavailable/unsupported media fail rather than being
+    omitted.
     Neither the blueprint nor private provenance is copied into the documents.
     """
     data = manifest.data()
     scoring = data['scoring']
-    # Exams issued before answer rules could change have no `answers`: five per question.
-    total = scoring['rules'].get('answers', {}).get('max_options', 5)
+    total = scoring['rules']['answers']['max_options']
     exam, key, sheet = [], [], []
     points, minutes = 0, Decimal(0)
     for number, item in enumerate(data['items'], 1):
@@ -205,8 +201,8 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
         exam.append(_question(item, number, rule, images, key=False))
         key.append(_question(item, number, rule, images, key=True))
         name = f'<td>{number} — {_text(item["id"])} r{item["revision"]}</td>'
-        if item.get('kind') == 'open':
-            if not item.get('model_answer', '').strip():
+        if item['kind'] == 'open':
+            if not item['model_answer'].strip():
                 raise ValueError(f'{item["id"]}: an open-answer question needs a model answer')
             sheet.append(f'<tr>{name}<td>Open answer: graded by hand</td><td>{rule["points"]}</td>'
                          '<td>—</td><td>—</td></tr>')

@@ -3,7 +3,7 @@
 """The question editor: answers, footer state, linked slides, banner and palette."""
 from dataclasses import replace
 
-from fake_host import fill, source
+from fake_host import fill, revision, source
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QMessageBox
 from slidemage.plugin_api import SlideSource
@@ -35,14 +35,14 @@ def test_ticks_are_a_radio_for_revision_and_multiple_for_elp_which_pads_to_five(
     assert len(window.rows) == 8 and not window.add_button.isEnabled()
     window.use.setCurrentData("elp")
     assert len(window.rows) == 8 and window.rows[0].text.toPlainText() == "typed"  # Never deleted.
-    assert "have exactly five answers" in reviewed_issues(window.candidate())
+    assert "have exactly five answers" in reviewed_issues(window.candidate(), window.answer_rules)
 
 
 def test_the_footer_follows_the_review_lifecycle(env, monkeypatch):
     host, _, _, _, window = env
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Discard)
     window.new_question()
-    assert reviewed_issues(window.candidate()) == [
+    assert reviewed_issues(window.candidate(), window.answer_rules) == [
         "write the question", "fill in every answer", "mark exactly one correct answer", "link a slide"]
     assert not window.approve_button.isEnabled() and window.save_button.isEnabled()
     item = fill(window)
@@ -74,7 +74,7 @@ def test_reviewing_an_edited_question_saves_a_draft_first_and_keeps_option_ids(e
     window.approve_button.click()
     host.drain()
     assert window.current.status == "reviewed" and window.current.revision == reviewed.revision + 2
-    assert bank.get(reviewed.id, reviewed.revision + 1).status == "draft"
+    assert revision(bank, reviewed.id, reviewed.revision + 1).status == "draft"
     assert [o.id for o in window.current.options] == [o.id for o in item.options]
 
 

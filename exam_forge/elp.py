@@ -54,7 +54,7 @@ class ScoringRow:
     wrong_tick: int
 
 
-def scoring_table(points: int, answers: AnswerRule = ELP_ANSWERS) -> tuple[ScoringRow, ...]:
+def scoring_table(points: int, answers: AnswerRule) -> tuple[ScoringRow, ...]:
     """Return the per-option values for a scoring sheet, with a zero floor: one row per allowed number of correct
     answers."""
     if type(points) is not int or points <= 0 or points % 12:
@@ -64,6 +64,6 @@ def scoring_table(points: int, answers: AnswerRule = ELP_ANSWERS) -> tuple[Scori
                  for n in range(answers.min_correct, answers.max_correct + 1))
 
 
-def check_elp(item: Item, rule: AnswerRule = ELP_ANSWERS, kinds: tuple[str, ...] = ("choice",)) -> list[str]:
+def check_elp(item: Item, rule: AnswerRule, kinds: tuple[str, ...]) -> list[str]:
     """Return exam answer-structure errors, allowing incomplete drafts to be saved."""
     return [f"An exam question must {issue}." for issue in type_issues(item, kinds, rule)]

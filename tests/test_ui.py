@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 from xml.etree import ElementTree as ET
 
-from fake_host import GuiHost, activate, fill, source
+from fake_host import GuiHost, activate, fill, revision, source
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton
 from slidemage.plugin_api import Focus, SlideSource
@@ -40,7 +40,7 @@ def test_editing_a_reviewed_question_creates_a_draft_revision_with_its_image(env
     edited = window.current
     assert edited.status == "draft" and edited.revision == reviewed.revision + 1
     assert bank.read_media(edited.media[0]) == image_path.read_bytes()
-    assert bank.get(item.id, reviewed.revision) == reviewed and not reviewed.media
+    assert revision(bank, item.id, reviewed.revision) == reviewed and not reviewed.media
 
 
 def test_conflict_keeps_every_field(env):
@@ -111,7 +111,7 @@ def test_a_failed_check_or_an_edit_during_it_cannot_approve(env):
 def test_moodle_export_has_bank_media_and_leaves_out_exam_draft_and_retired(env, tmp_path, monkeypatch):
     host, _, bank, _, window = env
     item = fill(window)
-    media = bank.store_media("plot.png", b"picture bytes", "A plot")
+    media = replace(bank.store_media("plot.png", b"picture bytes"), alt="A plot")
     window.attachments = (media,)
     assert window.save()
     window.approve_button.click()
@@ -192,7 +192,7 @@ def change_folder(host, deck, monkeypatch, folder):
 def test_changing_folder_copies_only_the_bank_and_leaves_the_old_one(env, tmp_path, monkeypatch):
     host, deck, bank, _, window = env
     item = fill(window)
-    media = bank.store_media("plot.png", png(), "A plot")
+    media = replace(bank.store_media("plot.png", png()), alt="A plot")
     window.attachments = (media,)
     window.save()
     (bank.folder / "unrelated.txt").write_text("not the bank's")
