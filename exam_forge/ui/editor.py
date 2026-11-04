@@ -27,7 +27,16 @@ from PySide6.QtWidgets import (
 
 from ..bank import BankError
 from ..elp_document import image_mime
-from ..model import DEFAULT_RULES, KINDS, USES, Item, Option, describe, question_issues
+from ..model import (
+    DEFAULT_RULES,
+    KINDS,
+    USES,
+    Item,
+    Option,
+    describe,
+    question_issues,
+    slide_label,
+)
 from ..sources import check_item, link_slide, rebaseline_links
 from ..topics import topic_color, topic_of
 from .work import SCROLL_STYLE, fresh_deck, slide_title
@@ -757,8 +766,7 @@ class ItemEditor:
     # -- linked slides -------------------------------------------------------------------------------------
 
     def slide_label(self, link):
-        position, title = self.labels.get(link.slide_id, (None, ""))
-        return f"Slide {position} · {title}" if position else f"Slide {link.slide_id}"
+        return slide_label(link.slide_id, *self.labels.get(link.slide_id, ()))
 
     def draw_links(self):
         clear(self.link_box)

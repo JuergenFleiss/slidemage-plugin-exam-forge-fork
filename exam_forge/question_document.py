@@ -9,26 +9,33 @@ the export. Math stays copyable source, as in the exam documents.
 """
 from __future__ import annotations
 
-import base64
 from collections.abc import Callable, Iterable, Mapping
 
-from .elp_document import _page, _text, chips, heading, image_mime, marker
-from .model import KINDS, USES, Item, Media, plural
+from .elp_document import (
+    _page,
+    _text,
+    assistant_note,
+    chips,
+    figure,
+    heading,
+    image_mime,
+    key_option,
+    model_answer,
+)
+from .model import KINDS, USES, Item, Media, plural, slide_ids, slide_label
 from .table_export import STATUS, deck_order
 from .topics import Topic, topic_of
 
 
 def _image(media: Media, read_media: Callable[[Media], bytes] | None) -> str:
-    alt = _text(media.alt)
     try:
         raw = read_media(media) if read_media is not None else None
     except Exception:  # noqa: BLE001 - any unreadable image is named, never fatal
         raw = None
     mime = image_mime(raw) if raw else None
     if mime is None:
-        return f'<p class="meta">Image not available: {_text(media.name)} — {alt}</p>'
-    encoded = base64.b64encode(raw).decode("ascii")
-    return f'<figure><img src="data:{mime};base64,{encoded}" alt="{alt}"><figcaption>{alt}</figcaption></figure>'
+        return f'<p class="meta">Image not available: {_text(media.name)} — {_text(media.alt)}</p>'
+    return figure(raw, mime, media.alt)
 
 
 def _question(item: Item, number: int, topic: str, slides: list[str], read_media) -> str:
@@ -37,19 +44,11 @@ def _question(item: Item, number: int, topic: str, slides: list[str], read_media
              chips(labels, item.status == "reviewed"), f'<div class="text stem">{_text(item.stem)}</div>',
              *(_image(media, read_media) for media in item.media)]
     if item.assistant_note:
-        parts.append('<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
-                     + _text(item.assistant_note) + '</aside>')
+        parts.append(assistant_note(item.assistant_note))
     if item.kind == "open":
-        parts += ['<h3>Model answer</h3>', f'<div class="text model-answer">{_text(item.model_answer)}</div>']
-        if item.grading_notes:
-            parts += ['<h3>Grading notes</h3>', f'<div class="text grading-notes">{_text(item.grading_notes)}</div>']
+        parts += model_answer(item.model_answer, item.grading_notes)
     else:
-        parts.append('<ol>')
-        for option in item.options:
-            rationale = f'<div class="text rationale">{_text(option.rationale)}</div>' if option.rationale else ''
-            parts.append(f'<li class="{"ok" if option.correct else "no"}">{marker(option.correct)}'
-                         f'<div><div class="text option">{_text(option.text)}</div>{rationale}</div></li>')
-        parts.append('</ol>')
+        parts += ['<ol>', *(key_option(o.text, o.correct, o.rationale) for o in item.options), '</ol>']
     if item.objective:
         parts.append(f'<p class="objective">Learning objective: {_text(item.objective)}</p>')
     parts.append('</section>')
@@ -70,8 +69,9 @@ def questions_html(items: Iterable[Item], topics: Iterable[Topic] = (),
     for number, item in enumerate(items, 1):
         topic = topic_of(item, topics)
         names = []
-        for slide in dict.fromkeys(link.slide_id for link in item.sources):
-            names += [f"Slide {slides[slide][0]}", slides[slide][1]] if slide in slides else [f"Slide {slide}"]
+        for slide in slide_ids(item):
+            position, title = slides.get(slide, (None, ""))
+            names += [slide_label(slide, position), title]     # chips() leaves out an empty title
         names = names or ["No slide linked"]
         body.append(_question(item, number, topic.name if topic else "", names, read_media))
     return _page("All questions with answers", body, language)

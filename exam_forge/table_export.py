@@ -13,7 +13,7 @@ import csv
 import io
 from collections.abc import Iterable, Mapping
 
-from .model import KINDS, USES, Item
+from .model import KINDS, USES, Item, slide_ids, slide_label
 from .topics import Topic, topic_of
 
 STATUS = {"draft": "Draft", "reviewed": "Reviewed", "retired": "Retired"}
@@ -46,9 +46,7 @@ def questions_csv(items: Iterable[Item], topics: Iterable[Topic] = (),
     writer.writerow(head)
     for item in items:
         topic = topic_of(item, topics)
-        names = []
-        for slide in dict.fromkeys(link.slide_id for link in item.sources):
-            names.append(f"Slide {slides[slide][0]} · {slides[slide][1]}" if slide in slides else f"Slide {slide}")
+        names = [slide_label(slide, *slides.get(slide, ())) for slide in slide_ids(item)]
         origin = "AI" if item.origin.kind == "ai" else "AI-assisted" if item.ai_edit_route else "Author"
         row = [item.id, str(item.revision), STATUS[item.status], USES[item.use], KINDS[item.kind],
                item.difficulty.title(), topic.name if topic else "", "; ".join(names), item.objective, item.stem,

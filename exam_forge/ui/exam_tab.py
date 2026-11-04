@@ -28,7 +28,7 @@ from ..assembly import (
 )
 from ..elp import ElpRules
 from ..manifest import Manifest
-from ..model import plural
+from ..model import plural, slide_label
 from ..topics import topic_color, topic_name
 from .editor import accent_color, clear, is_dark, red_color
 from .issue import IssueView
@@ -78,7 +78,7 @@ def slide_labels(host, deck, items):
             refs = {}
         for item_id, slide_id in pairs:
             ref = refs.get(slide_id)
-            labels[item_id] = f"Slide {ref.position}" if ref and ref.position else f"Slide {slide_id}"
+            labels[item_id] = slide_label(slide_id, ref.position if ref else None)
     return labels
 
 
@@ -481,7 +481,7 @@ class ExamTab(QWidget):
         if item.media:
             meta.addWidget(self.host.Chip(f"{len(item.media)} image{'s' if len(item.media) != 1 else ''}", "muted"))
         meta.addWidget(self.muted(self.labels.get(item.id) or
-                             (f"Slide {item.sources[0].slide_id}" if item.sources else "No slide")))
+                             (slide_label(item.sources[0].slide_id) if item.sources else "No slide")))
         row = self.rows[item.id] = {"stem": stem, "chip": chip, "changed": None, "review": None}
         if item.source_changed:
             row["changed"] = self.host.Chip("Slide changed")

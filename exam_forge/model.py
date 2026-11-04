@@ -166,6 +166,18 @@ def plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+def slide_ids(item: Item) -> list[str]:
+    """The item's linked slides, each once, in link order."""
+    return list(dict.fromkeys(link.slide_id for link in item.sources))
+
+
+def slide_label(slide_id: str, position: int | None = None, title: str = "") -> str:
+    """'Slide 3 · Title', 'Slide 3' without a title, or 'Slide <id>' for a slide the deck does not place."""
+    if not position:
+        return f"Slide {slide_id}"
+    return f"Slide {position} · {title}" if title else f"Slide {position}"
+
+
 def span(low: int, high: int) -> str:
     """'exactly five' or 'one to four'."""
     return f"exactly {number_word(low)}" if low == high else f"{number_word(low)} to {number_word(high)}"

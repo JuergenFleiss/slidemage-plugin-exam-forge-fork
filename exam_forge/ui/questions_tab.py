@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bank import BankError, _atomic_write_bytes
-from ..model import KINDS, USES, plural, question_issues
+from ..model import KINDS, USES, plural, question_issues, slide_ids, slide_label
 from ..moodle_xml import export_moodle_xml
 from ..sources import check_bank, link_slide
 from ..question_document import questions_html
@@ -42,10 +42,6 @@ REVIEW = ("attention", "unlinked")
 STATUS = {"draft": ("Draft", "neutral"), "reviewed": ("Reviewed", "ok"), "retired": ("Retired", "muted")}
 FOCUS = (("slides", "Slides"), ("questions", "Questions"))
 ELP_NOTE = "Exam questions without a linked slide are left out of exam counts until they are linked."
-
-
-def slide_ids(item):
-    return list(dict.fromkeys(link.slide_id for link in item.sources))
 
 
 def ai_draft(item):
@@ -246,7 +242,7 @@ class QuestionsTab:
 
     def slide_name(self, slide_id):
         ref = self.slide_ref(slide_id)
-        return f"Slide {ref.position} · {slide_title(ref)}" if ref else f"Slide {slide_id}"
+        return slide_label(slide_id, ref.position, slide_title(ref)) if ref else slide_label(slide_id)
 
     def owner(self, slide_id):
         return next((t for t in self.topics if slide_id in t.slides), None)

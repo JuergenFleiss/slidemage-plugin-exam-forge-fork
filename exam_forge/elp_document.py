@@ -115,6 +115,34 @@ def image_mime(raw: bytes) -> str | None:
     return None
 
 
+def figure(raw: bytes, mime: str, alt: str) -> str:
+    """An embedded image with its description as alt text and caption."""
+    encoded = base64.b64encode(raw).decode('ascii')
+    alt = _text(alt)
+    return (f'<figure><img src="data:{mime};base64,{encoded}" alt="{alt}">'
+            f'<figcaption>{alt}</figcaption></figure>')
+
+
+def assistant_note(note: str) -> str:
+    return ('<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
+            + _text(note) + '</aside>')
+
+
+def model_answer(answer: str, grading_notes: str) -> list[str]:
+    parts = ['<h3>Model answer</h3>', f'<div class="text model-answer">{_text(answer)}</div>']
+    if grading_notes:
+        parts += ['<h3>Grading notes</h3>', f'<div class="text grading-notes">{_text(grading_notes)}</div>']
+    return parts
+
+
+def key_option(text: str, correct: bool, rationale: str, title: str = '') -> str:
+    """One answer as the key shows it: its marker, text and rationale."""
+    rationale = f'<div class="text rationale">{_text(rationale)}</div>' if rationale else ''
+    title = f' title="{_text(title)}"' if title else ''
+    return (f'<li class="{"ok" if correct else "no"}"{title}>{marker(correct)}'
+            f'<div><div class="text option">{_text(text)}</div>{rationale}</div></li>')
+
+
 def _image(media: dict, attachments: dict) -> str:
     name = media['name']
     try:
@@ -126,10 +154,7 @@ def _image(media: dict, attachments: dict) -> str:
     mime = image_mime(raw)
     if mime is None:
         raise ValueError(f'Unsupported image {name}: use PNG, JPEG, GIF or WebP')
-    encoded = base64.b64encode(raw).decode('ascii')
-    alt = _text(media['alt'])
-    return (f'<figure><img src="data:{mime};base64,{encoded}" alt="{alt}">'
-            f'<figcaption>{alt}</figcaption></figure>')
+    return figure(raw, mime, media['alt'])
 
 
 def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bool) -> str:
@@ -140,29 +165,20 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
         f'<div class="text stem">{_text(item["stem"])}</div>', *images, '<ol>',
     ]
     if item.get('assistant_note'):
-        parts.insert(-1, '<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
-                     + _text(item['assistant_note']) + '</aside>')
+        parts.insert(-1, assistant_note(item['assistant_note']))
     if item.get('kind') == 'open':
         parts.pop()     # no answers to list: room to write, or the model answer in the key
         if key:
-            parts.append('<h3>Model answer</h3>')
-            parts.append(f'<div class="text model-answer">{_text(item["model_answer"])}</div>')
-            if item.get('grading_notes'):
-                parts.append('<h3>Grading notes</h3>')
-                parts.append(f'<div class="text grading-notes">{_text(item["grading_notes"])}</div>')
+            parts += model_answer(item['model_answer'], item.get('grading_notes'))
         else:
             parts.append('<div class="answer-space"></div>')
         parts.append('</section>')
         return '\n'.join(parts)
     for option in item['options']:
-        text = f'<div class="text option">{_text(option["text"])}</div>'
-        if not key:
-            parts.append(f'<li class="pl"><div>{text}</div></li>')
-            continue
-        rationale = (f'<div class="text rationale">{_text(option["rationale"])}</div>'
-                     if option['rationale'] else '')
-        parts.append(f'<li class="{"ok" if option["correct"] else "no"}" title="option {_text(option["id"])}">'
-                     f'{marker(option["correct"])}<div>{text}{rationale}</div></li>')
+        if key:
+            parts.append(key_option(option['text'], option['correct'], option['rationale'], f'option {option["id"]}'))
+        else:
+            parts.append(f'<li class="pl"><div><div class="text option">{_text(option["text"])}</div></div></li>')
     parts.extend(['</ol>', '</section>'])
     return '\n'.join(parts)
 
