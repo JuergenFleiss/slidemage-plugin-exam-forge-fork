@@ -14,6 +14,7 @@ from ..rules import AnswerRules
 from .editor import ItemEditor
 from .exam_tab import ExamTab
 from .export_menu import ExportMenu
+from .kit import tone_sheet
 from .questions_tab import QuestionsTab
 
 
@@ -58,7 +59,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 8)
         layout.setSpacing(8)
-        self.notice = host.caption("")
+        self.notice = host.caption("")  # The source check's status.
         self.notice.setWordWrap(True)
         self.check_button = host.Button("Check slides")
         self.check_button.clicked.connect(self.check_sources)
@@ -87,12 +88,13 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         foot.addWidget(self.folder_label, 1)
         foot.addWidget(self.checked_label)
         layout.addLayout(foot)
+        self.retheme()
         self.load_topics()
         self.load_answer_rules()
         self.reload()
         self.load_slides()
         self.check_sources()
-        host.on_theme_changed(lambda _tokens: self.retheme())
+        host.on_theme_changed(lambda tokens: self.retheme())
 
     # The host window is what opens and closes.
 
@@ -122,7 +124,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         return super().eventFilter(obj, event)
 
     def toast(self, text):
-        self.notice.setText(text)
+        """Something went well."""
         self.host.toast(self.shell, text)
 
     def show_export_menu(self):
@@ -180,7 +182,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         return True
 
     def error(self, error):
-        self.notice.setText(str(error))
+        """Something failed or was refused."""
         self.host.show_message(str(error), error=True)
 
     def when_idle(self, callback):
@@ -217,13 +219,5 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.host.run_in_background(work, completed)
 
     def retheme(self):
-        if hasattr(self, "topic_list"):
-            self.tint(self.changed_label)
-            self.tint(self.draft_button, True)
-            self.restyle_editor()
-            self.render()
-
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange:
-            self.retheme()
+        """Every tone's colour in the host's theme, in one stylesheet that the tagged widgets and the dialogs share."""
+        self.setStyleSheet(tone_sheet(self.host.theme().dark))

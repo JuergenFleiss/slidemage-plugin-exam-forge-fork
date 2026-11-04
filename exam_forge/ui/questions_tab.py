@@ -5,19 +5,16 @@ export.
 The middle column lists the slides, each with its number of questions, or the questions themselves."""
 from dataclasses import replace
 from datetime import datetime
-from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
-    QLabel,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -25,26 +22,20 @@ from PySide6.QtWidgets import (
 )
 
 from ..bank import BankError, atomic_write_bytes
-from ..model import KINDS, USES, plural, slide_ids, slide_label, topic_of
+from ..model import KINDS, STATUS, USES, agree, ai_draft, deck_order, plural, slide_ids, slide_label, topic_of
 from ..moodle_xml import export_moodle_xml
 from ..question_document import questions_html
 from ..rules import question_issues
 from ..sources import check_bank, fresh_deck, link_slide
 from ..table_export import questions_csv
 from .drafting import DraftDialog
-from .editor import Box, accent_color, is_dark, topic_color
+from .kit import Box, Fit, confirm, deck_language, dot, label, line, passive, row, slide_title, source_details, tone
 from .review_changes import ReviewChangesDialog
 from .topic_dialog import TopicDialog
-from .work import slide_title
 
 KEY = Qt.ItemDataRole.UserRole
 REVIEW = ("attention", "unlinked")
-STATUS = {"draft": ("Draft", "neutral"), "reviewed": ("Reviewed", "ok"), "retired": ("Retired", "muted")}
 FOCUS = (("slides", "Slides"), ("questions", "Questions"))
-
-
-def ai_draft(item):
-    return item.status == "draft" and "ai" in (item.origin.kind, item.ai_edit.kind)
 
 
 def off_rules(item, rules):
@@ -54,73 +45,6 @@ def off_rules(item, rules):
 
 def needs_attention(item, rules):
     return (item.source_changed and item.status != "retired") or ai_draft(item) or off_rules(item, rules)
-
-
-def retired_last(items):
-    return sorted(items, key=lambda item: item.status == "retired")
-
-
-def passive(widget):
-    widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-    return widget
-
-
-def label(host, text="", *, role="body", wrap=False, clip=False):
-    widget = host.Label(text, role)
-    widget.setWordWrap(wrap)
-    if clip:  # A long title is cut off by the column instead of widening it.
-        widget.setMinimumWidth(0)
-        widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-    return widget
-
-
-def line(*parts):
-    box = QHBoxLayout()
-    box.setSpacing(6)
-    for part in parts:
-        box.addWidget(part)
-    box.addStretch()
-    return box
-
-
-def row(lead=(), body=()):
-    """A list row: leading widgets, then a column of lines."""
-    widget = Box()
-    outer = QHBoxLayout(widget)
-    outer.setContentsMargins(6, 4, 6, 4)
-    for part in lead:
-        outer.addWidget(part)
-    column = QVBoxLayout()
-    column.setSpacing(2)
-    for part in body:
-        column.addLayout(part) if isinstance(part, QHBoxLayout) else column.addWidget(part)
-    outer.addLayout(column, 1)
-    return widget
-
-
-class Fit(QObject):
-    """Row heights follow the list's width, so wrapped text is never clipped."""
-
-    def __init__(self, listw):
-        super().__init__(listw)
-        self.listw, self.width = listw, -1
-        listw.viewport().installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Resize and obj.width() != self.width:
-            self.refit()
-        return False
-
-    def refit(self):
-        self.width = self.listw.viewport().width()
-        width = self.width - 2 * self.listw.spacing()
-        for index in range(self.listw.count()):
-            entry = self.listw.item(index)
-            widget = self.listw.itemWidget(entry)
-            if widget is not None:
-                layout = widget.layout()
-                height = layout.totalHeightForWidth(width) if layout.hasHeightForWidth() else 0
-                entry.setSizeHint(QSize(width, max(height, widget.sizeHint().height())))
 
 
 class QuestionsTab:
@@ -161,10 +85,13 @@ class QuestionsTab:
         body.setContentsMargins(10, 4, 4, 0)
         head = QHBoxLayout()
         titles = QVBoxLayout()
-        self.crumb = host.caption("")
-        self.crumb.setTextFormat(Qt.TextFormat.RichText)
+        self.crumb_dot, self.crumb = dot(), host.caption("")
+        crumb = QHBoxLayout()
+        crumb.setSpacing(4)
+        crumb.addWidget(self.crumb_dot)
+        crumb.addWidget(self.crumb, 1)
         self.slide_title = label(host, role="title", clip=True)
-        titles.addWidget(self.crumb)
+        titles.addLayout(crumb)
         titles.addWidget(self.slide_title)
         head.addLayout(titles, 1)
         self.open_button = host.Button("Open slide", compact=True)
@@ -174,9 +101,8 @@ class QuestionsTab:
         self.changed_bar = Box()
         bar = QHBoxLayout(self.changed_bar)
         bar.setContentsMargins(0, 0, 0, 0)
-        self.changed_label = host.Label("")
+        self.changed_label = tone(host.Label(""), "violet")
         self.changed_label.setWordWrap(True)
-        self.tint(self.changed_label)
         self.review_button = host.Button("Review changes", compact=True)
         self.review_button.clicked.connect(self.review_slide)
         bar.addWidget(self.changed_label, 1)
@@ -184,8 +110,7 @@ class QuestionsTab:
         body.addWidget(self.changed_bar)
         self.empty_label = host.Label("No questions on this slide yet.", "secondary")
         body.addWidget(self.empty_label)
-        self.draft_button = host.Button("✦ Draft with AI")
-        self.tint(self.draft_button, True)
+        self.draft_button = tone(host.Button("✦ Draft with AI"), "amber")
         self.draft_button.clicked.connect(self.draft_with_ai)
         self.write_button = host.Button("Write question", "primary")
         self.write_button.clicked.connect(self.write_question)
@@ -258,20 +183,20 @@ class QuestionsTab:
         if self.view == "attention":
             return [item for item in self.items if needs_attention(item, self.answer_rules)]
         if self.view == "unlinked":
-            return retired_last(self.unlinked())
+            return self.in_deck_order(self.unlinked())
         return self.view_questions() if self.focus == "questions" else []
 
+    def in_deck_order(self, items):
+        positions = {ref.id: n for n, ref in enumerate(self.slides or ())}
+        return sorted(items, key=lambda item: deck_order(item, positions))
+
     def view_questions(self):
-        """The questions a topic row counts, in deck order of their first slide; retired ones last."""
+        """The questions a topic row counts, in deck order."""
         if self.view == "all":
-            mine = self.items
-        else:
-            topic = self.topic_by_id(self.view)
-            mine = [item for item in self.items if item.sources
-                    and getattr(topic_of(item, self.topics), "id", None) == getattr(topic, "id", None)]
-        order = {ref.id: n for n, ref in enumerate(self.slides or ())}
-        first = {item.id: order.get(next(iter(slide_ids(item)), None), len(order)) for item in mine}
-        return retired_last(sorted(mine, key=lambda item: first[item.id]))
+            return self.in_deck_order(self.items)
+        topic = self.topic_by_id(self.view)
+        return self.in_deck_order([item for item in self.items if item.sources and getattr(
+            topic_of(item, self.topics), "id", None) == getattr(topic, "id", None)])
 
     def listing(self):
         """Whether the middle column lists questions rather than slides."""
@@ -333,23 +258,10 @@ class QuestionsTab:
             if hasattr(widget, "set_selected"):
                 widget.set_selected(True)
 
-    def dot(self, topic):
-        text = f"<span style='color:{topic_color(topic.color, is_dark(self))}'>●</span>" if topic else ""
-        widget = QLabel(text)
-        widget.setTextFormat(Qt.TextFormat.RichText)
-        widget.setFixedWidth(14)
-        return passive(widget)
-
-    def tint(self, widget, amber=False):
-        # Read the window's palette: a widget that is not yet in the window still has the application's.
-        widget.setStyleSheet(f"color: {accent_color(self, amber)};")
-
-    def chip(self, text, tone="neutral", amber=None):
-        chip = self.host.Chip(text, tone)
+    def chip(self, text, chip_tone="neutral", accent=""):
+        chip = self.host.Chip(text, chip_tone)
         chip.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        if amber is not None:
-            self.tint(chip, amber)
-        return passive(chip)
+        return passive(tone(chip, accent))
 
     def render_topics(self):
         host, items = self.host, self.items
@@ -363,7 +275,7 @@ class QuestionsTab:
             widget = host.RowButton(title, subtitle)
             widget.layout().setContentsMargins(8, 7, 8, 7)
             widget.layout().setSpacing(8)
-            widget.layout().insertWidget(0, self.dot(topic))
+            widget.layout().insertWidget(0, dot(topic))
             if badge:
                 widget.layout().addWidget(passive(host.Badge(str(badge))))
             if edit:
@@ -420,15 +332,15 @@ class QuestionsTab:
                 return
             for ref in self.view_slides():
                 mine = by_slide.get(ref.id, [])
-                chips = [self.chip("Changed", amber=False)] if any(ref.id in self.changed_on(i) for i in mine) else []
+                chips = [self.chip("Changed", accent="violet")] if any(ref.id in self.changed_on(i) for i in mine) else []
                 drafts = sum(ai_draft(i) for i in mine)
                 if drafts:
-                    chips.append(self.chip(plural(drafts, "AI draft"), amber=True))
+                    chips.append(self.chip(plural(drafts, "AI draft"), accent="amber"))
                 text = plural(len(mine), "question") if mine else "No questions yet"
                 widget = self.host.RowButton(slide_title(ref), text)
                 widget.layout().setContentsMargins(8, 7, 8, 7)
                 widget.layout().setSpacing(8)
-                widget.layout().insertWidget(0, self.dot(self.owner(ref.id)))
+                widget.layout().insertWidget(0, dot(self.owner(ref.id)))
                 widget.layout().insertWidget(0, self.chip(str(ref.position or "·"), "muted"))
                 for chip in chips:
                     widget.layout().addWidget(chip)
@@ -457,11 +369,11 @@ class QuestionsTab:
         if item.media:
             chips.append(self.chip(plural(len(item.media), "image"), "muted"))
         if ai_draft(item):
-            chips.append(self.chip("AI draft", amber=True))
+            chips.append(self.chip("AI draft", accent="amber"))
         if off_rules(item, self.answer_rules):
             chips.append(self.chip("Off the answer rules", "warning"))
         if item.source_changed and item.status != "retired":
-            chips.append(self.chip("Slide changed", amber=False))
+            chips.append(self.chip("Slide changed", accent="violet"))
         review = self.listing()
         others = [s for s in slide_ids(item) if review or s != self.sel_slide]
         if others:
@@ -492,16 +404,15 @@ class QuestionsTab:
         if slide is None:
             return
         ref, topic = self.slide_ref(slide), self.owner(slide)
-        where = escape(topic.name) if topic else "No topic"
-        number = f" · slide {ref.position}" if ref else ""
-        self.crumb.setText(f"{self.dot(topic).text()} {where}{number}")
+        dot(topic, self.crumb_dot)
+        self.crumb.setText((topic.name if topic else "No topic") + (f" · slide {ref.position}" if ref else ""))
         self.slide_title.setText((slide_title(ref)) if ref else f"Slide {slide}")
         self.open_button.setEnabled(ref is not None)
-        mine = retired_last([i for i in self.items if slide in slide_ids(i)])
+        mine = self.in_deck_order([i for i in self.items if slide in slide_ids(i)])
         changed = [i for i in mine if slide in self.changed_on(i)]
         self.changed_bar.setVisible(bool(changed))
         self.changed_label.setText(f"This slide changed after {plural(len(changed), 'question')} "
-                                   f"{'was' if len(changed) == 1 else 'were'} written.")
+                                   f"{agree(len(changed), 'was', 'were')} written.")
         self.empty_label.setVisible(not mine)
         self.cards.setVisible(bool(mine))
         chosen = self.cards.currentItem()
@@ -746,9 +657,7 @@ class QuestionsTab:
                 slides = [s for d in drafts for s in slide_ids(d)]
                 if slides:
                     self.select(slides[0])
-                message = f"{plural(len(drafts), 'AI draft')} added · review before use"
-                self.toast(message)
-                self.host.show_message(message)
+                self.toast(f"{plural(len(drafts), 'AI draft')} added · review before use")
 
             self.work(lambda: [bank.create(item) for item in items], saved)
 
@@ -772,10 +681,7 @@ class QuestionsTab:
     def load_slides(self):
         self.slide_gen += 1
         generation, host, deck = self.slide_gen, self.host, self.deck
-        try:
-            language = host.deck_language(deck)
-        except Exception:
-            language = "en"
+        language = deck_language(host, deck)
 
         def done(refs, error):
             if generation != self.slide_gen:
@@ -795,13 +701,21 @@ class QuestionsTab:
     def check_sources(self, *_, then=None, item_ids=None):
         if self.busy:
             return
+        self.set_busy(True)
         self.notice.setText("Checking sources…")
         host, deck, bank = self.host, self.deck, self.bank
 
-        def checked(report):
-            self.checked_at = datetime.now()
-            self.reload()
+        def checked(report, error):
+            self.set_busy(False)
+            if error is None:
+                self.checked_at = datetime.now()
+            self.reload()      # A failed check may have recorded some questions before it stopped.
             self.load_slides()
+            if error is not None:
+                self.notice.setText("The source check did not finish.")
+                self.error(error)
+                return
+            self.notice.setText(f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}.")
             if report.errors:
                 self.error("\n".join(map(str, report.errors)))
                 return
@@ -812,11 +726,10 @@ class QuestionsTab:
                     self.current = replace(self.current, changed_slides=latest.changed_slides)
                     self.baseline = replace(self.baseline, changed_slides=latest.changed_slides)
                     self.update_header(self.current)
-            self.notice.setText(f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}.")
             if then:
                 then(report)
 
-        self.work(lambda: check_bank(host, fresh_deck(deck), bank, item_ids), checked)
+        host.run_in_background(lambda: check_bank(host, fresh_deck(deck), bank, item_ids), checked)
 
     def export(self):
         if not self.may_leave():
@@ -830,20 +743,16 @@ class QuestionsTab:
         items = [item for item in reviewed if not question_issues(item, self.answer_rules)]
         skipped = len(reviewed) - len(items)
         left_out = (f" {plural(skipped, 'reviewed question')} that no longer fit the answer rules "
-                    f"{'was' if skipped == 1 else 'were'} left out.") if skipped else ""
+                    f"{agree(skipped, 'was', 'were')} left out.") if skipped else ""
         if not items:
             self.error("No reviewed revision-quiz questions to export." + left_out)
             return
         changed = [checked for checked in report.items if checked.item in items and checked.source_changed]
         if changed:
-            details = [f"• {checked.item.stem} ({checked.item.id}): {source.source.slide_id} "
-                       f"({source.source.view}, {source.source.language}) — {source.status} {source.message}"
-                       for checked in changed for source in checked.sources if source.status != "unchanged"]
-            answer = QMessageBox.warning(self, "Source changed", "Changed sources:\n" +
-                                         "\n".join(details) +
-                                         "\n\nContinue exporting?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                         QMessageBox.StandardButton.No)
-            if answer != QMessageBox.StandardButton.Yes:
+            details = [f"• {checked.item.stem} ({checked.item.id}): {line}"
+                       for checked in changed for line in source_details(checked)]
+            if not confirm(self, "Source changed", "Changed sources:\n" + "\n".join(details) + "\n\nContinue exporting?",
+                           warning=True):
                 return
         filename, _ = QFileDialog.getSaveFileName(self, "Export reviewed revision questions",
                                                   str(self.bank.folder / "revision-quiz.xml"), "Moodle XML (*.xml)")
@@ -873,11 +782,7 @@ class QuestionsTab:
 
     def export_html(self):
         """Every question of the bank, with its answers and rationales, as one HTML page like the exam key."""
-        bank = self.bank
-        try:
-            language = self.host.deck_language(self.deck)
-        except Exception:  # noqa: BLE001 - the page's language is only a hint for screen readers
-            language = "en"
+        bank, language = self.bank, deck_language(self.host, self.deck)
         self.export_all(".html", "HTML page (*.html)", lambda items, topics, slides: questions_html(
             items, topics, slides, bank.read_media, language).encode("utf-8"))
 
@@ -906,7 +811,7 @@ class QuestionsTab:
                 self.error(error)
             elif counts[1]:
                 self.error(f"Exported {plural(counts[0], 'question')} to {filename}; {plural(counts[1], 'question')} "
-                           f"could not be read and {'is' if counts[1] == 1 else 'are'} missing.")
+                           f"could not be read and {agree(counts[1], 'is', 'are')} missing.")
             else:
                 self.toast(f"Exported {plural(counts[0], 'question')} to {filename}. "
                            "It holds the answers: keep it private.")

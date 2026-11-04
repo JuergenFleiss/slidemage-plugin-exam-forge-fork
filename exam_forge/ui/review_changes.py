@@ -13,8 +13,7 @@ from slidemage.plugin_api import AiChatError
 from ..ai_support import NO_REPLY, ai_service
 from ..drafting import DraftReplyError, build_update_request, parse_update_reply
 from ..sources import SlideIndex, fresh_deck, rebaseline_links, word_diff
-from .editor import accent, accent_color
-from .sheet import Sheet
+from .kit import Sheet, color, tone
 
 
 def ordered(item, slide_id):
@@ -168,14 +167,14 @@ class ReviewChangesDialog(Sheet):
         self.new_pane.setHtml("".join(new))
 
     def html(self, segments, side):
-        color = accent_color(self.new_pane)
+        added = color(self.host, "violet")
         out = []
         for text, changed in segments:
             part = escape(text).replace("\n", "<br>")
             if changed and side == "old":
                 part = f'<span style="text-decoration: line-through;">{part}</span>'
             elif changed:
-                part = f'<span style="color: {color}; font-weight: 600; text-decoration: underline;">{part}</span>'
+                part = f'<span style="color: {added}; font-weight: 600; text-decoration: underline;">{part}</span>'
             out.append(part)
         return f'<div style="white-space: pre-wrap;">{"".join(out)}</div>'
 
@@ -192,8 +191,7 @@ class ReviewChangesDialog(Sheet):
         if chip and not error:
             if row.chip:
                 row.chip.deleteLater()
-            row.chip = self.host.Chip(chip)
-            accent(row.chip, amber)
+            row.chip = tone(self.host.Chip(chip), "amber" if amber else "violet")
             row.chips.addWidget(row.chip)
             row.resolved = True
         row.say(str(error) if error else "")

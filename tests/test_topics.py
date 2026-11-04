@@ -7,7 +7,7 @@ import pytest
 from exam_forge.bank import CorruptFileError, SchemaError, TopicStore
 from exam_forge.model import (PALETTE, Item, SourceLink, Topic, add_topic, assign_slide, delete_topic, next_color,
                               rename_topic, topic_of)
-from exam_forge.ui.editor import topic_color
+from exam_forge.ui.kit import TONES
 
 
 def item(*slides):
@@ -16,9 +16,8 @@ def item(*slides):
 
 def test_topic_colours_never_use_the_violet_or_amber_accents():
     for key in PALETTE:
-        assert topic_color(key, True) != topic_color(key, False)
-        for dark in (False, True):
-            assert topic_color(key, dark).lower() not in ("#7040ac", "#c4b5fd", "#8a5000", "#fbbf24")
+        light, dark = TONES[key]
+        assert light != dark and not {light, dark} & {*TONES["violet"], *TONES["amber"], *TONES["error"]}
 
 
 def test_topic_validation():

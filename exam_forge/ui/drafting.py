@@ -17,8 +17,7 @@ from ..ai_support import NO_REPLY, ai_service
 from ..drafting import DraftReplyError, build_request, parse_reply
 from ..model import KINDS, SourceLink, plural
 from ..sources import VIEWS, fingerprint, fresh_deck
-from .sheet import Sheet
-from .work import slide_title
+from .kit import Sheet, deck_language, slide_title
 
 VIEW_NAMES = ("Instructor view", "During course", "After course")
 
@@ -81,12 +80,9 @@ class DraftDialog(Sheet):
         self.view, self.language = QComboBox(), QComboBox()
         for label, value in zip(VIEW_NAMES, VIEWS):
             self.view.addItem(label, value)
-        codes = list(host.project_languages())          # the main language first: the default
-        try:
-            own = host.deck_language(deck)
-            codes += [] if own in codes else [own]       # the deck's own, should it be another
-        except Exception:
-            own = codes[0]
+        codes = list(host.project_languages())          # the main language first
+        own = deck_language(host, deck)
+        codes += [] if own in codes else [own]           # the deck's own, should it be another
         self.language.addItems(codes)
         self.language.setCurrentText(own)
         for label, field in (("How many", self.count), ("For", self.use),

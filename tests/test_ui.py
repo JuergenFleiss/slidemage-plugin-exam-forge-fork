@@ -44,13 +44,13 @@ def test_editing_a_reviewed_question_creates_a_draft_revision_with_its_image(env
 
 
 def test_conflict_keeps_every_field(env):
-    _, _, bank, _, window = env
+    host, _, bank, _, window = env
     item = fill(window)
     window.stem.setPlainText("My unsaved text")
     window.rows[1].why.setPlainText("Typed rationale")
     window.difficulty.setCurrentData("hard")
     bank.save(replace(item, stem="Their edit"))
-    assert not window.save() and "stale revision" in window.notice.text()
+    assert not window.save() and "stale revision" in host.messages[-1][0]
     assert window.stem.toPlainText() == "My unsaved text" and window.rows[1].why.toPlainText() == "Typed rationale"
     assert window.difficulty.currentData() == "hard" and bank.get(item.id).stem == "Their edit"
 
@@ -101,11 +101,12 @@ def test_a_failed_check_or_an_edit_during_it_cannot_approve(env):
     window.change_status("reviewed")
     bank.save(replace(item, stem="Edited elsewhere during check"))
     host.drain()
-    assert bank.get(item.id).status == "draft" and "changed during the check" in window.notice.text()
+    assert bank.get(item.id).status == "draft" and "changed during the check" in host.messages[-1][0]
     deck.path.unlink()
     window.check_sources()
     host.drain()
     assert not window.busy and host.messages[-1][1] and window.stem.toPlainText() == item.stem
+    assert window.notice.text() == "The source check did not finish."
 
 
 def test_moodle_export_has_bank_media_and_leaves_out_exam_draft_and_retired(env, tmp_path, monkeypatch):
@@ -134,7 +135,7 @@ def test_moodle_export_has_bank_media_and_leaves_out_exam_draft_and_retired(env,
     (bank.folder / "media" / media.name).write_bytes(b"changed")  # A hash failure keeps the old export.
     window.export()
     host.drain()
-    assert path.read_bytes() == xml and "hash mismatch" in window.notice.text()
+    assert path.read_bytes() == xml and "hash mismatch" in host.messages[-1][0]
 
 
 def test_export_rechecks_the_bank_and_the_slides(env, tmp_path, monkeypatch):
@@ -153,7 +154,7 @@ def test_export_rechecks_the_bank_and_the_slides(env, tmp_path, monkeypatch):
     bank.save(replace(bank.get(item.id), stem="Changed elsewhere", status="draft", use="elp"))
     window.export()
     host.drain()
-    assert not path.exists() and "No reviewed" in window.notice.text()
+    assert not path.exists() and "No reviewed" in host.messages[-1][0]
 
 
 # -- the bank folder ----------------------------------------------------------------------------------------
@@ -164,7 +165,7 @@ def test_a_missing_bank_asks_for_its_new_folder_and_keeps_the_editor(env, tmp_pa
     fill(window)
     window.stem.setPlainText("Unsaved")
     (bank.folder / "bank.json").unlink()
-    monkeypatch.setattr("exam_forge.ui.first_use.QFileDialog.getExistingDirectory", lambda *a: "")
+    monkeypatch.setattr("exam_forge.ui.controller.QFileDialog.getExistingDirectory", lambda *a: "")
     assert controller.open(deck) is None and window.stem.toPlainText() == "Unsaved"
     relocated = tmp_path / "relocated"
     relocated.mkdir()
@@ -172,7 +173,7 @@ def test_a_missing_bank_asks_for_its_new_folder_and_keeps_the_editor(env, tmp_pa
     host = GuiHost(tmp_path / "other")
     host.root.mkdir()
     host.settings().set("bank_folders", {str(deck.path.resolve()): str(tmp_path / "missing")})
-    monkeypatch.setattr("exam_forge.ui.first_use.QFileDialog.getExistingDirectory", lambda *a: str(relocated))
+    monkeypatch.setattr("exam_forge.ui.controller.QFileDialog.getExistingDirectory", lambda *a: str(relocated))
     other = activate(host).open(deck)
     host.drain()
     assert other.bank.id == existing.id
@@ -182,7 +183,7 @@ def test_a_missing_bank_asks_for_its_new_folder_and_keeps_the_editor(env, tmp_pa
 
 
 def change_folder(host, deck, monkeypatch, folder):
-    monkeypatch.setattr("exam_forge.ui.first_use.QFileDialog.getExistingDirectory", lambda *a: str(folder))
+    monkeypatch.setattr("exam_forge.ui.controller.QFileDialog.getExistingDirectory", lambda *a: str(folder))
     host.current_focus = Focus(deck.path, None, "slide")
     page = host.settings_tabs["Exam Forge"]()
     next(b for b in page.findChildren(QPushButton) if b.text() == "Change folder…").click()
@@ -213,7 +214,7 @@ def test_a_folder_with_a_bank_is_used_only_after_asking(env, tmp_path, monkeypat
     other.mkdir()
     existing = Bank(other, create=True)
     answers = [QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes]
-    monkeypatch.setattr("exam_forge.ui.first_use.QMessageBox.question", lambda *a: answers.pop(0))
+    monkeypatch.setattr("exam_forge.ui.kit.QMessageBox.question", lambda *a: answers.pop(0))
     change_folder(host, deck, monkeypatch, other)
     assert window.bank.folder == bank.folder
     change_folder(host, deck, monkeypatch, other)

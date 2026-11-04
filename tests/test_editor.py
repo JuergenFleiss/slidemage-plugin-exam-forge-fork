@@ -4,12 +4,13 @@
 from dataclasses import replace
 
 from fake_host import fill, revision, source
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QLabel, QMessageBox
 from slidemage.plugin_api import SlideSource
 
 from exam_forge.model import Item, Option, Origin
-from exam_forge.ui.editor import accent_color, red_color, reviewed_issues
+from exam_forge.ui.editor import reviewed_issues
+from exam_forge.ui.kit import TONES
 
 
 def ticks(window):
@@ -111,7 +112,7 @@ def test_still_correct_on_a_stale_revision_keeps_the_fields(env):
     window.baseline = window.candidate()  # No unsaved changes, but the revision is stale.
     window.still_button.click()
     host.drain()
-    assert "stale revision" in window.notice.text() and window.stem.toPlainText() == "Typed"
+    assert "stale revision" in host.messages[-1][0] and window.stem.toPlainText() == "Typed"
 
 
 def test_back_asks_about_unsaved_edits(env, monkeypatch):
@@ -146,21 +147,26 @@ def test_the_link_grid_lists_the_decks_slides_and_links_in_the_instructor_view(e
     assert "link a slide" in window.status_line.text()
 
 
-def test_ai_chips_and_the_dark_palette_recolour_text_only(env):
-    _, _, bank, _, window = env
+def text_color(widget):
+    widget.ensurePolished()
+    return widget.palette().color(QPalette.ColorRole.WindowText).name()
+
+
+def test_ai_chips_and_the_dark_theme_recolour_text_only(env):
+    host, _, bank, _, window = env
     ai = bank.create(Item("ai", 1, "AI", (Option("a", "x", True), Option("b", "y")), origin=Origin("ai", "r", "m")))
     window.populate(ai)
     assert window.draft_tag.isVisible() and not window.ai_tag.isVisible()
-    assert red_color(window) == "#a8231a" and accent_color(window, True) in window.draft_tag.styleSheet()
-    palette = window.palette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eeeeee"))
-    window.setPalette(palette)
-    assert "#fbbf24" in window.draft_tag.styleSheet() and "#c4b5fd" in window.source_banner.styleSheet()
-    assert red_color(window) == "#fca5a5" and red_color(window) in window.status_line.styleSheet()
-    assert all("background" not in w.styleSheet() for w in (window.editor, window.stem, window.status_line))
+    chip_text = window.draft_tag.findChild(QLabel)
+    assert text_color(chip_text) == TONES["amber"][0] and text_color(window.status_line) == TONES["error"][0]
+    host.set_dark(True)
+    assert text_color(chip_text) == TONES["amber"][1] and text_color(window.status_line) == TONES["error"][1]
+    assert text_color(window.source_banner) == TONES["violet"][1]
+    assert "background" not in window.styleSheet() and window.draft_tag.styleSheet() == ""
     window.populate(bank.set_status("ai", 1, "reviewed"))
     assert window.ai_tag.isVisible() and not window.draft_tag.isVisible() and window.ai_tag.toolTip() == "r · m"
     edited = bank.create(Item("edit", 1, "E", ai.options, ai_edit=Origin("ai", "route", "mod")))
-    window.populate(edited)
+    window.populate(edited)  # Updated by the AI: an AI draft until it is reviewed, like its card.
+    assert window.draft_tag.isVisible() and not window.ai_tag.isVisible() and window.draft_tag.toolTip() == "route · mod"
+    window.populate(bank.set_status("edit", 1, "reviewed"))
     assert window.ai_tag.isVisible() and window.ai_tag.toolTip() == "route · mod"

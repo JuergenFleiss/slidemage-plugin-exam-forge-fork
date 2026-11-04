@@ -2,19 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Create, rename, fill and delete a topic. Nothing is written until Done or Delete topic."""
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QScrollArea,
-)
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLineEdit
 
 from ..model import add_topic, assign_slide, delete_topic, next_color, rename_topic
-from .editor import is_dark, red_color, topic_color
-from .sheet import Sheet
-from .work import SCROLL_STYLE, slide_title
+from .kit import Sheet, confirm, dot, scroll_area, slide_title, tone
 
 
 class TopicDialog(Sheet):
@@ -30,22 +21,15 @@ class TopicDialog(Sheet):
         self.name = QLineEdit(topic.name if topic else "")
         layout.addWidget(host.Field("Name", self.name))
         layout.addWidget(host.caption("Slides in this topic. A slide belongs to one topic; ticking one takes it over."))
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(SCROLL_STYLE)
         grid_host = host.Surface()
         self.grid = QGridLayout(grid_host)
-        scroll.setWidget(grid_host)
-        layout.addWidget(scroll, 1)
+        layout.addWidget(scroll_area(grid_host), 1)
         slides = shell.slides or []
         if not slides:
             self.grid.addWidget(host.caption("No slides found in this deck yet."), 0, 0)
         for index, ref in enumerate(slides):
             cell = QHBoxLayout()
-            dot = QLabel()
-            dot.setTextFormat(Qt.TextFormat.RichText)
+            mark = dot()
             title = f"{ref.position} · {slide_title(ref)}"
             button = host.Button(title, compact=True)
             button.setText(button.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, 240))
@@ -53,12 +37,12 @@ class TopicDialog(Sheet):
             button.setCheckable(True)
             button.setChecked(ref.id in self.initial)
             button.toggled.connect(self.recolor)
-            cell.addWidget(dot)
+            cell.addWidget(mark)
             cell.addWidget(button, 1)
             self.grid.addLayout(cell, index // 2, index % 2)
-            self.buttons[ref.id], self.dots[ref.id] = button, dot
+            self.buttons[ref.id], self.dots[ref.id] = button, mark
         self.grid.setRowStretch(self.grid.rowCount(), 1)
-        self.problem = host.caption("")
+        self.problem = tone(host.caption(""), "error")
         self.problem.setWordWrap(True)
         self.problem.hide()
         layout.addWidget(self.problem)
@@ -70,26 +54,19 @@ class TopicDialog(Sheet):
         self.done_button.clicked.connect(self.finish)
         self.recolor()
 
-    def own_color(self):
-        key = self.topic.color if self.topic else next_color(self.shell.topics)
-        return topic_color(key, is_dark(self.shell))
-
     def recolor(self, *_):
-        dark = is_dark(self.shell)
-        for slide, dot in self.dots.items():
+        """A ticked slide shows this topic's dot; another topic's slide shows that one's."""
+        own = self.topic.color if self.topic else next_color(self.shell.topics)
+        for slide, mark in self.dots.items():
             owner = self.shell.owner(slide)
-            if self.buttons[slide].isChecked():
-                color = self.own_color()
-            else:
-                color = topic_color(owner.color, dark) if owner and (not self.topic or owner.id != self.topic.id) else ""
-            dot.setText(f"<span style='color:{color}'>●</span>" if color else "")
-            dot.setFixedWidth(14)
+            other = owner if owner and (self.topic is None or owner.id != self.topic.id) else None
+            color = own if self.buttons[slide].isChecked() else other.color if other else ""
+            mark.setText("●" if color else "")
+            tone(mark, color)
 
     def say(self, text):
         self.problem.setText(text)
         self.problem.setVisible(bool(text))
-        if text:
-            self.problem.setStyleSheet(f"color: {red_color(self.shell)};")
 
     def finish(self):
         name = self.name.text().strip()
@@ -116,8 +93,6 @@ class TopicDialog(Sheet):
             self.accept()
 
     def delete(self):
-        answer = QMessageBox.question(self.sheet, "Delete topic", f"Delete the topic \"{self.topic.name}\"? Its slides will have "
-                                      "no topic. Questions are kept.", QMessageBox.StandardButton.Yes |
-                                      QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if answer == QMessageBox.StandardButton.Yes and self.shell.save_topics(delete_topic(self.shell.topics, self.topic.id)):
+        if (confirm(self.sheet, "Delete topic", f"Delete the topic \"{self.topic.name}\"? Its slides will have no topic. "
+                    "Questions are kept.") and self.shell.save_topics(delete_topic(self.shell.topics, self.topic.id))):
             self.accept()

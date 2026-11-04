@@ -3,15 +3,13 @@
 """Question editor for the bank window."""
 from dataclasses import replace
 from functools import partial
-from html import escape
 from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt, Signal
-from PySide6.QtGui import QGuiApplication, QPalette, QPixmap
+from PySide6.QtGui import QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -19,52 +17,32 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ..bank import BankError
-from ..model import IMAGE_NAMES, IMAGE_SUFFIXES, IMAGE_TYPES, KINDS, USES, Item, Option, image_type, topic_of
+from ..model import (
+    IMAGE_NAMES,
+    IMAGE_SUFFIXES,
+    IMAGE_TYPES,
+    KINDS,
+    STATUS,
+    USES,
+    Item,
+    Option,
+    ai_draft,
+    image_type,
+    topic_of,
+)
 from ..rules import describe, question_issues
 from ..sources import SlideIndex, Unresolved, fresh_deck, link_slide, rebaseline_links
-from .work import SCROLL_STYLE, slide_title
+from .kit import Box, Fold, Switch, clear, confirm, dot, scroll_area, slide_title, source_details, tone
 
 PRIVATE = "Only in the private key."
 IMAGE_FILTER = f"Images ({' '.join('*' + suffix for suffix in IMAGE_SUFFIXES)})"
 THUMB_WIDTH, THUMB_HEIGHT = 160, 100
 TA_WARNING = "Shared stem, exclusions or fixed option order. This appears in the exam file; do not put answers here."
-
-
-def is_dark(widget):
-    return widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
-
-
-def accent_color(widget, amber=False):
-    dark = is_dark(widget)
-    return (("#fbbf24" if dark else "#8a5000") if amber
-            else ("#c4b5fd" if dark else "#7040ac"))
-
-
-def red_color(widget):
-    return "#fca5a5" if is_dark(widget) else "#a8231a"
-
-
-# Topic colour key: (light, dark). Kept clear of the reserved violet and amber accents.
-_TOPIC_COLORS = {"blue": ("#1d4ed8", "#60a5fa"), "green": ("#15803d", "#4ade80"),
-                 "red": ("#b91c1c", "#f87171"), "teal": ("#0f766e", "#2dd4bf"),
-                 "pink": ("#be185d", "#f472b6"), "slate": ("#475569", "#94a3b8")}
-
-
-def topic_color(key, dark):
-    return _TOPIC_COLORS[key][1 if dark else 0]
-
-
-def accent(widget, amber=False):
-    # Only label foregrounds are explicit; surfaces and fields inherit the theme.
-    # A local stylesheet also reaches the QLabel inside a host Chip.
-    widget.setStyleSheet(f"color: {accent_color(widget, amber)};")
 
 
 def reviewed_issues(item, rules):
@@ -87,83 +65,6 @@ def set_chip(chip, text=None, tone=None):
         chip.set_text(text)
     if tone is not None:
         chip.set_tone(tone)
-
-
-class Switch(QWidget):
-    """Two-option switch. A value outside the options shows as unselected but is kept."""
-    changed = Signal()
-
-    def __init__(self, host, options, clearable=False):
-        super().__init__()
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        self.clearable, self.value = clearable, "" if clearable else options[0][1]
-        self.control = host.SegmentedControl([(value, label) for label, value in options])
-        self.buttons = dict(zip((value for _, value in options), self.control.buttons()))
-        self.control.changed.connect(self.pick)
-        row.addWidget(self.control)
-        row.addStretch()
-        self.sync()
-
-    def sync(self):
-        if self.value in self.buttons:
-            self.control.set_current(self.value)
-        else:
-            self.control.clear_current()
-
-    def currentData(self):
-        return self.value
-
-    def setCurrentData(self, value):
-        value = value or ""
-        changed = value != self.value
-        self.value = value
-        self.sync()
-        if changed:
-            self.changed.emit()
-
-    def pick(self, value):
-        self.setCurrentData("" if self.clearable and value == self.value else value)
-        self.sync()
-
-
-def clear(layout):
-    while layout.count():
-        child = layout.takeAt(0)
-        if child.widget():
-            child.widget().hide()       # deleted later: not shown in the meantime
-            child.widget().deleteLater()
-        elif child.layout():
-            clear(child.layout())
-
-
-class Box(QWidget):
-    """A container that shows what is behind it: the stylesheet paints the page colour on a plain QWidget only."""
-
-
-class Fold(QWidget):
-    def __init__(self, title):
-        super().__init__()
-        column = QVBoxLayout(self)
-        column.setContentsMargins(0, 0, 0, 0)
-        self.header = QToolButton()
-        self.header.setText(title)
-        self.header.setCheckable(True)
-        self.header.setAutoRaise(True)
-        self.header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.header.setArrowType(Qt.ArrowType.RightArrow)
-        self.header.toggled.connect(self.set_open)
-        self.content = Box()
-        self.content.hide()
-        self.box = QVBoxLayout(self.content)
-        self.box.setContentsMargins(0, 0, 0, 0)
-        column.addWidget(self.header)
-        column.addWidget(self.content)
-
-    def set_open(self, on):
-        self.header.setChecked(on)
-        self.content.setVisible(on)
-        self.header.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
 
 
 def png_bytes(image):
@@ -294,14 +195,8 @@ class ItemEditor:
         outer = card.layout()
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(SCROLL_STYLE)
-        outer.addWidget(scroll, 1)
         content = host.Page()
-        scroll.setWidget(content)
+        outer.addWidget(scroll_area(content), 1)
         body = content.body
         body.setContentsMargins(14, 10, 14, 10)
         self.back_button = host.Button("", compact=True)
@@ -313,15 +208,13 @@ class ItemEditor:
         self.status_chip = host.Chip("Draft")
         self.rev_chip = host.Chip("rev 1", "muted")
         self.ai_tag = host.Chip("AI-assisted", "muted")
-        self.draft_tag = host.Chip("AI draft")
-        accent(self.draft_tag, True)
+        self.draft_tag = tone(host.Chip("AI draft"), "amber")
         for chip in (self.draft_tag, self.ai_tag, self.status_chip, self.rev_chip):
             tags.addWidget(chip)
         tags.addStretch()
         body.addLayout(tags)
-        self.source_banner = host.Label("A linked slide changed after this question was written.")
+        self.source_banner = tone(host.Label("A linked slide changed after this question was written."), "violet")
         self.source_banner.setWordWrap(True)
-        accent(self.source_banner)
         self.compare_button = host.Button("Compare", compact=True)
         self.compare_button.clicked.connect(lambda: self.review_changes(self.current))
         self.still_button = host.Button("Still correct", compact=True)
@@ -394,9 +287,9 @@ class ItemEditor:
         head = QHBoxLayout()
         head.addWidget(host.Label("Linked slides", "heading"))
         head.addStretch()
-        self.topic_label = host.caption("")
-        self.topic_label.setTextFormat(Qt.TextFormat.RichText)
-        head.addWidget(self.topic_label)
+        self.topic_label, self.topic_dot, self.topic_name = host.caption(""), dot(), host.caption("")
+        for part in (self.topic_label, self.topic_dot, self.topic_name):
+            head.addWidget(part)
         body.addLayout(head)
         self.link_box = QVBoxLayout()
         body.addLayout(self.link_box)
@@ -460,7 +353,7 @@ class ItemEditor:
 
     def may_leave(self):
         if self.busy:
-            self.notice.setText("Wait for the current operation to finish.")
+            self.error("Wait for the current operation to finish.")
             return False
         if not self.dirty():
             return True
@@ -502,10 +395,7 @@ class ItemEditor:
         self.stem.setPlainText(item.stem)
         self.assistant_note.setPlainText(item.assistant_note)
         self.note_fold.set_open(bool(item.assistant_note))
-        for row in self.rows:
-            self.answers.removeWidget(row)
-            row.hide()
-            row.deleteLater()
+        clear(self.answers)
         self.rows = []
         for option in item.options:
             self.add_option(option)
@@ -526,16 +416,14 @@ class ItemEditor:
         self.refresh_footer()
 
     def update_header(self, item):
-        ai_edit = item.ai_edit.kind == "ai"
-        provenance = (f"{item.ai_edit.route} · {item.ai_edit.model}" if ai_edit
-                      else f"{item.origin.route} · {item.origin.model}")
-        draft = item.status == "draft"
-        self.ai_tag.setToolTip(provenance)
-        self.draft_tag.setToolTip(provenance)
-        self.ai_tag.setVisible(ai_edit or (item.origin.kind == "ai" and not draft))
-        self.draft_tag.setVisible(item.origin.kind == "ai" and draft)
-        tone = {"draft": "neutral", "reviewed": "ok", "retired": "muted"}[item.status]
-        set_chip(self.status_chip, "New question" if self.new_item else item.status.title(), tone)
+        # Like the cards: an AI draft until it is reviewed, AI-assisted for good after that.
+        source = item.ai_edit if item.ai_edit.kind == "ai" else item.origin
+        self.ai_tag.setToolTip(f"{source.route} · {source.model}")
+        self.draft_tag.setToolTip(f"{source.route} · {source.model}")
+        self.draft_tag.setVisible(ai_draft(item))
+        self.ai_tag.setVisible(source.kind == "ai" and not ai_draft(item))
+        name, chip_tone = STATUS[item.status]
+        set_chip(self.status_chip, "New question" if self.new_item else name, chip_tone)
         set_chip(self.rev_chip, f"rev {item.revision}")
         self.rev_chip.setVisible(not self.new_item)
         first = self.slide_ref(item.changed_slides[0]) if item.changed_slides else None
@@ -575,7 +463,7 @@ class ItemEditor:
             text = "Retired · restore it as a draft to edit or review again"
         shown = bool(issues and (dirty or status == "draft") or off_rules)
         self.status_line.setText(text)
-        self.status_line.setStyleSheet(f"color: {red_color(self)};" if shown else "")
+        tone(self.status_line, "error" if shown else "")
         reviewed_clean = status == "reviewed" and not dirty and not self.new_item
         self.retire_button.setVisible(reviewed_clean)
         self.retire_button.setEnabled(reviewed_clean)
@@ -584,14 +472,6 @@ class ItemEditor:
         self.save_button.setEnabled(dirty)
         self.approve_button.setText("Reviewed" if reviewed_clean else "Mark reviewed")
         self.approve_button.setEnabled(status != "retired" and not issues and not reviewed_clean)
-
-    def restyle_editor(self):
-        # Children get the new palette after the window's event, so read it from the window.
-        self.draft_tag.setStyleSheet(f"color: {accent_color(self, True)};")
-        self.source_banner.setStyleSheet(f"color: {accent_color(self)};")
-        if self.current is not None:
-            self.refresh_footer()
-            self.update_topic()
 
     # -- answers -------------------------------------------------------------------------------------------
 
@@ -613,7 +493,6 @@ class ItemEditor:
 
     def remove_option(self, row):
         self.rows.remove(row)
-        self.answers.removeWidget(row)
         row.hide()
         row.deleteLater()
         self.touch()
@@ -700,13 +579,9 @@ class ItemEditor:
                 self.error("Question changed during the check. Your editor is intact; save or reopen before continuing.")
                 return
             if checked.source_changed:
-                details = "\n".join(f"• {s.source.slide_id} ({s.source.view}, {s.source.language}): {s.status} {s.message}"
-                                    for s in checked.sources if s.status != "unchanged")
-                answer = QMessageBox.warning(self, "Source changed", f"{item.stem}\n\n{details}\n\n"
-                                             f"Continue and mark this question {target}? The Source changed flag remains.",
-                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                             QMessageBox.StandardButton.No)
-                if answer != QMessageBox.StandardButton.Yes:
+                details = "\n".join("• " + line for line in source_details(checked))
+                if not confirm(self, "Source changed", f"{item.stem}\n\n{details}\n\nContinue and mark this question "
+                               f"{target}? The Source changed flag remains.", warning=True):
                     return
             try:
                 updated = self.bank.set_status(item.id, item.revision, target)
@@ -763,11 +638,9 @@ class ItemEditor:
 
     def update_topic(self):
         topic = topic_of(self.candidate(), self.topics) if self.current is not None else None
-        if topic is None:
-            self.topic_label.setText("No topic")
-        else:
-            dot = f"<span style='color:{topic_color(topic.color, is_dark(self))}'>●</span>"
-            self.topic_label.setText(f"Topic from first slide: {dot} {escape(topic.name)}")
+        self.topic_label.setText("Topic from first slide:" if topic else "No topic")
+        dot(topic, self.topic_dot)
+        self.topic_name.setText(topic.name if topic else "")
 
     def remove_source(self, index, *_):
         self.links = tuple(s for i, s in enumerate(self.links) if i != index)
@@ -823,10 +696,7 @@ class ItemEditor:
     # -- images --------------------------------------------------------------------------------------------
 
     def render_media(self):
-        for row in self.image_rows:
-            self.media_box.removeWidget(row)
-            row.hide()
-            row.deleteLater()
+        clear(self.media_box)
         self.image_rows = []
         for media in self.attachments:
             try:

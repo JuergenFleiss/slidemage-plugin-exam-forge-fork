@@ -1,25 +1,28 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Third step: freeze the approved exam, save its documents, record corrections."""
+"""Third step: freeze the approved exam, save its documents, record corrections in a separate journal."""
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from PySide6.QtCore import QLockFile
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
-    QMessageBox,
+    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from ..elp_document import export_elp_documents
-from ..manifest import ChangedSourcesError, Manifest, freeze
+from ..manifest import ChangedSourcesError, Manifest, append_correction, freeze, read_corrections
 from ..model import plural
 from ..rules import exam_totals
 from ..sources import fresh_deck
-from .corrections import open_corrections
-from .editor import accent_color
+from .kit import Sheet, confirm, deck_language, tone
+
+_SHEETS = {}  # One correction sheet, and so one pending writer, per journal in this application.
 
 
 def issued_at(path):
@@ -60,8 +63,9 @@ class IssueView(QWidget):
         self.exam_button.clicked.connect(lambda: self.documents(0))
         self.key_button = self.host.Button("Save key HTML…")
         self.key_button.clicked.connect(lambda: self.documents(1))
-        self.key_title = self.host.Label("🔒 Private key", "heading")
-        self.key_text = self.host.Label("Answers, rationales and the scoring sheet. Keep this file private.")
+        self.key_title = tone(self.host.Label("🔒 Private key", "heading"), "amber")
+        self.key_text = tone(self.host.Label("Answers, rationales and the scoring sheet. Keep this file private."),
+                             "amber")
         cards.addWidget(self.card(self.host.Label("Exam copy", "heading"), self.host.Label(
             "Questions and answer options for students. No answers."), self.exam_button))
         cards.addWidget(self.card(self.key_title, self.key_text, self.key_button))
@@ -76,7 +80,6 @@ class IssueView(QWidget):
         row.addWidget(another)
         layout.addLayout(row)
         layout.addStretch()
-        self.restyle()
         self.reset()
 
     def card(self, title, text, button):
@@ -88,10 +91,6 @@ class IssueView(QWidget):
         box.addWidget(button)
         box.addStretch()
         return frame
-
-    def restyle(self):
-        for label in (self.key_title, self.key_text):
-            label.setStyleSheet(f"color: {accent_color(self.exam, True)};")
 
     def reset(self):
         self.manifest = self.manifest_path = self.journal_path = None
@@ -165,8 +164,8 @@ class IssueView(QWidget):
         """Save the exam copy (0) or the private key and scoring sheet (1)."""
         if self.manifest is None:
             return
-        if which and QMessageBox.warning(self, "Private answer key", "The key file holds answers, rationales and scoring rules. Save it in a private location. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+        if which and not confirm(self, "Private answer key", "The key file holds answers, rationales and scoring rules. "
+                                 "Save it in a private location. Continue?", warning=True):
             return
         title, name = (("Save private key and scoring sheet", "key.html") if which
                        else ("Save exam entry copy", "exam.html"))
@@ -177,11 +176,10 @@ class IssueView(QWidget):
         if self.saved.get(1 - which) == path:
             self.window.error("Exam and private key need separate files.")
             return
-        manifest = self.manifest
+        manifest, language = self.manifest, deck_language(self.host, self.window.deck)
 
         def work():
-            path.write_text(export_elp_documents(manifest, self.host.deck_language(self.window.deck))[which],
-                            encoding="utf-8")
+            path.write_text(export_elp_documents(manifest, language)[which], encoding="utf-8")
 
         def done(_):
             if self.manifest is manifest:
@@ -192,3 +190,95 @@ class IssueView(QWidget):
     def corrections(self):
         if self.manifest is not None:
             open_corrections(self.host, self.manifest, self.journal_path, self.window)
+
+
+def open_corrections(host, manifest, path, parent=None):
+    path = path.resolve()
+    sheet = _SHEETS.get(path)
+    if sheet is None:
+        sheet = CorrectionSheet(host, manifest, path, parent)
+        _SHEETS[path] = sheet  # Retain the sheet, including while a worker is writing.
+    sheet.show()
+    sheet.raise_()
+    sheet.activateWindow()
+    sheet.load()
+    return sheet
+
+
+class CorrectionSheet(Sheet):
+    def __init__(self, host, manifest, path, parent=None):
+        super().__init__(host, "Exam Forge · Corrections", parent)
+        self.sheet.setModal(False)
+        self.host, self.path, self.busy = host, path, False
+        self.resize(700, 640)
+        layout = self.body
+        layout.addWidget(host.Label(str(path), "mono"))
+        self.trail = QPlainTextEdit()
+        self.trail.setReadOnly(True)
+        layout.addWidget(self.trail, 1)
+        self.item = QComboBox()
+        self.item.addItems([i['id'] for i in manifest.data()['items']])
+        layout.addWidget(host.Field("Frozen question", self.item))
+        self.change, self.reason = QPlainTextEdit(), QPlainTextEdit()
+        layout.addWidget(host.Field("Change", self.change))
+        layout.addWidget(host.Field("Reason", self.reason))
+        self.append = self.add_button("Record correction", kind="primary")
+        self.append.clicked.connect(self.record)
+        self.message = host.caption("")
+        self.message.setWordWrap(True)
+        layout.addWidget(self.message)
+
+    def run(self, work, done):
+        if self.busy:
+            return
+        self.busy = True
+        for field in (self.item, self.change, self.reason, self.append):
+            field.setEnabled(False)
+
+        def completed(result, error):
+            self.busy = False
+            for field in (self.item, self.change, self.reason, self.append):
+                field.setEnabled(True)
+            if error:
+                self.message.setText(str(error))
+            else:
+                done(result)
+        self.host.run_in_background(work, completed)
+
+    def render(self, rows):
+        self.trail.setPlainText("\n\n".join(f"{r['time']} · {r['item_id']}\n{r['change']}\nReason: {r['reason']}" for r in rows) or "No corrections recorded.")
+
+    def load(self):
+        self.run(lambda: read_corrections(self.path), self.render)
+
+    def record(self):
+        if self.busy:
+            return
+        item, change, reason = self.item.currentText(), self.change.toPlainText(), self.reason.toPlainText()
+        if not change.strip() or not reason.strip():
+            self.message.setText("Change and reason are required.")
+            return
+        if not confirm(self.sheet, "Record correction", f"Append this correction for {item}?\n\n{change}\nReason: {reason}"):
+            return
+
+        def work():
+            lock = QLockFile(str(self.path) + ".lock")
+            if not lock.tryLock(0):
+                raise ValueError("Another writer is using this correction journal. Retry when it finishes.")
+            try:
+                append_correction(self.path, item, change, reason)
+                return read_corrections(self.path)
+            finally:
+                lock.unlock()
+
+        def done(rows):
+            self.render(rows)
+            self.change.clear()
+            self.reason.clear()
+            self.message.setText("Correction recorded. The issued manifest is unchanged.")
+        self.run(work, done)
+
+    def may_close(self):
+        if self.busy:
+            self.message.setText("Wait for the journal operation to finish.")
+        return not self.busy

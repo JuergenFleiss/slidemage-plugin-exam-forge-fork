@@ -8,7 +8,7 @@ from fake_host import FakeDeck, FakeHost
 from PySide6.QtWidgets import QMessageBox
 
 from exam_forge.folder import folder_warnings, remembered_folder
-from exam_forge.ui.first_use import choose_bank
+from exam_forge.ui.controller import choose_bank
 
 
 @pytest.fixture
@@ -21,9 +21,9 @@ def setup(app, tmp_path):
 
 
 def select(monkeypatch, path, answer=QMessageBox.StandardButton.Yes):
-    monkeypatch.setattr("exam_forge.ui.first_use.QFileDialog.getExistingDirectory", lambda *a: str(path))
+    monkeypatch.setattr("exam_forge.ui.controller.QFileDialog.getExistingDirectory", lambda *a: str(path))
     calls = []
-    monkeypatch.setattr("exam_forge.ui.first_use.QMessageBox.warning", lambda *a: calls.append(a[2]) or answer)
+    monkeypatch.setattr("exam_forge.ui.kit.QMessageBox.warning", lambda *a: calls.append(a[2]) or answer)
     return calls
 
 

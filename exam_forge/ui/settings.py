@@ -11,7 +11,7 @@ from ..model import KINDS
 from ..rules import MAX_OPTIONS, AnswerRule, AnswerRules
 
 
-def add_folder_section(host, controller, page, folder_changed=lambda: None):
+def add_folder_section(host, controller, page, folder_changed):
     deck = controller.open_deck()
     if deck is None:
         page.body.addWidget(host.Field("Question folder", host.caption("Open a deck to change its question folder.")))
@@ -35,9 +35,9 @@ def add_folder_section(host, controller, page, folder_changed=lambda: None):
     page.body.addWidget(change, 0, Qt.AlignmentFlag.AlignLeft)
 
 
-def add_rules_section(host, controller, page):
-    """The open deck's answer rules, saved in its question folder as soon as they are valid. Returns a callable that
-    reads them again, for when the folder changed."""
+def rules_section(host, controller):
+    """The open deck's answer rules, saved in its question folder as soon as they are valid: (widgets to add, a
+    callable that reads the rules again, for when the folder changed)."""
     def spin(low, high):
         box = QSpinBox()
         box.setRange(low, high)
@@ -64,13 +64,10 @@ def add_rules_section(host, controller, page):
     notice.setWordWrap(True)
     reset = host.Button("Default answer rules", compact=True)
     widgets = (revision_field, kinds_field, elp_field, reset)
-    page.body.addWidget(host.Field("Answer rules", host.caption(
+    intro = host.Field("Answer rules", host.caption(
         "For this deck: the question types its exam uses, how many answers a multiple-choice question has, and "
         "how many of them are correct. Revision quizzes are multiple choice. Reviewed questions that no longer fit "
-        "are flagged and left out of exports and exams until you fix them.")))
-    for widget in (revision_field, kinds_field, elp_field, notice):
-        page.body.addWidget(widget)
-    page.body.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
+        "are flagged and left out of exports and exams until you fix them."))
     state = {"store": None, "loading": False}
 
     def show(rules):
@@ -135,15 +132,18 @@ def add_rules_section(host, controller, page):
         box.toggled.connect(changed)
     reset.clicked.connect(default)
     load()
-    return load
+    return (intro, revision_field, kinds_field, elp_field, notice, reset), load
 
 
 def build_settings(host, controller):
     on_change = controller.refresh_ai_support
     page = host.Page()
-    reload_rules = []
-    add_folder_section(host, controller, page, lambda: reload_rules[0]())
-    reload_rules.append(add_rules_section(host, controller, page))
+    rules, reload_rules = rules_section(host, controller)
+    add_folder_section(host, controller, page, reload_rules)
+    *fields, reset_rules = rules
+    for widget in fields:
+        page.body.addWidget(widget)
+    page.body.addWidget(reset_rules, 0, Qt.AlignmentFlag.AlignLeft)
     checkbox = page.ai_checkbox = QCheckBox("Enable AI support")
     checkbox.setChecked(bool(host.settings().get("ai_support", False)))
     notice = page.ai_notice = host.caption("")

@@ -95,7 +95,7 @@ def test_an_elp_exam_with_four_answers(tmp_path):
 
 def test_settings_change_the_open_windows_rules(lab):
     host, deck, bank, _, window, *_ = lab
-    window.card_opened(window.cards.item(0))       # q1, reviewed, one of two answers correct
+    window.open_card("q1")                         # reviewed, one of two answers correct
     host.current_focus = Focus(deck.path, None, "slide")
     page = host.settings_tabs["Exam Forge"]()
     rev_min, rev_max, _, rev_high, elp_count, _, elp_high = page.findChildren(QSpinBox)
@@ -129,4 +129,4 @@ def test_moodle_export_leaves_out_reviewed_questions_off_the_rules(lab, tmp_path
     window.export_menu.moodle_action.trigger()
     host.drain()
     assert [i.id for i in exported] == ["q9"]
-    assert "2 reviewed questions that no longer fit the answer rules were left out." in window.notice.text()
+    assert "2 reviewed questions that no longer fit the answer rules were left out." in host.toasts[-1]

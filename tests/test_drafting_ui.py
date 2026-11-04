@@ -172,7 +172,7 @@ def test_bulk_drafts_link_to_their_slides(env):
     drafts, errors = bank.load()
     assert [item.sources[0].slide_id for item in drafts] == [first.id, second.id] and not errors
     assert all(item.origin.kind == "ai" for item in drafts)
-    assert host.messages[-1] == ("2 AI drafts added · review before use", False)
+    assert host.toasts == ["2 AI drafts added · review before use"] and not host.messages  # Reported once.
 
 
 def test_the_grid_scopes_to_the_topic_and_hidden_ticks_are_never_sent(env):

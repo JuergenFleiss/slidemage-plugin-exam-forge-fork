@@ -4,13 +4,12 @@
 from dataclasses import replace
 from secrets import randbits
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -19,11 +18,10 @@ from PySide6.QtWidgets import (
 
 from ..assembly import Blueprint, assemble, available, swap, waiting_elp_drafts
 from ..manifest import Manifest
-from ..model import plural, topic_of
+from ..model import agree, plural, topic_of
 from ..rules import MINUTES, POINTS, ExamRules, exam_totals
-from .editor import accent_color, clear, is_dark, red_color, topic_color
 from .issue import IssueView
-from .work import SCROLL_STYLE
+from .kit import clear, dot, scroll_area, tone
 
 STEPS = ("Counts", "Review & swap", "Freeze & save")
 def count_columns(kinds):
@@ -72,24 +70,14 @@ class ExamTab(QWidget):
         self.setup, self.review = self.page(), self.page()
         self.issue = IssueView(self)
         for page in (self.setup, self.review):
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-            scroll.setStyleSheet(SCROLL_STYLE)
-            scroll.setWidget(page)
             card = self.host.Card()
-            card.layout().addWidget(scroll)
+            card.layout().addWidget(scroll_area(page))
             self.stack.addWidget(card)
         self.stack.addWidget(self.issue)
         self.build_setup(self.setup.body)
         self.build_review(self.review.body)
         self.set_step(0)
         self.render_counts()
-
-    def tint(self, widget, kind):
-        """Text colour only, taken from this tab's palette so rebuilt widgets match the theme."""
-        color = red_color(self) if kind == "red" else accent_color(self, kind == "amber")
-        widget.setStyleSheet(f"color: {color};")
 
     def muted(self, text=""):
         label = self.host.caption(text)
@@ -128,7 +116,7 @@ class ExamTab(QWidget):
         avoid.addWidget(self.avoid_unit)
         avoid.addStretch()
         body.addLayout(avoid)
-        self.history_note = QLabel()
+        self.history_note = tone(QLabel(), "error")
         self.history_note.setWordWrap(True)
         body.addWidget(self.history_note)
         self.untopiced = self.muted()
@@ -142,7 +130,7 @@ class ExamTab(QWidget):
             grid.addWidget(value, 0, column)
             grid.addWidget(self.muted(caption), 1, column)
         body.addLayout(grid)
-        self.reason = QLabel()
+        self.reason = tone(QLabel(), "error")
         self.reason.setWordWrap(True)
         body.addWidget(self.reason)
         self.propose_button = self.host.Button("Propose exam", "primary")
@@ -166,19 +154,15 @@ class ExamTab(QWidget):
             grid.setColumnStretch(0, 1)
             for column, text in enumerate(("Topic", *(heading for _, heading in columns))):
                 grid.addWidget(self.muted(text), 0, column)
-            dark = is_dark(self)
             for row, topic in enumerate(topics, 1):
                 cell = self.cells[topic.name] = {}
                 info = QVBoxLayout()
                 name = QHBoxLayout()
-                dot = QLabel("●")
-                dot.setStyleSheet(f"color: {topic_color(topic.color, dark)};")
-                name.addWidget(dot)
+                name.addWidget(dot(topic))
                 name.addWidget(self.host.Label(topic.name), 1)
                 info.addLayout(name)
-                cell["avail"], cell["draft"] = self.muted(), QLabel()
+                cell["avail"], cell["draft"] = self.muted(), tone(QLabel(), "amber")
                 cell["draft"].setWordWrap(True)
-                self.tint(cell["draft"], "amber")
                 info.addWidget(cell["avail"])
                 info.addWidget(cell["draft"])
                 grid.addLayout(info, row, 0)
@@ -189,8 +173,7 @@ class ExamTab(QWidget):
                     spin.setValue(self.counts[topic.name][difficulty])
                     spin.valueChanged.connect(
                         lambda value, n=topic.name, d=difficulty: self.count_changed(n, d, value))
-                    over = cell[difficulty + "_over"] = QLabel()
-                    self.tint(over, "red")
+                    over = cell[difficulty + "_over"] = tone(QLabel(), "error")
                     stepper.addWidget(spin)
                     stepper.addWidget(over)
                     stepper.addStretch()
@@ -213,12 +196,11 @@ class ExamTab(QWidget):
             cell["draft"].setText(f"{plural(n, 'exam draft')} waiting for review" if n else "")
             cell["draft"].setVisible(bool(n))
         lost = sum(1 for i in items if i.use == "elp" and i.status == "reviewed" and not of(i))
-        self.untopiced.setText(f"{plural(lost, 'reviewed exam question')} {'has' if lost == 1 else 'have'}"
+        self.untopiced.setText(f"{plural(lost, 'reviewed exam question')} {agree(lost, 'has', 'have')}"
                                " no topic and can't be used." if lost else "")
         self.untopiced.setVisible(bool(lost))
         errors = self.history[1] if self.history and avoid else []
         self.history_note.setText("\n".join(errors))
-        self.tint(self.history_note, "red")
         self.update_counts()
 
     def update_counts(self):
@@ -242,7 +224,6 @@ class ExamTab(QWidget):
         reason = ("Not enough reviewed questions for " + ", ".join(short) + ". Lower the counts first."
                   if short else "" if easy + hard or not self.cells else "Choose at least one question.")
         self.reason.setText(reason)
-        self.tint(self.reason, "red")
         self.propose_button.setEnabled(bool(easy + hard) and not short)
 
     def count_changed(self, name, difficulty, value):
@@ -270,23 +251,17 @@ class ExamTab(QWidget):
         self.host.run_in_background(lambda: read_history(bank), done)
 
     def refresh(self):
-        """Re-render the counts from the window's questions and topics; history is read again."""
+        """Re-render from the window's questions and topics; history is read again."""
         self.history, self.token = None, self.token + 1
         self.render_counts()
         if self.avoid.value():
             self.load_history()
+        if self.selection is not None:
+            self.mark_changed({i.id: i.changed_slides for i in self.window.items})
 
     def showEvent(self, event):
         super().showEvent(event)
         self.refresh()
-        self.sync_flags()
-
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange and hasattr(self, "groups"):
-            self.render_counts()
-            self.render_review()
-            self.issue.restyle()
 
     def set_step(self, step):
         self.stack.setCurrentIndex(step)
@@ -350,10 +325,9 @@ class ExamTab(QWidget):
                 self.history = history
                 self.compute_avail()
                 if history[1]:
-                    self.window.notice.setText("\n".join(history[1]))
+                    self.window.error("\n".join(history[1]))
             if not selection.feasible:
                 self.reason.setText("\n".join(selection.problems))
-                self.tint(self.reason, "red")
                 return
             self.selection, self.pick_topics = selection, topics
             self.render_review()
@@ -378,7 +352,7 @@ class ExamTab(QWidget):
         for button in (self.back_button, self.again_button, self.approve_button):
             head.addWidget(button)
         body.addLayout(head)
-        self.blocked = QLabel()
+        self.blocked = tone(QLabel(), "violet")
         self.blocked.setWordWrap(True)
         body.addWidget(self.blocked)
         self.groups = QVBoxLayout()
@@ -400,11 +374,9 @@ class ExamTab(QWidget):
         self.seed_label.setText(f"seed {selection.seed}")
         changed = self.changed_ids()
         n = len(changed)
-        self.blocked.setText(
-            f"{n} picked question{' is' if n == 1 else 's are'} linked to a changed slide. "
-            "Review or swap before freezing." if n else "")
+        self.blocked.setText(f"{plural(n, 'picked question')} {agree(n, 'is', 'are')} linked to a changed slide. "
+                             "Review or swap before freezing." if n else "")
         self.blocked.setVisible(bool(n))
-        self.tint(self.blocked, "violet")
         self.approve_button.setEnabled(not n)
         topics = self.pick_topics
         by_topic = {}
@@ -412,15 +384,12 @@ class ExamTab(QWidget):
             by_topic.setdefault(selection.topic_of(item), []).append(item)
         order = [t.name for t in topics if t.name in by_topic] + [n for n in by_topic
                                                                   if n not in {t.name for t in topics}]
-        colors = {t.name: t.color for t in topics}
-        dark = is_dark(self)
+        named = {t.name: t for t in topics}
         count = 0
         for name in order:
             head = QHBoxLayout()
-            if name in colors:
-                dot = QLabel("●")
-                dot.setStyleSheet(f"color: {topic_color(colors[name], dark)};")
-                head.addWidget(dot)
+            if name in named:
+                head.addWidget(dot(named[name]))
             title = self.host.Label(name, "heading")
             head.addWidget(title)
             head.addWidget(self.muted(plural(len(by_topic[name]), "question")))
@@ -444,12 +413,11 @@ class ExamTab(QWidget):
         if item.kind == "open":
             meta.addWidget(self.host.Chip("Open answer", "muted"))
         if item.media:
-            meta.addWidget(self.host.Chip(f"{len(item.media)} image{'s' if len(item.media) != 1 else ''}", "muted"))
+            meta.addWidget(self.host.Chip(plural(len(item.media), "image"), "muted"))
         meta.addWidget(self.muted(self.window.slide_name(item.sources[0].slide_id) if item.sources else "No slide"))
         row = self.rows[item.id] = {"stem": stem, "chip": chip, "changed": None, "review": None}
         if item.source_changed:
-            row["changed"] = self.host.Chip("Slide changed")
-            self.tint(row["changed"], "violet")
+            row["changed"] = tone(self.host.Chip("Slide changed"), "violet")
             meta.addWidget(row["changed"])
         meta.addStretch()
         text.addLayout(meta)
@@ -484,22 +452,6 @@ class ExamTab(QWidget):
                 self.window.error(exc)
                 return
             self.render_review()
-
-    def sync_flags(self):
-        """Back on the tab: pick up source checks made elsewhere, keeping the selection otherwise."""
-        selection, bank = self.selection, self.window.bank
-        if selection is None or self.stack.currentIndex() != 1:
-            return
-
-        def work():
-            return {i.id: bank.get(i.id).changed_slides for i in selection.items}
-
-        def done(flags, error):
-            if error:
-                self.window.error(error)
-            elif self.selection is selection:
-                self.mark_changed(flags)
-        self.host.run_in_background(work, done)
 
     def mark_changed(self, flags):
         """flags: item ID -> changed slides. Re-render when any selected question's differ."""

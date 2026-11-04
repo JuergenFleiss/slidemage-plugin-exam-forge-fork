@@ -5,6 +5,7 @@ a particular output belongs outside the model."""
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Literal
 from uuid import uuid4
@@ -79,6 +80,7 @@ KINDS = {"choice": "Multiple choice", "open": "Open answer"}
 # Item.use "elp" is the exam: the stored name stays, the shown one is "Exam".
 USES = {"revision": "Revision quiz", "elp": "Exam"}
 NEXT_STATUS = {"draft": "reviewed", "reviewed": "retired", "retired": "draft"}
+STATUS = {"draft": ("Draft", "neutral"), "reviewed": ("Reviewed", "ok"), "retired": ("Retired", "muted")}  # name, tone
 
 
 @dataclass(frozen=True)
@@ -125,9 +127,25 @@ class Item:
         return bool(self.changed_slides)
 
 
+def ai_draft(item: Item) -> bool:
+    """A draft an AI wrote or updated: it waits for review, labelled as an AI draft."""
+    return item.status == "draft" and "ai" in (item.origin.kind, item.ai_edit.kind)
+
+
+def deck_order(item: Item, positions: Mapping[str, int]) -> tuple:
+    """Sort key: by the first linked slide in the deck, unlinked last, retired last on a slide."""
+    firsts = [positions[link.slide_id] for link in item.sources if link.slide_id in positions]
+    return (not item.sources, min(firsts, default=len(positions) + 1), item.status == "retired", item.stem)
+
+
 def plural(n: int, word: str) -> str:
     """'1 question' or '3 questions'."""
     return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def agree(n: int, one: str, many: str) -> str:
+    """The verb that agrees with a count: agree(n, "is", "are")."""
+    return one if n == 1 else many
 
 
 def slide_ids(item: Item) -> list[str]:

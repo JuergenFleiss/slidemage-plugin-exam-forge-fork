@@ -12,7 +12,7 @@ from slidemage.plugin_api import AiChatError, AiChatResult, Route, SlideSource
 from exam_forge.ai_support import NO_REPLY
 from exam_forge.model import Item, Option, Origin
 from exam_forge.sources import link_slide
-from exam_forge.ui.editor import accent_color
+from exam_forge.ui.kit import color
 from exam_forge.ui.review_changes import ReviewChangesDialog
 
 OLD, NEW = "Two plus two = four\nsecond <b>line</b> & more", "Two plus three = five\nsecond <b>line</b> & more"
@@ -45,11 +45,11 @@ def review(env):
 
 
 def test_the_diff_marks_changes_with_escaped_text_and_no_backgrounds(review):
-    *_, open_dialog = review
+    host, *_, open_dialog = review
     dialog = open_dialog()
     old_html, new_html = dialog.old_pane.toHtml(), dialog.new_pane.toHtml()
     assert OLD in dialog.old_pane.toPlainText() and NEW in dialog.new_pane.toPlainText()
-    assert "line-through" in old_html and "underline" in new_html and accent_color(dialog.new_pane) in new_html
+    assert "line-through" in old_html and "underline" in new_html and color(host, "violet") in new_html
     assert "<b>line" not in old_html + new_html and "&lt;b&gt;line" in new_html
     assert "background" not in (old_html + new_html).replace("background-color:transparent", "")
     assert dialog.rows[0].update.isHidden()  # AI support is off.

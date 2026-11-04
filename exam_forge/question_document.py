@@ -21,8 +21,8 @@ from .elp_document import (
     key_option,
     model_answer,
 )
-from .model import KINDS, USES, Item, Media, Topic, image_type, plural, slide_ids, slide_label, topic_of
-from .table_export import STATUS, deck_order
+from .model import (KINDS, STATUS, USES, Item, Media, Topic, deck_order, image_type, plural, slide_ids, slide_label,
+                    topic_of)
 
 
 def _image(media: Media, read_media: Callable[[Media], bytes] | None) -> str:
@@ -37,7 +37,7 @@ def _image(media: Media, read_media: Callable[[Media], bytes] | None) -> str:
 
 
 def _question(item: Item, number: int, topic: str, slides: list[str], read_media) -> str:
-    labels = [STATUS[item.status], USES[item.use], KINDS[item.kind], item.difficulty.title(), topic, *slides]
+    labels = [STATUS[item.status][0], USES[item.use], KINDS[item.kind], item.difficulty.title(), topic, *slides]
     parts = ['<section class="question">', heading(number, item.id, item.revision),
              chips(labels, item.status == "reviewed"), f'<div class="text stem">{_text(item.stem)}</div>',
              *(_image(media, read_media) for media in item.media)]

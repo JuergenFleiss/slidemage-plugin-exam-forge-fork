@@ -43,14 +43,14 @@ def test_slides_follow_deck_order_and_topic_selection(lab):
     assert host.read_threads and all(t != host.ui_thread for t in host.read_threads)
 
 
-def test_cards_put_retired_last_and_show_other_slides(lab):
+def test_cards_follow_deck_order_retired_last_and_show_other_slides(lab):
     host, _, bank, _, window, refs, link, _ = lab
     bank.create(Item("elp", 1, "ELP on a", tuple(Option(uuid4().hex, str(n), n < 3) for n in range(5)),
                      use="elp", sources=(link["a"],)))
     window.reload()
-    assert keys(window.cards) == ["q1", "q2", "q4", "elp", "q5"]
+    assert keys(window.cards) == ["q4", "q2", "elp", "q1", "q5"]  # By question text, as in the exports.
     assert window.cards.itemWidget(window.cards.item(4)).graphicsEffect() is not None
-    assert "Also on slide 3" in card(window, 1) and "5 answers · 3 correct" in card(window, 3)
+    assert "Also on slide 3" in card(window, 1) and "5 answers · 3 correct" in card(window, 2)
     pick(window.slide_list, "b")
     assert window.changed_label.text() == "This slide changed after 1 question was written."
     window.open_button.click()
@@ -99,8 +99,8 @@ def test_unlinked_questions_are_reachable_and_stay_reviewed(lab):
     add(bank, "q10", "Reviewed nowhere", status="reviewed")
     window.reload()
     pick(window.topic_list, "unlinked")
-    assert keys(window.slide_list) == ["q6", "q7", "q10", "q8"]  # Retired last.
-    window.review_row_opened(window.slide_list.item(2))
+    assert keys(window.slide_list) == ["q6", "q10", "q7", "q8"]  # Retired last.
+    window.review_row_opened(window.slide_list.item(1))
     window.back_button.click()
     assert bank.get("q10").status == "reviewed" and window.view == "unlinked"
     for item in ("q6", "q7", "q8", "q10"):

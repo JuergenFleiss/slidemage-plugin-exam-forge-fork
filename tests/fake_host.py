@@ -58,6 +58,7 @@ class FakeHost:
         self.commands: dict[str, Command] = {}
         self.menus: dict[str, list[str]] = {}
         self.messages: list[tuple[str, bool]] = []
+        self.toasts: list[str] = []
         self.chat = FakeAiChat()
         self._active = True
         self.root = Path(root) if root is not None else Path.cwd()
@@ -68,6 +69,7 @@ class FakeHost:
         self.settings_tabs, self.boxes = {}, {}
         self.current_focus = Focus(None, None, "slide")
         self._settings = FakeSettings()
+        self.dark, self.theme_listeners = False, []
 
     def finish_activation(self):
         self._active = False
@@ -204,14 +206,21 @@ class FakeHost:
         return _kit().ModalSheet(title, parent)
 
     def toast(self, parent, text):
-        pass
+        self.toasts.append(text)
 
     def theme(self):
         from types import SimpleNamespace
-        return SimpleNamespace(dark=False, font_sans="Roboto")
+        return SimpleNamespace(dark=self.dark, font_sans="Roboto")
 
     def on_theme_changed(self, callback):
-        return lambda: None
+        self.theme_listeners.append(callback)
+        return lambda: self.theme_listeners.remove(callback)
+
+    def set_dark(self, dark):
+        """Switch the theme, as the user does in SlideMage."""
+        self.dark = dark
+        for callback in list(self.theme_listeners):
+            callback(self.theme())
 
 
 def _kit():

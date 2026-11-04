@@ -13,20 +13,13 @@ import csv
 import io
 from collections.abc import Iterable, Mapping
 
-from .model import KINDS, USES, Item, Topic, slide_ids, slide_label, topic_of
+from .model import KINDS, STATUS, USES, Item, Topic, deck_order, slide_ids, slide_label, topic_of
 
-STATUS = {"draft": "Draft", "reviewed": "Reviewed", "retired": "Retired"}
 FORMULA = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _cell(value: str) -> str:
     return "'" + value if value.startswith(FORMULA) else value
-
-
-def deck_order(item: Item, positions: Mapping[str, int]) -> tuple:
-    """Sort key: by the first linked slide in the deck, unlinked last, retired last on a slide."""
-    firsts = [positions[link.slide_id] for link in item.sources if link.slide_id in positions]
-    return (not item.sources, min(firsts, default=len(positions) + 1), item.status == "retired", item.stem)
 
 
 def questions_csv(items: Iterable[Item], topics: Iterable[Topic] = (),
@@ -47,7 +40,7 @@ def questions_csv(items: Iterable[Item], topics: Iterable[Topic] = (),
         topic = topic_of(item, topics)
         names = [slide_label(slide, *slides.get(slide, ())) for slide in slide_ids(item)]
         origin = "AI" if item.origin.kind == "ai" else "AI-assisted" if item.ai_edit.kind == "ai" else "Author"
-        row = [item.id, str(item.revision), STATUS[item.status], USES[item.use], KINDS[item.kind],
+        row = [item.id, str(item.revision), STATUS[item.status][0], USES[item.use], KINDS[item.kind],
                item.difficulty.title(), topic.name if topic else "", "; ".join(names), item.objective, item.stem,
                item.model_answer, item.grading_notes]
         for n in range(answers):

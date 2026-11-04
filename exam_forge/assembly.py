@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from .model import Item, plural
+from .model import Item, agree, plural
 from .rules import ExamRules, exam_issues, exam_totals
 
 _DIFFICULTIES = ("easy", "hard")
@@ -132,7 +132,7 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
             if n > len(pool):
                 have = len(pool)
                 problems.append(f"Topic {name!r} needs {plural(n, CELL_NAMES[key] + ' question')}; "
-                                f"only {have} {'is' if have == 1 else 'are'} eligible.")
+                                f"only {have} {agree(have, 'is', 'are')} eligible.")
             if n:
                 cells.append((n, pool))
     if problems:
