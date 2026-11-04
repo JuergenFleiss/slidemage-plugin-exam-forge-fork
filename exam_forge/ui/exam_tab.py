@@ -16,38 +16,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..assembly import Blueprint, assemble, available, swap, waiting_elp_drafts
-from ..manifest import Manifest
-from ..model import agree, plural, topic_of
+from collections import Counter
+
+from ..exam import DIFFICULTIES, Blueprint, assemble, available, read_history, swap, topic_names
+from ..model import agree, plural
 from ..rules import MINUTES, POINTS, ExamRules, exam_totals
 from .issue import IssueView
 from .kit import clear, dot, scroll_area, tone
 
 STEPS = ("Counts", "Review & swap", "Freeze & save")
-def count_columns(kinds):
-    """The Counts step's columns, as (blueprint cell, heading), for the exam's question types."""
-    if kinds == ("open",):
-        return (("open easy", "Easy"), ("open hard", "Hard"))
-    if "open" in kinds:
-        return (("easy", "Easy"), ("hard", "Hard"), ("open easy", "Open easy"), ("open hard", "Open hard"))
-    return (("easy", "Easy"), ("hard", "Hard"))
+
+
+def columns(kinds):
+    """The Counts step's columns, as (question type, difficulty, heading), for the exam's question types."""
+    return [(kind, d, d.title() if kind == "choice" or len(kinds) == 1 else f"Open {d}")
+            for kind in kinds for d in DIFFICULTIES]
 
 
 def number(value):
     return f"{value:g}"
-
-
-def read_history(bank):
-    """Earlier exams' item IDs, oldest first, and a message for each unreadable manifest."""
-    previous, errors = [], []
-    for path in sorted(bank.folder.glob("*.manifest.json")):
-        try:
-            data = Manifest.read(path).data()
-            if data["bank_id"] == bank.id:
-                previous.append([i["id"] for i in data["items"]])
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            errors.append(f"Could not read exam history {path.name}: {exc}")
-    return previous, errors
 
 
 class ExamTab(QWidget):
@@ -56,7 +43,7 @@ class ExamTab(QWidget):
         self.window, self.host = window, window.host
         self.rules = ExamRules()
         self.selection = self.pick_topics = None
-        self.counts, self.cells, self.rows = {}, {}, {}
+        self.counts, self.spins, self.overs, self.notes, self.rows = {}, {}, {}, {}, {}
         self.avail, self.history, self.token = {}, None, 0
         layout = QVBoxLayout(self)
         self.steps = QHBoxLayout()
@@ -141,39 +128,38 @@ class ExamTab(QWidget):
         body.addStretch()
 
     def render_counts(self):
-        topics = self.window.topics
-        columns = count_columns(self.rules.kinds)
-        self.counts = {t.name: {key: self.counts.get(t.name, {}).get(key, 0) for key, _ in columns} for t in topics}
+        """One row per topic, one stepper per question type and difficulty; counts already set are kept."""
+        topics, cols = self.window.topics, columns(self.rules.kinds)
+        self.counts = {(t.name, k, d): self.counts.get((t.name, k, d), 0) for t in topics for k, d, _ in cols}
         clear(self.rows_box)
-        self.cells = {}
+        self.spins, self.overs, self.notes = {}, {}, {}
         if not topics:
             self.rows_box.addWidget(self.muted("No topics yet. Create topics and link questions to "
-                                          "slides in the Questions tab."))
+                                               "slides in the Questions tab."))
         else:
             grid = QGridLayout()
             grid.setColumnStretch(0, 1)
-            for column, text in enumerate(("Topic", *(heading for _, heading in columns))):
+            for column, text in enumerate(("Topic", *(heading for *_, heading in cols))):
                 grid.addWidget(self.muted(text), 0, column)
             for row, topic in enumerate(topics, 1):
-                cell = self.cells[topic.name] = {}
                 info = QVBoxLayout()
                 name = QHBoxLayout()
                 name.addWidget(dot(topic))
                 name.addWidget(self.host.Label(topic.name), 1)
                 info.addLayout(name)
-                cell["avail"], cell["draft"] = self.muted(), tone(QLabel(), "amber")
-                cell["draft"].setWordWrap(True)
-                info.addWidget(cell["avail"])
-                info.addWidget(cell["draft"])
+                avail, draft = self.notes[topic.name] = self.muted(), tone(QLabel(), "amber")
+                draft.setWordWrap(True)
+                info.addWidget(avail)
+                info.addWidget(draft)
                 grid.addLayout(info, row, 0)
-                for column, (difficulty, _) in enumerate(columns, 1):
+                for column, (kind, difficulty, _) in enumerate(cols, 1):
+                    cell = (topic.name, kind, difficulty)
                     stepper = QVBoxLayout()
-                    spin = cell[difficulty] = QSpinBox()
+                    spin = self.spins[cell] = QSpinBox()
                     spin.setRange(0, 999)
-                    spin.setValue(self.counts[topic.name][difficulty])
-                    spin.valueChanged.connect(
-                        lambda value, n=topic.name, d=difficulty: self.count_changed(n, d, value))
-                    over = cell[difficulty + "_over"] = tone(QLabel(), "error")
+                    spin.setValue(self.counts[cell])
+                    spin.valueChanged.connect(lambda value, c=cell: self.count_changed(c, value))
+                    over = self.overs[cell] = tone(QLabel(), "error")
                     stepper.addWidget(spin)
                     stepper.addWidget(over)
                     stepper.addStretch()
@@ -182,20 +168,19 @@ class ExamTab(QWidget):
         self.compute_avail()
 
     def compute_avail(self):
-        topics, items = self.window.topics, self.window.items
-        of = lambda item: getattr(topic_of(item, topics), "name", "")  # noqa: E731
+        items = self.window.items
+        names = topic_names(items, self.window.topics)
         avoid = self.avoid.value()
         previous = self.history[0] if self.history and avoid else []
-        self.avail = available(items, of, self.rules, previous, avoid)
-        waiting = waiting_elp_drafts(items, of)
-        for name, cell in self.cells.items():
-            have = self.avail.get(name, {})
-            cell["avail"].setText(" · ".join(f"{have.get(key, 0)} {heading.lower()}"
-                                             for key, heading in count_columns(self.rules.kinds)) + " reviewed")
-            n = waiting.get(name, 0)
-            cell["draft"].setText(f"{plural(n, 'exam draft')} waiting for review" if n else "")
-            cell["draft"].setVisible(bool(n))
-        lost = sum(1 for i in items if i.use == "elp" and i.status == "reviewed" and not of(i))
+        self.avail = available(items, names, self.rules, previous, avoid)
+        waiting = Counter(names[i.id] for i in items if i.use == "elp" and i.status == "draft" and names[i.id])
+        for name, (avail, draft) in self.notes.items():
+            avail.setText(" · ".join(f"{self.avail[(name, kind, d)]} {heading.lower()}"
+                                     for kind, d, heading in columns(self.rules.kinds)) + " reviewed")
+            n = waiting[name]
+            draft.setText(f"{plural(n, 'exam draft')} waiting for review" if n else "")
+            draft.setVisible(bool(n))
+        lost = sum(1 for i in items if i.use == "elp" and i.status == "reviewed" and not names[i.id])
         self.untopiced.setText(f"{plural(lost, 'reviewed exam question')} {agree(lost, 'has', 'have')}"
                                " no topic and can't be used." if lost else "")
         self.untopiced.setVisible(bool(lost))
@@ -204,30 +189,25 @@ class ExamTab(QWidget):
         self.update_counts()
 
     def update_counts(self):
-        short, easy, hard = [], 0, 0
-        for name, cell in self.cells.items():
-            counts = self.counts[name]
-            for key, heading in count_columns(self.rules.kinds):
-                if key.endswith("easy"):
-                    easy += counts[key]
-                else:
-                    hard += counts[key]
-                have = self.avail.get(name, {}).get(key, 0)
-                over = counts[key] > have
-                cell[key + "_over"].setText(f"Only {have} available" if over else "")
-                cell[key + "_over"].setVisible(over)
-                if over:
-                    short.append(f"{name} ({heading.lower()})")
-        points, minutes = exam_totals(["easy"] * easy + ["hard"] * hard)
-        for key, value in (("questions", easy + hard), ("points", points), ("minutes", number(minutes))):
+        headings = {(kind, d): heading for kind, d, heading in columns(self.rules.kinds)}
+        short = []
+        for cell, over in self.overs.items():
+            have = self.avail[cell]
+            over.setText(f"Only {have} available" if self.counts[cell] > have else "")
+            over.setVisible(self.counts[cell] > have)
+            if self.counts[cell] > have:
+                short.append(f"{cell[0]} ({headings[cell[1:]].lower()})")
+        chosen = [d for (_, _, d), n in self.counts.items() for _ in range(n)]
+        points, minutes = exam_totals(chosen)
+        for key, value in (("questions", len(chosen)), ("points", points), ("minutes", number(minutes))):
             self.totals[key].setText(str(value))
         reason = ("Not enough reviewed questions for " + ", ".join(short) + ". Lower the counts first."
-                  if short else "" if easy + hard or not self.cells else "Choose at least one question.")
+                  if short else "" if chosen or not self.spins else "Choose at least one question.")
         self.reason.setText(reason)
-        self.propose_button.setEnabled(bool(easy + hard) and not short)
+        self.propose_button.setEnabled(bool(chosen) and not short)
 
-    def count_changed(self, name, difficulty, value):
-        self.counts[name][difficulty] = value
+    def count_changed(self, cell, value):
+        self.counts[cell] = value
         self.update_counts()
 
     def avoid_changed(self, value):
@@ -273,8 +253,7 @@ class ExamTab(QWidget):
             label.setEnabled(i <= step)
 
     def blueprint(self):
-        counts = {n: dict(c) for n, c in self.counts.items() if any(c.values())}
-        return Blueprint(counts, self.avoid.value())
+        return Blueprint(self.counts, self.avoid.value())
 
     def reset(self):
         self.selection = self.pick_topics = None
@@ -307,7 +286,6 @@ class ExamTab(QWidget):
         topics = topics if topics is not None else self.window.topics
         bank, rules = self.window.bank, self.rules
         history, seed = self.history, randbits(64)
-        of = lambda item: getattr(topic_of(item, topics), "name", "")  # noqa: E731
 
         def work():
             items, errors = bank.load()
@@ -316,7 +294,8 @@ class ExamTab(QWidget):
             previous, errors = [], []
             if blueprint.avoid_last:
                 previous, errors = history or read_history(bank)
-            selection = assemble(items, blueprint, seed=seed, topic_of=of, rules=rules, previous_exams=previous)
+            selection = assemble(items, blueprint, seed=seed, topics=topic_names(items, topics), rules=rules,
+                                 previous_exams=previous)
             return selection, (previous, errors)
 
         def done(data):
@@ -381,7 +360,7 @@ class ExamTab(QWidget):
         topics = self.pick_topics
         by_topic = {}
         for item in selection.items:
-            by_topic.setdefault(selection.topic_of(item), []).append(item)
+            by_topic.setdefault(selection.topics[item.id], []).append(item)
         order = [t.name for t in topics if t.name in by_topic] + [n for n in by_topic
                                                                   if n not in {t.name for t in topics}]
         named = {t.name: t for t in topics}

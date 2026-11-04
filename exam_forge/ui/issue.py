@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..exam_document import export_elp_documents
-from ..manifest import ChangedSourcesError, Manifest, append_correction, freeze, read_corrections
+from ..exam import ChangedSourcesError, Manifest, append_correction, freeze, read_corrections
+from ..exam_document import export_exam_documents
 from ..model import plural
 from ..rules import exam_totals
 from ..sources import fresh_deck
@@ -25,13 +25,9 @@ from .kit import Sheet, confirm, deck_language, tone
 _SHEETS = {}  # One correction sheet, and so one pending writer, per journal in this application.
 
 
-def issued_at(path):
-    """Local issue time from the manifest file name, or an empty string."""
-    try:
-        stamp = datetime.strptime(Path(path).name.split("-")[0], "%Y%m%dT%H%M%S%fZ")
-        return stamp.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
-    except ValueError:
-        return ""
+def issued_at(data):
+    """The manifest's issue time, local."""
+    return datetime.fromisoformat(data["issued"]).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def manifest_totals(data):
@@ -60,9 +56,9 @@ class IssueView(QWidget):
         layout.addWidget(note)
         cards = QHBoxLayout()
         self.exam_button = self.host.Button("Save exam HTML…")
-        self.exam_button.clicked.connect(lambda: self.documents(0))
+        self.exam_button.clicked.connect(lambda: self.documents("exam"))
         self.key_button = self.host.Button("Save key HTML…")
-        self.key_button.clicked.connect(lambda: self.documents(1))
+        self.key_button.clicked.connect(lambda: self.documents("key"))
         self.key_title = tone(self.host.Label("🔒 Private key", "heading"), "amber")
         self.key_text = tone(self.host.Label("Answers, rationales and the scoring sheet. Keep this file private."),
                              "amber")
@@ -108,6 +104,7 @@ class IssueView(QWidget):
         if self.manifest is not None or self.window.busy:
             return
         bank, deck = self.window.bank, self.window.deck
+        # The time in the file name only sorts the files; the manifest records when it was issued.
         stem = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ-") + uuid4().hex[:8]
         path = bank.folder / (stem + ".manifest.json")
         self.window.set_busy(True)
@@ -116,7 +113,7 @@ class IssueView(QWidget):
         def work():
             manifest = freeze(self.host, fresh_deck(deck), bank,
                               [(i.id, i.revision) for i in selection.items], blueprint, selection.rules,
-                              topic_of=selection.topic_of)
+                              topics=selection.topics)
             manifest.write(path)
             return Manifest.read(path)
 
@@ -136,8 +133,7 @@ class IssueView(QWidget):
     def show_manifest(self, manifest, path):
         self.manifest, self.manifest_path, self.saved = manifest, Path(path), {}
         self.journal_path = self.manifest_path.with_suffix(".corrections.jsonl")
-        when = issued_at(path)
-        self.summary.setText(manifest_totals(manifest.data()) + (f" · issued {when}" if when else ""))
+        self.summary.setText(f"{manifest_totals(manifest.data())} · issued {issued_at(manifest.data())}")
         self.file_name.setText(self.manifest_path.name)
         for button in (self.exam_button, self.key_button, self.corrections_button):
             button.setEnabled(True)
@@ -161,30 +157,31 @@ class IssueView(QWidget):
         self.window.work(work, lambda manifest: self.show_manifest(manifest, path))
 
     def documents(self, which):
-        """Save the exam copy (0) or the private key and scoring sheet (1)."""
+        """Save the exam copy ("exam") or the private key and scoring sheet ("key")."""
         if self.manifest is None:
             return
-        if which and not confirm(self, "Private answer key", "The key file holds answers, rationales and scoring rules. "
+        key = which == "key"
+        if key and not confirm(self, "Private answer key", "The key file holds answers, rationales and scoring rules. "
                                  "Save it in a private location. Continue?", warning=True):
             return
-        title, name = (("Save private key and scoring sheet", "key.html") if which
-                       else ("Save exam entry copy", "exam.html"))
+        title = "Save private key and scoring sheet" if key else "Save exam entry copy"
+        name = f"{which}.html"
         chosen, _ = QFileDialog.getSaveFileName(self, title, str(self.window.bank.folder / name), "HTML (*.html)")
         if not chosen:
             return
         path = Path(chosen if chosen.lower().endswith(".html") else chosen + ".html").resolve()
-        if self.saved.get(1 - which) == path:
+        if self.saved.get("exam" if key else "key") == path:
             self.window.error("Exam and private key need separate files.")
             return
         manifest, language = self.manifest, deck_language(self.host, self.window.deck)
 
         def work():
-            path.write_text(export_elp_documents(manifest, language)[which], encoding="utf-8")
+            path.write_text(export_exam_documents(manifest, language)[which], encoding="utf-8")
 
         def done(_):
             if self.manifest is manifest:
                 self.saved[which] = path
-            self.window.toast(f"Saved {'private key' if which else 'exam'}: {path}")
+            self.window.toast(f"Saved {'private key' if key else 'exam'}: {path}")
         self.window.work(work, done)
 
     def corrections(self):

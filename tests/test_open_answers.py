@@ -7,11 +7,11 @@ from dataclasses import replace
 import pytest
 from slidemage.plugin_api import AiChatResult, Route
 
-from exam_forge.assembly import Blueprint, assemble, available
+from exam_forge.exam import Blueprint, assemble, available
 from exam_forge.bank import AnswerRulesStore, Bank
 from exam_forge.drafting import DraftReplyError, build_request, build_update_request, parse_reply
-from exam_forge.exam_document import export_elp_documents
-from exam_forge.manifest import freeze
+from exam_forge.exam_document import export_exam_documents
+from exam_forge.exam import freeze
 from exam_forge.model import Item, Option, SourceLink
 from exam_forge.rules import AnswerRules, ExamRules, exam_issues, question_issues
 from exam_forge.exports import questions_csv
@@ -60,17 +60,16 @@ def test_store_keeps_the_exam_types(tmp_path):
 def test_proposals_count_each_type_separately():
     items = [replace(choice_item(f"c{i}"), status="reviewed") for i in range(3)]
     items += [replace(open_item(f"o{i}", "hard"), status="reviewed") for i in range(2)]
-    of = lambda item: "t"
+    of = {item.id: "t" for item in items}
     rules = ExamRules(kinds=("choice", "open"))
-    assert available(items, of, rules) == {"t": {"easy": 3, "hard": 0, "open easy": 0, "open hard": 2}}
-    assert available(items, of, ExamRules())["t"]["open hard"] == 0   # multiple choice only: open ones excluded
-    picked = assemble(items, Blueprint({"t": {"easy": 2, "open hard": 1}}), seed=1, topic_of=of, rules=rules)
+    assert available(items, of, rules) == {("t", "choice", "easy"): 3, ("t", "open", "hard"): 2}
+    assert available(items, of, ExamRules())[("t", "open", "hard")] == 0   # multiple choice only: open ones excluded
+    picked = assemble(items, Blueprint({("t", "choice", "easy"): 2, ("t", "open", "hard"): 1}), seed=1, topics=of,
+                      rules=rules)
     assert sorted(i.kind for i in picked.items) == ["choice", "choice", "open"]
     assert [i.id for i in picked.alternatives(next(i.id for i in picked.items if i.kind == "open"))] in (["o0"], ["o1"])
-    short = assemble(items, Blueprint({"t": {"open easy": 1}}), seed=1, topic_of=of, rules=rules)
+    short = assemble(items, Blueprint({("t", "open", "easy"): 1}), seed=1, topics=of, rules=rules)
     assert short.problems == ("Topic 't' needs 1 easy open-answer question; only 0 are eligible.",)
-    assert Blueprint({"t": {"easy": 1}}).as_dict()["counts"] == {"t": {"easy": 1, "hard": 0, "open easy": 0,
-                                                                         "open hard": 0}}
 
 
 def test_documents_leave_room_and_the_key_holds_the_model_answer(tmp_path):
@@ -79,16 +78,16 @@ def test_documents_leave_room_and_the_key_holds_the_model_answer(tmp_path):
         bank.create(item)
         bank.set_status(item.id, 1, "reviewed")
     manifest = freeze(None, None, bank, [("c", 2), ("o", 2)], {}, ExamRules(kinds=("choice", "open")),
-                      topic_of=lambda i: "t")
+                      topics={})
     assert manifest.data()["schema_version"] == 1
-    exam, key = export_elp_documents(manifest)
+    exam, key = export_exam_documents(manifest).values()
     assert exam.count('class="answer-space"') == 1 and "P(A|B)" not in exam
     assert "P(A|B) = P(B|A) P(A) / P(B)" in key and "2 points for" in key and "graded by hand" in key
     assert "Frozen scoring tables" in key and "36 points" in exam
-    only_open = freeze(None, None, bank, [("o", 2)], {}, ExamRules(kinds=("open",)), topic_of=lambda i: "t")
-    assert "Frozen scoring tables" not in export_elp_documents(only_open)[1]
+    only_open = freeze(None, None, bank, [("o", 2)], {}, ExamRules(kinds=("open",)), topics={})
+    assert "Frozen scoring tables" not in export_exam_documents(only_open)['key']
     with pytest.raises(ValueError, match="be multiple choice"):
-        freeze(None, None, bank, [("o", 2)], {}, ExamRules(), topic_of=lambda i: "t")
+        freeze(None, None, bank, [("o", 2)], {}, ExamRules(), topics={})
 
 
 def test_ai_drafts_and_updates_open_questions():

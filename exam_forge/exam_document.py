@@ -30,8 +30,8 @@ from .model import IMAGE_NAMES, image_type
 from .rules import exam_totals, number_word
 
 if TYPE_CHECKING:
-    # manifest imports host-facing source checks; rendering needs no host or Qt.
-    from .manifest import Manifest
+    # exam imports host-facing source checks; rendering needs no host or Qt.
+    from .exam import Manifest
 
 
 _STYLE = """body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;max-width:46rem;margin:2.5rem auto;padding:0 1.25rem;color:#1c1b19}
@@ -146,29 +146,25 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
         '<section class="question">',
         heading(number, item["id"], item["revision"]),
         chips([f'{rule["points"]} points', f'{rule["minutes"]} planned minutes', item["difficulty"]]),
-        f'<div class="text stem">{text(item["stem"])}</div>', *images, '<ol>',
+        f'<div class="text stem">{text(item["stem"])}</div>', *images,
     ]
     if item['assistant_note']:
-        parts.insert(-1, assistant_note(item['assistant_note']))
-    if item['kind'] == 'open':
-        parts.pop()     # no answers to list: room to write, or the model answer in the key
-        if key:
-            parts += model_answer(item['model_answer'], item['grading_notes'])
-        else:
-            parts.append('<div class="answer-space"></div>')
-        parts.append('</section>')
-        return '\n'.join(parts)
-    for option in item['options']:
-        if key:
-            parts.append(key_option(option['text'], option['correct'], option['rationale'], f'option {option["id"]}'))
-        else:
-            parts.append(f'<li class="pl"><div><div class="text option">{text(option["text"])}</div></div></li>')
-    parts.extend(['</ol>', '</section>'])
+        parts.append(assistant_note(item['assistant_note']))
+    if item['kind'] == 'open':     # no answers to list: the model answer in the key, room to write in the exam
+        parts += model_answer(item['model_answer'], item['grading_notes']) if key else ['<div class="answer-space"></div>']
+    elif key:
+        parts += ['<ol>', *(key_option(o['text'], o['correct'], o['rationale'], f'option {o["id"]}')
+                            for o in item['options']), '</ol>']
+    else:
+        parts += ['<ol>', *(f'<li class="pl"><div><div class="text option">{text(o["text"])}</div></div></li>'
+                            for o in item['options']), '</ol>']
+    parts.append('</section>')
     return '\n'.join(parts)
 
 
-def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str, str]:
-    """Return (exam_html, key_html), to write as UTF-8; no I/O or live bank reads.
+def export_exam_documents(manifest: Manifest, language: str = "en") -> dict[str, str]:
+    """Return {"exam": the entry copy, "key": the key and scoring sheet}, as HTML to write as UTF-8; no I/O or live
+    bank reads.
 
     Unknown difficulty classes, missing frozen scoring rows and unavailable/unsupported media fail rather than being
     omitted.
@@ -235,4 +231,4 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                  '</tr></thead><tbody>'), *tables, '</tbody></table>']
     key[:0] = head
     # `language` is the deck's: the questions are written in it, so a screen reader reads the page in it.
-    return page('Exam — entry copy', exam, language), page('Exam key and scoring sheet', key, language)
+    return {'exam': page('Exam — entry copy', exam, language), 'key': page('Exam key and scoring sheet', key, language)}

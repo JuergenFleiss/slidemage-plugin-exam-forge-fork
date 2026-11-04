@@ -11,8 +11,8 @@ from PySide6.QtWidgets import QSpinBox
 from slidemage.plugin_api import Focus
 
 from exam_forge.bank import AnswerRulesStore, Bank, CorruptFileError
-from exam_forge.exam_document import export_elp_documents
-from exam_forge.manifest import freeze
+from exam_forge.exam_document import export_exam_documents
+from exam_forge.exam import freeze
 from exam_forge.model import Item, Option
 from exam_forge.exports import export_moodle_xml
 from exam_forge.rules import AnswerRule, AnswerRules, ExamRules, exam_issues, question_issues, scoring_table
@@ -85,12 +85,12 @@ def test_an_elp_exam_with_four_answers(tmp_path):
         bank.create(item)
         bank.set_status(item.id, 1, "reviewed")
     rules = ExamRules(AnswerRule(4, 4, 1, 3))
-    manifest = freeze(None, None, bank, [("q1", 2), ("q3", 2)], {}, rules, topic_of=lambda i: "t")
+    manifest = freeze(None, None, bank, [("q1", 2), ("q3", 2)], {}, rules, topics={})
     assert manifest.data()["scoring"]["rules"]["answers"]["max_options"] == 4
-    _, key = export_elp_documents(manifest)
+    _, key = export_exam_documents(manifest).values()
     assert "four options per question" in key and "−P/(4−n)" in key
     with pytest.raises(ValueError, match="exactly five answers"):
-        freeze(None, None, bank, [("q1", 2)], {}, ExamRules(), topic_of=lambda i: "t")
+        freeze(None, None, bank, [("q1", 2)], {}, ExamRules(), topics={})
 
 
 def test_settings_change_the_open_windows_rules(lab):

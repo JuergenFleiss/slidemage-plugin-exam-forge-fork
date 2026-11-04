@@ -12,9 +12,9 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 from slidemage.plugin_api import SlideSource
 
-from exam_forge.assembly import Blueprint
+from exam_forge.exam import Blueprint
 from exam_forge.folder import open_chosen_folder
-from exam_forge.manifest import Manifest, read_corrections
+from exam_forge.exam import Manifest, read_corrections
 from exam_forge.model import add_topic, assign_slide
 from exam_forge.sources import link_slide
 from exam_forge.ui.issue import _SHEETS
@@ -74,8 +74,8 @@ def issuing(app, tmp_path, monkeypatch):
 
 
 def counts(exam, easy, hard, topic="Arithmetic"):
-    exam.cells[topic]["easy"].setValue(easy)
-    exam.cells[topic]["hard"].setValue(hard)
+    exam.spins[(topic, "choice", "easy")].setValue(easy)
+    exam.spins[(topic, "choice", "hard")].setValue(hard)
 
 
 def propose(host, window):
@@ -123,10 +123,10 @@ def test_swap_freeze_and_documents_keep_the_key_private(issuing, monkeypatch):
     frozen = view.manifest.data()
     assert frozen["blueprint"]["seed"] == seed and frozen["items"][0]["id"] == incoming.id
     assert [i["topic"] for i in frozen["items"]] == ["Arithmetic"]  # Resolved from the slide, not the item.
-    view.documents(0)
+    view.documents("exam")
     host.drain()
     assert not warnings  # Only the private key carries the warning.
-    view.documents(1)
+    view.documents("key")
     host.drain()
     exam_html = (host.root / "exam.html").read_text()
     assert window.editor.current.assistant_note in exam_html and "Correct —" not in exam_html
@@ -136,7 +136,7 @@ def test_swap_freeze_and_documents_keep_the_key_private(issuing, monkeypatch):
 def test_an_infeasible_blueprint_is_reported_without_relaxing(issuing):
     host, _, _, window, _, _ = issuing
     exam = window.exam_tab
-    exam.propose(Blueprint({"Arithmetic": {"easy": 2}}))  # Bypasses the disabled button.
+    exam.propose(Blueprint({("Arithmetic", "choice", "easy"): 2}))  # Bypasses the disabled button.
     host.drain()
     assert exam.selection is None and exam.stack.currentIndex() == 0
     assert "needs 2 easy questions; only 1 is eligible" in exam.reason.text()
@@ -151,7 +151,7 @@ def test_a_new_pick_changes_the_seed_and_a_topic_save_discards_the_proposal(issu
     assert exam.selection.seed != seed and exam.selection.blueprint == blueprint
     assert window.save_topics(add_topic(window.topics, "Geometry"))
     assert exam.selection is None and exam.stack.currentIndex() == 0
-    assert exam.cells["Arithmetic"]["easy"].value() == 1
+    assert exam.spins[("Arithmetic", "choice", "easy")].value() == 1
 
 
 def test_a_changed_source_blocks_approval_without_a_way_around(issuing):
@@ -197,7 +197,7 @@ def test_a_conflict_at_approval_stays_on_review(issuing, monkeypatch):
 def test_editing_after_issue_leaves_the_manifest_and_documents_alone(issuing):
     host, _, bank, window, _, _ = issuing
     view = approve(host, window)
-    view.documents(0)
+    view.documents("exam")
     host.drain()
     before, exam_before = view.manifest_path.read_bytes(), (host.root / "exam.html").read_bytes()
     window.editor.stem.setPlainText("Changed after issue")
@@ -270,9 +270,9 @@ def test_exam_and_key_cannot_share_a_file(issuing, monkeypatch):
     monkeypatch.setattr(window, "error", errors.append)
     shared = host.root / "shared.html"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a: (str(shared), ""))
-    view.documents(0)
+    view.documents("exam")
     host.drain()
     written = shared.read_bytes()
-    view.documents(1)
+    view.documents("key")
     host.drain()
     assert errors == ["Exam and private key need separate files."] and shared.read_bytes() == written
