@@ -45,14 +45,14 @@ def test_every_view_runs_on_the_hosts_widgets(real):
     window.reload()
     window.load_slides()
     host.drain()
-    assert window.topic_list.count() and window.slide_list.count()
+    assert window.questions.topic_list.count() and window.questions.slide_list.count()
 
     for question in (item.id, draft.id, "loose"):
         assert window.open_question(question)
         host.drain()
-        assert window.stack.currentWidget() is window.editor
+        assert window.questions.stack.currentWidget() is window.editor
         window.editor.back()
-    assert window.new_question()
+    assert window.questions.new_question()
     window.editor.update_header(window.editor.current)
     window.editor.populate(bank.get(item.id))
     window.editor.back()
@@ -65,7 +65,7 @@ def test_every_view_runs_on_the_hosts_widgets(real):
         dialog.reject()
 
     exam = window.exam_tab
-    window.tabs.setCurrentWidget(exam)
+    window.tabs.select("Exam")
     exam.refresh()
     host.drain()
     bank.rebaseline(item.id, bank.get(item.id).revision, (replace(link),))
@@ -73,5 +73,5 @@ def test_every_view_runs_on_the_hosts_widgets(real):
     exam.render_counts()
     exam.issue.reset()
     exam.set_step(2)
-    window.setPalette(window.palette())
-    window.tabs.setCurrentIndex(0)
+    host.set_dark(True)
+    window.tabs.select("Questions")

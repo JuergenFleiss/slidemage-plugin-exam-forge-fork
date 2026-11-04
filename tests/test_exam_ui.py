@@ -42,7 +42,7 @@ def issuing(app, tmp_path, monkeypatch):
     window = activate(host).open(deck)
     host.drain()
     ref = source(host, deck)
-    window.new_question()
+    window.questions.new_question()
     window.editor.stem.setPlainText("Two plus two")
     window.editor.assistant_note.setPlainText("Shared stem with next item; keep option order; exclude together.")
     window.editor.use.set_value("elp")
@@ -68,8 +68,8 @@ def issuing(app, tmp_path, monkeypatch):
         sheet.hide()
         sheet.deleteLater()
     _SHEETS.clear()
-    window.hide()
-    window.deleteLater()
+    window.shell.hide()
+    window.shell.deleteLater()
     QApplication.processEvents()
 
 
@@ -80,7 +80,7 @@ def counts(exam, easy, hard, topic="Arithmetic"):
 
 def propose(host, window):
     exam = window.exam_tab
-    window.tabs.setCurrentWidget(exam)
+    window.tabs.select("Exam")
     exam.propose()
     host.drain()
     assert exam.selection and exam.selection.feasible, exam.reason.text()

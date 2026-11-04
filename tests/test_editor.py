@@ -19,7 +19,7 @@ def ticks(window):
 
 def test_ticks_are_a_radio_for_revision_and_multiple_for_elp_which_pads_to_five(env):
     window = env[4]
-    window.new_question()
+    window.questions.new_question()
     ids = [row.option_id for row in window.editor.rows]
     window.editor.rows[0].text.setPlainText("typed")
     window.editor.rows[0].tick.click()
@@ -42,7 +42,7 @@ def test_ticks_are_a_radio_for_revision_and_multiple_for_elp_which_pads_to_five(
 def test_the_footer_follows_the_review_lifecycle(env, monkeypatch):
     host, _, _, _, window = env
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Discard)
-    window.new_question()
+    window.questions.new_question()
     assert reviewed_issues(window.editor.candidate(), window.answer_rules) == [
         "write the question", "fill in every answer", "mark exactly one correct answer", "link a slide"]
     assert not window.editor.approve_button.isEnabled() and window.editor.save_button.isEnabled()
@@ -134,7 +134,7 @@ def test_the_link_grid_lists_the_decks_slides_and_links_in_the_instructor_view(e
     source(host, deck)
     window.load_slides()
     host.drain()
-    window.new_question()
+    window.questions.new_question()
     window.editor.link_button.click()
     assert [b.text() for b in window.editor.link_grid_buttons] == ["1 · Addition"]
     window.editor.link_grid_buttons[0].click()
@@ -142,7 +142,7 @@ def test_the_link_grid_lists_the_decks_slides_and_links_in_the_instructor_view(e
     host.drain()
     link, = window.editor.links
     assert (link.slide_id, link.view, link.language, link.text) == ("s1", "instructor", "en", "Two plus two = four")
-    assert window.editor.link_box.itemAt(0).widget().findChild(type(window.write_button)).text() == "Slide 1 · Addition"
+    assert window.editor.link_box.itemAt(0).widget().findChild(type(window.questions.write_button)).text() == "Slide 1 · Addition"
     window.editor.remove_source(0)
     assert "link a slide" in window.editor.status_line.text()
 
@@ -155,7 +155,7 @@ def text_color(widget):
 def test_ai_chips_and_the_dark_theme_recolour_text_only(env):
     host, _, bank, _, window = env
     ai = bank.create(Item("ai", 1, "AI", (Option("a", "x", True), Option("b", "y")), origin=Origin("ai", "r", "m")))
-    window.open_card(ai.id)
+    window.questions.open_card(ai.id)
     assert window.editor.draft_tag.isVisible() and not window.editor.ai_tag.isVisible()
     chip_text = window.editor.draft_tag.findChild(QLabel)
     assert text_color(chip_text) == TONES["amber"][0] and text_color(window.editor.status_line) == TONES["error"][0]

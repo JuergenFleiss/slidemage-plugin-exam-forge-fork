@@ -1,10 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Questions tab: topics, slides and the questions of one slide in three columns; source checks, XML and table
-export.
+"""Questions tab: topics, slides and the questions of one slide in three columns, or the editor in the third.
 The middle column lists the slides, each with its number of questions, or the questions themselves."""
-from datetime import datetime
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -16,16 +13,17 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..bank import BankError
 from ..drafting import ai_enabled
-from ..model import KINDS, STATUS, USES, agree, ai_draft, deck_order, plural, slide_ids, slide_label, topic_of
+from ..model import KINDS, STATUS, USES, agree, ai_draft, deck_order, plural, slide_ids, topic_of
 from ..rules import question_issues
-from ..sources import check_bank, fresh_deck, link_slide
+from ..sources import link_slide
 from .drafting import DraftDialog
 from .editor import ItemEditor
-from .kit import Box, Fit, deck_language, dot, label, line, passive, row, slide_title, tone
+from .kit import Box, Fit, dot, label, line, passive, row, slide_title, tone
 from .review_changes import ReviewChangesDialog
 from .topic_dialog import TopicDialog
 
@@ -43,17 +41,25 @@ def needs_attention(item, rules):
     return (item.source_changed and item.status != "retired") or ai_draft(item) or off_rules(item, rules)
 
 
-class QuestionsTab:
-    def build_questions_tab(self):
+def changed_on(item):
+    """The linked slides that changed under a question that is still in use."""
+    return [] if item.status == "retired" else list(item.changed_slides)
+
+
+class QuestionsTab(QWidget):
+    """The tab owns what it shows, the view, the selected slide and the focus; the window owns the data."""
+
+    def __init__(self, window):
+        super().__init__()
+        self.window, self.host = window, window.host
         host = self.host
-        self.view, self.sel_slide = "all", None
-        self.focus = "slides"
-        self.slides = None
-        self.slide_gen = 0
-        self.checked_at = None
+        self.reset()
         self.syncing = False
         self.topic_dialog = self.review_dialog = None
         split = QSplitter()
+        page = QVBoxLayout(self)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.addWidget(split)
         self.topic_list, self.slide_list = host.PlainList(), host.PlainList()
         self.stack = QStackedWidget()
         self.cards = host.PlainList()
@@ -122,8 +128,8 @@ class QuestionsTab:
         self.placeholder = host.Label("", "secondary")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.stack.addWidget(self.placeholder)
-        self.editor = ItemEditor(self)
-        self.editor.saved.connect(lambda _: self.reload())
+        self.editor = ItemEditor(window)
+        self.editor.saved.connect(lambda _: window.reload())
         self.editor.closed.connect(self.leave_editor)
         self.editor.compare.connect(self.review_changes)
         self.stack.addWidget(self.editor)
@@ -136,66 +142,57 @@ class QuestionsTab:
         self.slide_list.itemActivated.connect(self.review_row_opened)
         self.cards.itemClicked.connect(self.card_opened)
         self.cards.itemActivated.connect(self.card_opened)
-        return split
+
+    def reset(self):
+        """What the tab shows when it opens, or after a bank switch."""
+        self.view, self.sel_slide, self.focus = "all", None, "slides"
+
+    def set_busy(self, busy):
+        self.draft_button.setEnabled(not busy)
+        self.write_button.setEnabled(not busy)
+        self.editor.setEnabled(not busy and self.editor.current is not None)
 
     def refresh_ai_support(self):
         self.draft_button.setVisible(ai_enabled(self.host))
 
     # -- model ---------------------------------------------------------------------------------------------
 
-    def changed_on(self, item):
-        """The linked slides that changed under a question that is still in use."""
-        return [] if item.status == "retired" else list(item.changed_slides)
-
-    def changed_slides(self):
-        return {slide for item in self.items for slide in self.changed_on(item)}
-
-    def slide_ref(self, slide_id):
-        return next((ref for ref in self.slides or () if ref.id == slide_id), None)
-
-    def slide_name(self, slide_id):
-        ref = self.slide_ref(slide_id)
-        return slide_label(slide_id, ref.position, slide_title(ref)) if ref else slide_label(slide_id)
-
-    def owner(self, slide_id):
-        return next((t for t in self.topics if slide_id in t.slides), None)
-
     def topic_by_id(self, topic_id):
-        return next((t for t in self.topics if t.id == topic_id), None)
+        return next((t for t in self.window.topics if t.id == topic_id), None)
 
     def unlinked(self):
         # A retired question on a slide that left the deck is flagged nowhere else, yet can be restored.
-        known = {ref.id for ref in self.slides} if self.slides is not None else None
-        return [item for item in self.items if not item.sources or (
+        known = {ref.id for ref in self.window.slides} if self.window.slides is not None else None
+        return [item for item in self.window.items if not item.sources or (
             known is not None and item.status == "retired" and not known & set(slide_ids(item)))]
 
     def view_slides(self):
-        refs = self.slides or []
+        refs = self.window.slides or []
         if self.view == "all":
             return refs
         if self.view == "none":
-            return [ref for ref in refs if self.owner(ref.id) is None]
+            return [ref for ref in refs if self.window.owner(ref.id) is None]
         topic = self.topic_by_id(self.view)
         return [ref for ref in refs if topic and ref.id in topic.slides]
 
     def view_items(self):
         if self.view == "attention":
-            return [item for item in self.items if needs_attention(item, self.answer_rules)]
+            return [item for item in self.window.items if needs_attention(item, self.window.answer_rules)]
         if self.view == "unlinked":
             return self.in_deck_order(self.unlinked())
         return self.view_questions() if self.focus == "questions" else []
 
     def in_deck_order(self, items):
-        positions = {ref.id: n for n, ref in enumerate(self.slides or ())}
+        positions = {ref.id: n for n, ref in enumerate(self.window.slides or ())}
         return sorted(items, key=lambda item: deck_order(item, positions))
 
     def view_questions(self):
         """The questions a topic row counts, in deck order."""
         if self.view == "all":
-            return self.in_deck_order(self.items)
+            return self.in_deck_order(self.window.items)
         topic = self.topic_by_id(self.view)
-        return self.in_deck_order([item for item in self.items if item.sources and getattr(
-            topic_of(item, self.topics), "id", None) == getattr(topic, "id", None)])
+        return self.in_deck_order([item for item in self.window.items if item.sources and getattr(
+            topic_of(item, self.window.topics), "id", None) == getattr(topic, "id", None)])
 
     def listing(self):
         """Whether the middle column lists questions rather than slides."""
@@ -209,11 +206,11 @@ class QuestionsTab:
     def ensure_view(self):
         if (self.view not in ("all", "none", *REVIEW) and self.topic_by_id(self.view) is None
                 or self.view == "unlinked" and not self.unlinked()
-                or self.view == "none" and self.slides is not None and not self.view_slides()):
+                or self.view == "none" and self.window.slides is not None and not self.view_slides()):
             self.view = "all"
         if self.view in REVIEW:
             self.sel_slide = None
-        elif self.slides and (self.sel_slide is None or self.sel_slide not in {r.id for r in self.view_slides()}):
+        elif self.window.slides and (self.sel_slide is None or self.sel_slide not in {r.id for r in self.view_slides()}):
             shown = self.view_slides()
             self.sel_slide = shown[0].id if shown else None
 
@@ -263,12 +260,12 @@ class QuestionsTab:
         return passive(tone(chip, accent))
 
     def render_topics(self):
-        host, items = self.host, self.items
-        rules = self.answer_rules
+        host, items = self.host, self.window.items
+        rules = self.window.answer_rules
         attention = [item for item in items if needs_attention(item, rules)]
-        owned = {slide for t in self.topics for slide in t.slides}
-        bare = [r for r in self.slides or () if r.id not in owned]
-        topic_ids = {item.id: topic_of(item, self.topics) for item in items}
+        owned = {slide for t in self.window.topics for slide in t.slides}
+        bare = [r for r in self.window.slides or () if r.id not in owned]
+        topic_ids = {item.id: topic_of(item, self.window.topics) for item in items}
 
         def entry(title, subtitle, topic=None, badge=0, edit=None):
             widget = host.RowButton(title, subtitle)
@@ -287,9 +284,9 @@ class QuestionsTab:
             return widget
 
         def build(add):
-            slides = f"{plural(len(self.slides), 'slide')} · " if self.slides is not None else ""
+            slides = f"{plural(len(self.window.slides), 'slide')} · " if self.window.slides is not None else ""
             add("all", entry("All slides", f"{slides}{plural(len(items), 'question')}"))
-            for topic in self.topics:
+            for topic in self.window.topics:
                 mine = [i for i in items if topic_ids[i.id] is not None and topic_ids[i.id].id == topic.id]
                 add(topic.id, entry(topic.name, f"{plural(len(topic.slides), 'slide')} · {plural(len(mine), 'question')}",
                                     topic, sum(needs_attention(i, rules) for i in mine), topic.id))
@@ -302,7 +299,7 @@ class QuestionsTab:
             new.clicked.connect(lambda: self.edit_topic())
             add(None, row([new], []), False)
             add(None, row([], [passive(label(host, "Review", role="caption"))]), False)
-            changed, drafts = len(self.changed_slides()), sum(ai_draft(i) for i in items)
+            changed, drafts = len(self.window.changed_slides()), sum(ai_draft(i) for i in items)
             broken = sum(off_rules(i, rules) for i in items)
             subtitle = f"{plural(changed, 'changed slide')} · {plural(drafts, 'AI draft')}"
             if broken:
@@ -316,7 +313,7 @@ class QuestionsTab:
 
     def render_slides(self):
         by_slide = {}
-        for item in self.items:
+        for item in self.window.items:
             for slide in slide_ids(item):
                 by_slide.setdefault(slide, []).append(item)
 
@@ -331,7 +328,7 @@ class QuestionsTab:
                 return
             for ref in self.view_slides():
                 mine = by_slide.get(ref.id, [])
-                chips = [self.chip("Changed", accent="violet")] if any(ref.id in self.changed_on(i) for i in mine) else []
+                chips = [self.chip("Changed", accent="violet")] if any(ref.id in changed_on(i) for i in mine) else []
                 drafts = sum(ai_draft(i) for i in mine)
                 if drafts:
                     chips.append(self.chip(plural(drafts, "AI draft"), accent="amber"))
@@ -339,13 +336,13 @@ class QuestionsTab:
                 widget = self.host.RowButton(slide_title(ref), text)
                 widget.layout().setContentsMargins(8, 7, 8, 7)
                 widget.layout().setSpacing(8)
-                widget.layout().insertWidget(0, dot(self.owner(ref.id)))
+                widget.layout().insertWidget(0, dot(self.window.owner(ref.id)))
                 widget.layout().insertWidget(0, self.chip(str(ref.position or "·"), "muted"))
                 for chip in chips:
                     widget.layout().addWidget(chip)
                 add(ref.id, widget)
-            if not self.slides:
-                add(None, row([], [passive(label(self.host, "Loading slides…" if self.slides is None else "No slides.",
+            if not self.window.slides:
+                add(None, row([], [passive(label(self.host, "Loading slides…" if self.window.slides is None else "No slides.",
                                                  role="secondary"))]), False)
 
         self.fill(self.slide_list, build, self.listed_key())
@@ -369,14 +366,14 @@ class QuestionsTab:
             chips.append(self.chip(plural(len(item.media), "image"), "muted"))
         if ai_draft(item):
             chips.append(self.chip("AI draft", accent="amber"))
-        if off_rules(item, self.answer_rules):
+        if off_rules(item, self.window.answer_rules):
             chips.append(self.chip("Off the answer rules", "warning"))
         if item.source_changed and item.status != "retired":
             chips.append(self.chip("Slide changed", accent="violet"))
         review = self.listing()
         others = [s for s in slide_ids(item) if review or s != self.sel_slide]
         if others:
-            names = ", ".join(str(ref.position) if (ref := self.slide_ref(s)) else s for s in others)
+            names = ", ".join(str(ref.position) if (ref := self.window.slide_ref(s)) else s for s in others)
             chips.append(passive(label(host, ("On slide " if review else "Also on slide ") + names, role="caption")))
         elif review:
             chips.append(passive(label(host, "No slide linked", role="caption")))
@@ -402,13 +399,13 @@ class QuestionsTab:
         slide = self.sel_slide
         if slide is None:
             return
-        ref, topic = self.slide_ref(slide), self.owner(slide)
+        ref, topic = self.window.slide_ref(slide), self.window.owner(slide)
         dot(topic, self.crumb_dot)
         self.crumb.setText((topic.name if topic else "No topic") + (f" · slide {ref.position}" if ref else ""))
         self.slide_title.setText((slide_title(ref)) if ref else f"Slide {slide}")
         self.open_button.setEnabled(ref is not None)
-        mine = self.in_deck_order([i for i in self.items if slide in slide_ids(i)])
-        changed = [i for i in mine if slide in self.changed_on(i)]
+        mine = self.in_deck_order([i for i in self.window.items if slide in slide_ids(i)])
+        changed = [i for i in mine if slide in changed_on(i)]
         self.changed_bar.setVisible(bool(changed))
         self.changed_label.setText(f"This slide changed after {plural(len(changed), 'question')} "
                                    f"{agree(len(changed), 'was', 'were')} written.")
@@ -443,10 +440,6 @@ class QuestionsTab:
                                            if key is not None and listw.item(i).data(KEY) == key), None))
         finally:
             self.syncing = False
-
-    def update_footer(self):
-        self.checked_label.setText("Slides not checked yet" if self.checked_at is None else
-                                   f"Slides checked {self.checked_at:%H:%M} · {len(self.changed_slides())} changed")
 
     # -- navigation ----------------------------------------------------------------------------------------
 
@@ -501,9 +494,9 @@ class QuestionsTab:
         if not self.may_leave():
             return False
         try:
-            item = self.bank.get(item_id)
+            item = self.window.bank.get(item_id)
         except (OSError, BankError, KeyError) as exc:
-            self.error(exc)
+            self.window.error(exc)
             return False
         self.editor.populate(item)
         self.show_editor()
@@ -519,7 +512,7 @@ class QuestionsTab:
     def show_editor(self):
         self.stack.setCurrentWidget(self.editor)
         slide = self.sel_slide
-        self.editor.set_back_label(f"‹ {self.slide_name(slide)}" if slide and not self.listing()
+        self.editor.set_back_label(f"‹ {self.window.slide_name(slide)}" if slide and not self.listing()
                             else f"‹ {self.view_name()}")
         if self.listing():
             self.sync_selection()
@@ -531,7 +524,7 @@ class QuestionsTab:
 
     def select(self, slide_id):
         """Show a slide without asking; the caller has already left the editor."""
-        owner = self.owner(slide_id)
+        owner = self.window.owner(slide_id)
         fits = self.view == "all" or (owner is None and self.view == "none") or (owner and self.view == owner.id)
         self.view, self.sel_slide = self.view if fits else "all", slide_id
         self.render()
@@ -541,9 +534,9 @@ class QuestionsTab:
         if not self.may_leave():
             return False
         try:
-            item = self.bank.get(item_id)
+            item = self.window.bank.get(item_id)
         except (OSError, BankError, KeyError) as exc:
-            self.error(exc)
+            self.window.error(exc)
             return False
         self.editor.drop()
         self.stack.setCurrentWidget(self.placeholder)
@@ -553,25 +546,25 @@ class QuestionsTab:
         else:
             self.view, self.sel_slide = "unlinked", None
             self.render()
-        self.tabs.setCurrentIndex(0)
+        self.window.tabs.select("Questions")
         self.editor.populate(item)
         self.show_editor()
         return True
 
     def open_selected_slide(self):
-        ref = self.slide_ref(self.sel_slide)
+        ref = self.window.slide_ref(self.sel_slide)
         if ref is not None:
             try:
                 self.host.open_slide(ref)
             except (OSError, ValueError, RuntimeError) as exc:
-                self.error(exc)
+                self.window.error(exc)
 
     # -- topics --------------------------------------------------------------------------------------------
 
     def edit_topic(self, topic_id=None):
         if self.topic_dialog is not None and self.topic_dialog.isVisible():
             return
-        dialog = self.topic_dialog = TopicDialog(self, self.topic_by_id(topic_id))
+        dialog = self.topic_dialog = TopicDialog(self.window, self.topic_by_id(topic_id))
         dialog.finished.connect(lambda code, d=dialog: self.topic_edited(d, code))
         dialog.open()
 
@@ -582,33 +575,33 @@ class QuestionsTab:
             self.editor.drop()
             self.view, self.sel_slide = dialog.topic_id, None
         self.render()
-        self.exam_tab.refresh()
+        self.window.exam_tab.refresh()
 
     # -- reviewing changes ---------------------------------------------------------------------------------
 
     def review_changes(self, item):
-        changed = self.changed_on(item)
+        changed = changed_on(item)
         self.open_review([item], changed[0] if changed else None)
 
     def review_slide(self):
         slide = self.sel_slide
-        items = [i for i in self.items if slide in self.changed_on(i)]
+        items = [i for i in self.window.items if slide in changed_on(i)]
         if items:
             self.open_review(items, slide)
 
     def open_review(self, items, slide_id):
-        dialog = self.review_dialog = ReviewChangesDialog(self, items, slide_id)
+        dialog = self.review_dialog = ReviewChangesDialog(self.window, items, slide_id)
         dialog.edit_requested.connect(self.open_question)
         dialog.finished.connect(self.reviewed)
         dialog.open()
 
     def reviewed(self, *_):
-        self.reload()
+        self.window.reload()
         editor = self.editor
         if editor.current is None or editor.new_item or editor.dirty():
             return
         try:
-            latest = self.bank.get(editor.current.id)
+            latest = self.window.bank.get(editor.current.id)
         except (OSError, BankError, KeyError):
             return
         if latest != editor.current:
@@ -617,7 +610,7 @@ class QuestionsTab:
     # -- writing and drafting ------------------------------------------------------------------------------
 
     def write_question(self):
-        ref = self.slide_ref(self.sel_slide)
+        ref = self.window.slide_ref(self.sel_slide)
         if ref is None or not self.new_question():
             return
         created, host = self.editor.current, self.host
@@ -626,7 +619,7 @@ class QuestionsTab:
             if self.editor.current is created:
                 self.editor.add_link(link)
 
-        self.work(lambda: link_slide(host, ref, "instructor"), done)
+        self.window.work(lambda: link_slide(host, ref, "instructor"), done)
 
     def start_question(self, link):
         """Sidebar: select the slide and open a new question already linked to it."""
@@ -642,87 +635,27 @@ class QuestionsTab:
         if not ai_enabled(self.host) or not self.may_leave():
             return
         topic = self.topic_by_id(self.view)
-        dialog = DraftDialog(self.host, self.deck, self.bank, self, self.answer_rules, topics=self.topics,
+        dialog = DraftDialog(self.host, self.window.deck, self.window.bank, self.window, self.window.answer_rules, topics=self.window.topics,
                              topic_id=topic.id if topic else None, preselect=self.sel_slide)
         self.drafting_dialog = dialog
-        self.set_busy(True)
+        self.window.set_busy(True)
 
         def finished(code):
-            self.set_busy(False)
+            self.window.set_busy(False)
             if code != DraftDialog.DialogCode.Accepted:
                 return
-            bank, items = self.bank, dialog.items
+            bank, items = self.window.bank, dialog.items
 
             def saved(drafts):
-                self.reload()
+                self.window.reload()
                 self.editor.drop()
                 self.stack.setCurrentWidget(self.placeholder)
                 slides = [s for d in drafts for s in slide_ids(d)]
                 if slides:
                     self.select(slides[0])
-                self.toast(f"{plural(len(drafts), 'AI draft')} added · review before use")
+                self.window.toast(f"{plural(len(drafts), 'AI draft')} added · review before use")
 
-            self.work(lambda: [bank.create(item) for item in items], saved)
+            self.window.work(lambda: [bank.create(item) for item in items], saved)
 
         dialog.finished.connect(finished)
         dialog.open()
-
-    # -- data ----------------------------------------------------------------------------------------------
-
-    def reload(self):
-        try:
-            self.items, errors = self.bank.load()
-            if errors:
-                self.error("\n".join(map(str, errors)))
-            self.render()
-            self.update_footer()
-            self.changed(self.items)
-            self.exam_tab.refresh()
-        except (OSError, BankError, ValueError) as exc:
-            self.error(exc)
-
-    def load_slides(self):
-        self.slide_gen += 1
-        generation, host, deck = self.slide_gen, self.host, self.deck
-        language = deck_language(host, deck)
-
-        def done(refs, error):
-            if generation != self.slide_gen:
-                return
-            if error:
-                self.error(error)
-                return
-            self.slides = list({ref.id: ref for ref in reversed(refs)}.values())[::-1]
-            self.render()
-            self.update_footer()
-            self.editor.refresh()  # Its slide labels and banner come from these slides.
-
-        host.run_in_background(lambda: host.deck_slides(fresh_deck(deck), "instructor", language), done)
-
-    def check_sources(self, *_, then=None, item_ids=None):
-        if self.busy:
-            return
-        self.set_busy(True)
-        self.notice.setText("Checking sources…")
-        host, deck, bank = self.host, self.deck, self.bank
-
-        def checked(report, error):
-            self.set_busy(False)
-            if error is None:
-                self.checked_at = datetime.now()
-            self.reload()      # A failed check may have recorded some questions before it stopped.
-            self.load_slides()
-            if error is not None:
-                self.notice.setText("The source check did not finish.")
-                self.error(error)
-                return
-            self.notice.setText(f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}.")
-            if report.errors:
-                self.error("\n".join(map(str, report.errors)))
-                return
-            for item in self.items:
-                self.editor.take_check(item)
-            if then:
-                then(report)
-
-        host.run_in_background(lambda: check_bank(host, fresh_deck(deck), bank, item_ids), checked)

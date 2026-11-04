@@ -118,7 +118,7 @@ def test_editor_writes_an_open_answer_question(lab):
     _, _, bank, _, window, *_ = lab
     AnswerRulesStore(bank.folder).save(BOTH)
     window.answer_rules_changed()
-    window.new_question()
+    window.questions.new_question()
     assert window.editor.kind_field.isHidden() and not window.editor.choice_box.isHidden()
     window.editor.use.set_value("elp")
     assert not window.editor.kind_field.isHidden()

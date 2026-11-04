@@ -325,7 +325,7 @@ def add(bank, item_id, stem, links=(), status="draft", **fields):
 def fill(window, link=True):
     """Write and save a two-answer question in the open window, linked to slide s1."""
     from exam_forge.sources import link_slide
-    window.new_question()
+    window.questions.new_question()
     window.editor.stem.setPlainText("What is two plus two?")
     first, second = window.editor.rows
     first.text.setPlainText("4")

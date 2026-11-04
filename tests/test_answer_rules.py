@@ -95,7 +95,7 @@ def test_an_elp_exam_with_four_answers(tmp_path):
 
 def test_settings_change_the_open_windows_rules(lab):
     host, deck, bank, _, window, *_ = lab
-    window.open_card("q1")                         # reviewed, one of two answers correct
+    window.questions.open_card("q1")                         # reviewed, one of two answers correct
     host.current_focus = Focus(deck.path, None, "slide")
     page = host.settings_tabs["Exam Forge"]()
     rev_min, rev_max, _, rev_high, elp_count, _, elp_high = page.findChildren(QSpinBox)
@@ -103,12 +103,12 @@ def test_settings_change_the_open_windows_rules(lab):
     rev_min.setValue(3)
     assert AnswerRulesStore(bank.folder).load().revision == AnswerRule(3, 8, 1, 1)
     assert window.answer_rules.revision.min_options == 3
-    assert "Off the answer rules" in row_text(window.cards, "q1") and "attention" in keys(window.topic_list)
+    assert "Off the answer rules" in row_text(window.questions.cards, "q1") and "attention" in keys(window.questions.topic_list)
     assert window.editor.status_line.text().startswith("Reviewed, but it no longer fits the answer rules: have three")
     elp_count.setValue(6)                          # 12 points cannot be split for one correct of six
     notice = next(label for label in page.findChildren(type(page.ai_notice)) if label.text().startswith("Not saved"))
     assert "With 6 answers" in notice.text() and AnswerRulesStore(bank.folder).load().elp.max_options == 5
-    next(b for b in page.findChildren(type(window.write_button)) if b.text() == "Default answer rules").click()
+    next(b for b in page.findChildren(type(window.questions.write_button)) if b.text() == "Default answer rules").click()
     assert AnswerRulesStore(bank.folder).load() == AnswerRules() and window.answer_rules == AnswerRules()
     assert rev_min.value() == 2 and not notice.text()
 

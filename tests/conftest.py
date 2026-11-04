@@ -44,8 +44,8 @@ def env(app, tmp_path):
     yield host, deck, bank, controller, window
     host.drain()
     for window in controller.windows.values():
-        window.hide()
-        window.deleteLater()
+        window.shell.hide()
+        window.shell.deleteLater()
     QApplication.processEvents()
 
 

@@ -163,9 +163,7 @@ class Controller:
             window.deck = deck
             # Reopening also rechecks the bank without replacing unsaved editor content.
             window.check_sources()
-        window.show()
-        window.raise_()
-        window.activateWindow()
+        window.present()
         return window
 
     def sidebar(self, deck):

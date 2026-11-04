@@ -178,8 +178,8 @@ def test_a_missing_bank_asks_for_its_new_folder_and_keeps_the_editor(env, tmp_pa
     host.drain()
     assert other.bank.id == existing.id
     assert host.settings().get("bank_folders")[str(deck.path.resolve())] == str(relocated)
-    other.hide()
-    other.deleteLater()
+    other.shell.hide()
+    other.shell.deleteLater()
 
 
 def change_folder(host, deck, monkeypatch, folder):

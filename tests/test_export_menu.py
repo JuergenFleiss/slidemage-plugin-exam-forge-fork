@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 
 def open_menu(window):
-    window.show()
+    window.present()
     window.export_button.click()
     QApplication.processEvents()
     assert window.export_menu.isVisible()

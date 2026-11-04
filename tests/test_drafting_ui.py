@@ -17,8 +17,8 @@ from exam_forge.ui.drafting import DraftDialog
 
 def send_first(host, window):
     """Open the dialog from the window, tick the first slide and send."""
-    window.draft_button.click()
-    dialog = window.drafting_dialog
+    window.questions.draft_button.click()
+    dialog = window.questions.drafting_dialog
     host.drain()
     dialog.choices.item(0).setCheckState(Qt.CheckState.Checked)
     dialog.send.click()
@@ -32,9 +32,9 @@ def send_one(host, window):
 
 def test_ai_off_hides_the_entry_and_gates_the_action(env, monkeypatch):
     host, _, bank, _, window = env
-    assert window.draft_button.isHidden()
+    assert window.questions.draft_button.isHidden()
     monkeypatch.setattr(host, "ai_chat", lambda: pytest.fail("AI off fetched chat"))
-    window.draft_with_ai()
+    window.questions.draft_with_ai()
     assert not hasattr(window, "drafting_dialog") and bank.load() == ([], [])
 
 
@@ -57,7 +57,7 @@ def test_the_request_carries_only_the_ticked_slide_text_and_drafts_arrive_as_ai_
         assert excluded not in request.instructions + request.text
     chat.done(result(), None)
     host.drain()
-    window.card_opened(window.cards.item(0))
+    window.questions.card_opened(window.questions.cards.item(0))
     draft = window.editor.current
     assert draft.status == "draft" and draft.sources[0].slide_id == ref.id and window.editor.draft_tag.isVisible()
     assert window.editor.ai_tag.toolTip() == "captured-route · captured-model"
@@ -70,8 +70,8 @@ def test_preview_and_request_share_one_source_read(env, monkeypatch):
     read, calls = host.slide_source, []
     monkeypatch.setattr(host, "slide_source", lambda ref: calls.append(ref) or read(ref))
     chat, _ = enable_ai(host)
-    window.draft_button.click()
-    dialog = window.drafting_dialog
+    window.questions.draft_button.click()
+    dialog = window.questions.drafting_dialog
     host.drain()
     dialog.choices.setCurrentRow(0)
     assert dialog.preview.toPlainText() == "Original"
@@ -91,7 +91,7 @@ def test_declined_cancelled_and_late_replies_add_nothing(env, case):
     chat, page, dialog = send_one(host, window)
     if case == "ai_off_preparing":
         page.ai_checkbox.setChecked(False)
-        assert window.draft_button.isHidden()
+        assert window.questions.draft_button.isHidden()
     if case == "before_ready":
         dialog.reject()
     host.drain()
@@ -158,8 +158,8 @@ def test_bulk_drafts_link_to_their_slides(env):
     host, deck, bank, _, window = env
     first, second, _ = slides(host, deck)
     chat, _ = enable_ai(host)
-    window.draft_button.click()
-    dialog = window.drafting_dialog
+    window.questions.draft_button.click()
+    dialog = window.questions.drafting_dialog
     host.drain()
     for i in range(2):
         dialog.choices.item(i).setCheckState(Qt.CheckState.Checked)
