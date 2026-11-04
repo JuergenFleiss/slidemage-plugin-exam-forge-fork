@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Pure request construction and strict, all-or-nothing AI reply parsing."""
+"""Exam Forge's optional AI service: the gate, pure request construction, strict all-or-nothing reply parsing, and
+one cancellable request through all three. Nothing here needs Qt."""
 from __future__ import annotations
 
 import json
@@ -8,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from uuid import uuid4
 
-from slidemage.plugin_api import AiChatRequest, AiChatResult
+from slidemage.plugin_api import AiChatError, AiChatRequest, AiChatResult
 
 from .model import Item, Option, Origin, SourceLink
 from .rules import AnswerRules, question_issues, span
@@ -23,10 +24,92 @@ UPDATE_GUIDANCE = (
     "The result is a draft for an author's review."
 )
 _NO_DRAFTS, _UNCHANGED = "No drafts were added", "The question was not changed"
+# An AI request that ends with neither a reply nor an error: declined, cancelled, or not answered by the plugin.
+NO_REPLY = ("No reply from the AI plugin, so nothing changed. If you did not decline the request, check the AI "
+            "plugin in Settings, Extensions.")
+NO_SERVICE = "Enable AI support and an AI plugin such as Claude or Ollama in Settings."
 
 
 class DraftReplyError(ValueError):
     """A reply cannot safely become a set of drafts."""
+
+
+def ai_enabled(host) -> bool:
+    """The gate: the author has enabled AI support in Settings."""
+    return bool(host.settings().get("ai_support", False))
+
+
+def ai_service(host):
+    """Return the host service only while the author has enabled AI support."""
+    return host.ai_chat() if ai_enabled(host) else None
+
+
+class AiRequest:
+    """One cancellable request through the AI gate: prepare on the worker, send, parse, report.
+
+    The gate is checked before preparing, again just before sending and again on the reply, so turning AI support
+    off stops a request at any point. done(value, problem) runs on the UI thread, once: with what parse returned, or
+    with None and why nothing changed, a message or an exception. After cancel() nothing more is sent or reported.
+    """
+
+    def __init__(self, host):
+        self.host, self.active, self._cancel = host, True, None
+
+    def start(self, prepare, parse, done, sent=lambda: None) -> str | None:
+        """prepare() runs on the worker and returns (request, data); parse(reply, data) checks the reply and raises
+        DraftReplyError to refuse it; sent() runs once the request has gone to the host. Returns why it did not start,
+        or None."""
+        try:
+            service = ai_service(self.host)
+            if service is None or not service.available():
+                return NO_SERVICE
+        except AiChatError as exc:
+            return str(exc)
+
+        def ready(prepared, error):
+            if not self.active:
+                return
+            if error:
+                done(None, error)
+                return
+            request, data = prepared
+            try:
+                service = ai_service(self.host)
+                if service is None:
+                    done(None, "AI support is off. Nothing was sent.")
+                    return
+                sent()
+                self._cancel = service.request(request, lambda reply, error: self._replied(reply, error, data, parse,
+                                                                                           done))
+            except AiChatError as exc:
+                done(None, exc)
+
+        self.host.run_in_background(prepare, ready)
+        return None
+
+    def _replied(self, reply, error, data, parse, done):
+        if not self.active:
+            return
+        self._cancel = None
+        if not ai_enabled(self.host):
+            done(None, "AI support is off. Reply discarded.")
+        elif error is not None:
+            done(None, error)
+        elif reply is None:
+            done(None, NO_REPLY)
+        else:
+            try:
+                value = parse(reply, data)
+            except DraftReplyError as exc:
+                done(None, exc)
+                return
+            done(value, None)
+
+    def cancel(self):
+        self.active = False
+        cancel, self._cancel = self._cancel, None
+        if cancel:
+            cancel()
 
 
 def build_request(links: tuple[SourceLink, ...], rules: AnswerRules, *, use: str = "revision",

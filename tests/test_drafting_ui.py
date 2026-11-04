@@ -10,7 +10,7 @@ from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from slidemage.plugin_api import AiChatError, MediaDescription, SlideSource
 from test_drafting import reply_row, result
 
-from exam_forge.ai_support import NO_REPLY
+from exam_forge.drafting import NO_REPLY
 from exam_forge.model import Item, Option, Topic
 from exam_forge.ui.drafting import DraftDialog
 

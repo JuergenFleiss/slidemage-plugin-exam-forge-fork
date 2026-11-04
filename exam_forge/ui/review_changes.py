@@ -8,10 +8,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QListWidget, QListWidgetItem, QTextBrowser, QVBoxLayout, QWidget,
 )
-from slidemage.plugin_api import AiChatError
 
-from ..ai_support import NO_REPLY, ai_service
-from ..drafting import DraftReplyError, build_update_request, parse_update_reply
+from ..drafting import AiRequest, ai_enabled, build_update_request, parse_update_reply
 from ..sources import SlideIndex, fresh_deck, rebaseline_links, word_diff
 from .kit import Sheet, color, tone
 
@@ -59,16 +57,9 @@ class ReviewChangesDialog(Sheet):
         self.items = [item for item in items if item.status != "retired"]
         self.current = {}
         self.busy, self.generation = False, 0
-        self.state = state = {"active": True, "cancel": None}
-
-        def stop(*_):
-            state["active"] = False
-            cancel, state["cancel"] = state["cancel"], None
-            if cancel:
-                cancel()
-
-        self.finished.connect(stop)
-        self.destroyed.connect(stop)
+        self.request = request = AiRequest(window.host)
+        self.finished.connect(lambda *_: request.cancel())
+        self.destroyed.connect(lambda *_: request.cancel())
         self.resize(860, 680)
         layout = self.body
         panes = QHBoxLayout()
@@ -121,7 +112,7 @@ class ReviewChangesDialog(Sheet):
             return out
 
         def done(result, error):
-            if not self.state["active"] or generation != self.generation:
+            if not self.request.active or generation != self.generation:
                 return
             self.current = result if not error else {i.id: [(None, error, "")] for i in items}
             self.message.setText("")
@@ -131,7 +122,7 @@ class ReviewChangesDialog(Sheet):
         self.host.run_in_background(work, done)
 
     def sync(self):
-        ai = bool(self.host.settings().get("ai_support", False))
+        ai = ai_enabled(self.host)
         for row in self.rows:
             entries = self.current.get(row.item.id)
             ok = bool(entries) and all(isinstance(text, str) for _, text, _ in entries)
@@ -212,7 +203,7 @@ class ReviewChangesDialog(Sheet):
             return bank.rebaseline(item.id, item.revision, links)
 
         def done(result, error):
-            if self.state["active"]:
+            if self.request.active:
                 self.finish(row, error=error, item=result, report=True, chip="Kept · matches the current slide")
 
         host.run_in_background(work, done)
@@ -225,67 +216,34 @@ class ReviewChangesDialog(Sheet):
     def ask_ai(self, row):
         if self.busy:
             return
-        item, host = row.item, self.host
-        try:
-            service = ai_service(host)
-            if service is None or not service.available():
-                row.say("Enable AI support and an AI plugin such as Claude or Ollama in Settings.")
+        item, host, bank, rules = row.item, self.host, self.shell.bank, self.shell.answer_rules
+        deck = self.shell.deck
+
+        def prepare():
+            links = rebaseline_links(host, fresh_deck(deck), item)
+            return build_update_request(item, "\n\n".join(link.text for link in links), rules), links
+
+        def parse(reply, links):
+            return replace(parse_update_reply(reply, item, rules), sources=links)
+
+        def done(updated, problem):
+            if problem is not None:
+                self.finish(row, error=problem)
                 return
-        except AiChatError as exc:
-            row.say(str(exc))
-            return
+
+            def work():
+                bank.save(updated)
+                return bank.set_changed_slides(item.id, ())  # Written against the new text.
+
+            def saved(result, error):
+                if self.request.active:
+                    self.finish(row, error=error, item=result, report=True, chip="Updated by AI · review the draft",
+                                amber=True)
+            host.run_in_background(work, saved)
+
         self.begin(row, "Preparing the question and current slide text…")
-
-        def work():
-            links = rebaseline_links(host, fresh_deck(self.shell.deck), item)
-            return links, build_update_request(item, "\n\n".join(link.text for link in links),
-                                               self.shell.answer_rules)
-
-        def ready(prepared, error):
-            if not self.state["active"]:
-                return
-            if error:
-                self.finish(row, error=error, report=True)
-                return
-            links, request = prepared
-            try:
-                service = ai_service(host)
-                if service is None:
-                    self.finish(row, error="AI support is off.")
-                    return
-                row.say("Asking the AI… Closing this window discards the reply.")
-                self.state["cancel"] = service.request(request, lambda r, e: self.replied(row, item, links, r, e))
-            except AiChatError as exc:
-                self.finish(row, error=exc)
-
-        host.run_in_background(work, ready)
-
-    def replied(self, row, item, links, result, error):
-        if not self.state["active"]:
-            return
-        self.state["cancel"] = None
-        if not self.host.settings().get("ai_support", False):
-            self.finish(row, error="AI support is off. Reply discarded.")
-            return
-        if error is None and result is None:
-            self.finish(row, error=NO_REPLY)
-            return
-        if error is None:
-            try:
-                updated = parse_update_reply(result, item, self.shell.answer_rules)
-            except DraftReplyError as exc:
-                error = exc
-        if error is not None:
-            self.finish(row, error=error)
-            return
-        bank = self.shell.bank
-
-        def work():
-            bank.save(replace(updated, sources=links))
-            return bank.set_changed_slides(item.id, ())  # Written against the new text.
-
-        def done(saved, error):
-            if self.state["active"]:
-                self.finish(row, error=error, item=saved, report=True, chip="Updated by AI · review the draft", amber=True)
-
-        self.host.run_in_background(work, done)
+        refused = self.request.start(prepare, parse, done,
+                                     lambda: row.say("Asking the AI… Closing this window discards the reply."))
+        if refused:
+            self.finish(row)
+            row.say(refused)

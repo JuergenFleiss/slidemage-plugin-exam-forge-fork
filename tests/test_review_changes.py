@@ -9,7 +9,7 @@ from fake_host import enable_ai, revision, source
 from PySide6.QtCore import QCoreApplication, QEvent
 from slidemage.plugin_api import AiChatError, AiChatResult, Route, SlideSource
 
-from exam_forge.ai_support import NO_REPLY
+from exam_forge.drafting import NO_REPLY
 from exam_forge.model import Item, Option, Origin
 from exam_forge.sources import link_slide
 from exam_forge.ui.kit import color

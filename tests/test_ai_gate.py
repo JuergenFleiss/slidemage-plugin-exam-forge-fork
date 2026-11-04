@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 from fake_host import FakeHost, activate
 
-from exam_forge.ai_support import ai_service
+from exam_forge.drafting import ai_service
 
 
 @pytest.fixture

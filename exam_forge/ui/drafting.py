@@ -11,10 +11,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QSpinBox,
 )
-from slidemage.plugin_api import AiChatError
-
-from ..ai_support import NO_REPLY, ai_service
-from ..drafting import DraftReplyError, build_request, parse_reply
+from ..drafting import AiRequest, build_request, parse_reply
 from ..model import KINDS, SourceLink, plural
 from ..sources import VIEWS, fingerprint, fresh_deck
 from .kit import Sheet, deck_language, slide_title
@@ -38,16 +35,9 @@ class DraftDialog(Sheet):
         topic = next((t for t in topics if t.id == topic_id), None)
         self.scope = set(topic.slides) if topic else set()
         self.ticked, self.preselect = set(), preselect
-        self.state = state = {"active": True, "cancel": None}
-
-        def stop(*_):
-            state["active"] = False
-            cancel, state["cancel"] = state["cancel"], None
-            if cancel:
-                cancel()
-
-        self.finished.connect(stop)
-        self.destroyed.connect(stop)
+        self.request = request = AiRequest(host)
+        self.finished.connect(lambda *_: request.cancel())
+        self.destroyed.connect(lambda *_: request.cancel())
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(720, 660)
         layout = self.body
@@ -165,7 +155,7 @@ class DraftDialog(Sheet):
             return refs, sources
 
         def done(result, error):
-            if not self.state["active"] or generation != self.generation:
+            if not self.request.active or generation != self.generation:
                 return
             self.loading = False
             if error:
@@ -202,77 +192,39 @@ class DraftDialog(Sheet):
         self.refresh()
 
     def generate(self):
-        # Check again after source selection: disabling AI closes the gate immediately.
-        try:
-            service = ai_service(self.host)
-            if service is None or not service.available():
-                self.message.setText("Enable AI support and an AI plugin such as Claude or Ollama in Settings.")
-                return
-        except AiChatError as exc:
-            self.message.setText(str(exc))
-            return
         indices = self.selected()
         refs = [self.refs[i] for i in indices]
         sources = [self.sources[i] for i in indices]
         view, language, (use, kind) = self.view.currentData(), self.language.currentText(), self.use.currentData()
-        guidance = self.host.settings().get("drafting_guidance")
-        count = self.count.value()
-        self.controls.setEnabled(False)
-        self.busy = True
-        self.refresh()
-        self.message.setText("Preparing selected sources…")
+        guidance, count, rules = self.host.settings().get("drafting_guidance"), self.count.value(), self.rules
 
-        def work():
+        def prepare():
             links = []
             for ref, source in zip(refs, sources):
                 if isinstance(source, Exception):
                     raise source
                 links.append(SourceLink(ref.id, ref.version or "", language, view, fingerprint(source), source.text))
             links = tuple(links)
-            return build_request(links, self.rules, use=use, guidance=guidance, count=count, kind=kind), links
+            return build_request(links, rules, use=use, guidance=guidance, count=count, kind=kind), links
 
-        def ready(prepared, error):
-            if not self.state["active"]:
-                return
-            if error:
-                self.completed(None, error)
-                return
-            request, sources = prepared
-            # Discovery is kept inside ai_support, including this last-moment gate.
-            try:
-                service = ai_service(self.host)
-                if service is None:
-                    self.idle()
-                    self.message.setText("AI support is off. Nothing was sent.")
-                    return
-                self.message.setText("Drafting… Cancel discards the reply.")
-                self.state["cancel"] = service.request(
-                    request, lambda result, error: self.completed(result, error, sources=sources, use=use, count=count,
-                                                                  kind=kind))
-            except AiChatError as exc:
-                self.completed(None, exc)
+        def parse(reply, links):
+            return parse_reply(reply, rules, sources=links, use=use, count=count, kind=kind)
 
-        self.host.run_in_background(work, ready)
+        def done(items, problem):
+            if problem is not None:
+                self.idle()
+                self.message.setText(str(problem))
+            else:
+                self.items = items
+                self.accept()
 
-    def completed(self, result, error, *, sources=(), use="revision", count=1, kind="choice"):
-        if not self.state["active"]:
-            return
-        self.state["cancel"] = None
-        if not self.host.settings().get("ai_support", False):
+        self.controls.setEnabled(False)
+        self.busy = True
+        self.refresh()
+        self.message.setText("Preparing selected sources…")
+        # The gate is checked again here, after the slides were chosen: turning AI support off closes it at once.
+        refused = self.request.start(prepare, parse, done,
+                                     lambda: self.message.setText("Drafting… Cancel discards the reply."))
+        if refused:
             self.idle()
-            self.message.setText("AI support is off. Reply discarded.")
-            return
-        if error is None and result is None:
-            self.idle()
-            self.message.setText(NO_REPLY)
-            return
-        if error is None:
-            try:
-                self.items = parse_reply(result, self.rules, sources=sources, use=use, count=count, kind=kind)
-            except DraftReplyError as exc:
-                error = exc
-        if error is not None:
-            self.idle()
-            self.message.setText(str(error))
-        else:
-            self.accept()
+            self.message.setText(refused)

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bank import BankError, atomic_write_bytes
+from ..drafting import ai_enabled
 from ..model import KINDS, STATUS, USES, agree, ai_draft, deck_order, plural, slide_ids, slide_label, topic_of
 from ..moodle_xml import export_moodle_xml
 from ..question_document import questions_html
@@ -140,7 +141,7 @@ class QuestionsTab:
         return split
 
     def refresh_ai_support(self):
-        self.draft_button.setVisible(bool(self.host.settings().get("ai_support", False)))
+        self.draft_button.setVisible(ai_enabled(self.host))
 
     # -- model ---------------------------------------------------------------------------------------------
 
@@ -636,7 +637,7 @@ class QuestionsTab:
             self.render_links()
 
     def draft_with_ai(self):
-        if not self.host.settings().get("ai_support", False) or not self.may_leave():
+        if not ai_enabled(self.host) or not self.may_leave():
             return
         topic = self.topic_by_id(self.view)
         dialog = DraftDialog(self.host, self.deck, self.bank, self, self.answer_rules, topics=self.topics,

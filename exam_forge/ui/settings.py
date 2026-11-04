@@ -4,9 +4,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QPlainTextEdit, QSpinBox, QWidget
 
-from ..ai_support import ai_service
 from ..bank import AnswerRulesStore, BankError
-from ..drafting import DEFAULT_GUIDANCE
+from ..drafting import DEFAULT_GUIDANCE, ai_enabled, ai_service
 from ..model import KINDS
 from ..rules import MAX_OPTIONS, AnswerRule, AnswerRules
 
@@ -145,7 +144,7 @@ def build_settings(host, controller):
         page.body.addWidget(widget)
     page.body.addWidget(reset_rules, 0, Qt.AlignmentFlag.AlignLeft)
     checkbox = page.ai_checkbox = QCheckBox("Enable AI support")
-    checkbox.setChecked(bool(host.settings().get("ai_support", False)))
+    checkbox.setChecked(ai_enabled(host))
     notice = page.ai_notice = host.caption("")
     notice.setWordWrap(True)
     page.body.addWidget(checkbox)
