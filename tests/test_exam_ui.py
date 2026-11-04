@@ -28,7 +28,7 @@ class ExamHost(GuiHost):
 
 @pytest.fixture
 def issuing(app, tmp_path, monkeypatch):
-    """One reviewed easy ELP question on slide s1 in topic Arithmetic, and an Exam tab asking for it."""
+    """One reviewed easy exam question on slide s1 in topic Arithmetic, and an Exam tab asking for it."""
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Yes)
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: warnings.append(a[2]) or QMessageBox.StandardButton.Yes)
@@ -45,7 +45,7 @@ def issuing(app, tmp_path, monkeypatch):
     window.questions.new_question()
     window.editor.stem.setPlainText("Two plus two")
     window.editor.assistant_note.setPlainText("Shared stem with next item; keep option order; exclude together.")
-    window.editor.use.set_value("elp")
+    window.editor.use.set_value("exam")
     for number, row in enumerate(window.editor.rows, 1):
         row.text.setPlainText(str(number))
     window.editor.rows[0].tick.click()

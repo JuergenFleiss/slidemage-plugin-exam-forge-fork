@@ -43,14 +43,14 @@ def sample(tmp_path):
               Option('whole', r'\( p + (1-p) = 1 \)', True, 'The two fractions cover the whole.'),
               Option('zero', r'\( p = 0 \)', False, 'Two cells are shaded.'),
               Option('large', r'\( p > 1 \)', False, 'A fraction of these cells cannot exceed one.')),
-             use='elp', difficulty='easy', media=(media,)),
+             use='exam', difficulty='easy', media=(media,)),
         Item('quadratic-function', 1, r'For \( f(x) = x^2 \), select all true statements.',
              (Option('at-zero', r'\( f(0) = 0 \)', True, 'Zero squared is zero.'),
               Option('at-three', r'\( f(3) = 9 \)', True, 'Three squared is nine.'),
               Option('negative', r'\( f(-3) = -9 \)', False, 'A negative number squared is positive.'),
               Option('derivative', r'\( f^{\prime}(x) = 2x \)', True, 'Apply the power rule.'),
               Option('linear', 'The function is linear.', False, 'It is quadratic.')),
-             use='elp', difficulty='hard'),
+             use='exam', difficulty='hard'),
     ]
     for item in items:
         bank.create(item)
@@ -109,7 +109,7 @@ def test_samples_and_fidelity_after_bank_edits(tmp_path):
     before = manifest.encoded
     documents = export_exam_documents(manifest)
     for kind, html in documents.items():
-        assert html == (Path(__file__).parent / f'fixtures/sample_elp_{kind}.html').read_text('utf-8')
+        assert html == (Path(__file__).parent / f'fixtures/sample_exam_{kind}.html').read_text('utf-8')
         doc = Document(html)
         items = manifest.data()['items']
         assert [text for cls, text in doc.blocks if cls == 'text stem'] == [i['stem'] for i in items]

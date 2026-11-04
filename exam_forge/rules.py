@@ -40,14 +40,14 @@ class AnswerRule:
 
 
 REVISION_ANSWERS = AnswerRule(2, 8, 1, 1)
-ELP_ANSWERS = AnswerRule(5, 5, 1, 4)
+EXAM_ANSWERS = AnswerRule(5, 5, 1, 4)
 
 
 @dataclass(frozen=True)
 class ExamRules:
     """The exam's answer rule and question types. Refuses an answer rule that does not split the points evenly."""
 
-    answers: AnswerRule = ELP_ANSWERS
+    answers: AnswerRule = EXAM_ANSWERS
     kinds: tuple[str, ...] = ("choice",)
 
     def __post_init__(self) -> None:
@@ -70,24 +70,24 @@ class AnswerRules:
     chooses. Every multiple-choice exam question has the same number of answers."""
 
     revision: AnswerRule = REVISION_ANSWERS
-    elp: AnswerRule = ELP_ANSWERS
+    exam: AnswerRule = EXAM_ANSWERS
     exam_kinds: tuple[str, ...] = ("choice",)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "exam_kinds", tuple(k for k in KINDS if k in self.exam_kinds))
         if not self.exam_kinds:
             raise ValueError("an exam needs at least one question type")
-        if self.elp.min_options != self.elp.max_options:
+        if self.exam.min_options != self.exam.max_options:
             raise ValueError("every multiple-choice exam question has the same number of answers")
 
     def of(self, use: str) -> AnswerRule:
-        return self.elp if use == "elp" else self.revision
+        return self.exam if use == "exam" else self.revision
 
     def kinds(self, use: str) -> tuple[str, ...]:
-        return self.exam_kinds if use == "elp" else ("choice",)
+        return self.exam_kinds if use == "exam" else ("choice",)
 
     def exam_rules(self) -> ExamRules:
-        return ExamRules(self.elp, self.exam_kinds)
+        return ExamRules(self.exam, self.exam_kinds)
 
 
 def exam_totals(difficulties: Iterable[str], points: Mapping[str, int] = POINTS,

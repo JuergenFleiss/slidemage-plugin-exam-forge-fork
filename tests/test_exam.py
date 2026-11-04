@@ -37,7 +37,7 @@ def item(id_, *, topic="a", difficulty="easy", sources=(), **kwargs):
     """A reviewed exam question; its topic is kept in the learning objective, where topic() finds it."""
     return Item(id_, 1, stem=id_, objective=topic, difficulty=difficulty,
                 options=tuple(Option(str(i), f"Option {i}", i < 2) for i in range(5)),
-                status="reviewed", use="elp", sources=sources, **kwargs)
+                status="reviewed", use="exam", sources=sources, **kwargs)
 
 
 def pool():
@@ -175,7 +175,7 @@ def setup(tmp_path):
     media = bank.store_media("image.png", b"image bytes")
     link = link_slide(host, ref, "instructor")
     for name in ("q1", "q2"):
-        bank.create(Item(name, 1, stem="Original", use="elp", difficulty="easy",
+        bank.create(Item(name, 1, stem="Original", use="exam", difficulty="easy",
                          options=tuple(Option(str(i), str(i), i == 0) for i in range(5)),
                          sources=(link,), media=(media,)))
         bank.set_status(name, 1, "reviewed")

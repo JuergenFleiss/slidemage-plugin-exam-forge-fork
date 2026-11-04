@@ -549,7 +549,7 @@ class ItemEditor(QWidget):
             return
         if self.kind.value() == "choice":
             self._loading = True
-            while len(self.rows) < (self.rule().min_options if self.use.value() == "elp" else 2):
+            while len(self.rows) < (self.rule().min_options if self.use.value() == "exam" else 2):
                 self.add_option()
             self._loading = False
         self.touch()
@@ -560,7 +560,7 @@ class ItemEditor(QWidget):
         self.choice_box.setVisible(kind != "open")
         self.open_box.setVisible(kind == "open")
         # The switch shows for an exam question, and for any question whose type its use does not allow.
-        self.kind_field.setVisible(use == "elp" or kind not in self.window.answer_rules.kinds(use))
+        self.kind_field.setVisible(use == "exam" or kind not in self.window.answer_rules.kinds(use))
         self.add_button.setEnabled(len(self.rows) < self.cap())
         for number, row in enumerate(self.rows, 1):
             row.tick.setAccessibleName(f"Option {number} is correct")

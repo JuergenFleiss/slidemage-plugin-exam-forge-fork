@@ -23,7 +23,7 @@ def test_availability_follows_the_bank(env, lab):
     menu = open_menu(window)
     assert menu.moodle_action.isEnabled() and menu.table_action.isEnabled()
     menu.close()
-    window.items = [replace(item, use="elp") for item in window.items]
+    window.items = [replace(item, use="exam") for item in window.items]
     menu = open_menu(window)
     assert not menu.moodle_action.isEnabled() and "No reviewed revision-quiz" in menu.moodle_action.toolTip()
     menu.close()

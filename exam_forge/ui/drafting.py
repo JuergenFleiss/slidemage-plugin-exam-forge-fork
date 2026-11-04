@@ -66,7 +66,7 @@ class DraftDialog(Sheet):
         self.use.addItem("Revision quiz", ("revision", "choice"))
         kinds = rules.exam_kinds
         for kind in kinds:
-            self.use.addItem("Exam" if len(kinds) == 1 else f"Exam · {KINDS[kind].lower()}", ("elp", kind))
+            self.use.addItem("Exam" if len(kinds) == 1 else f"Exam · {KINDS[kind].lower()}", ("exam", kind))
         self.view, self.language = QComboBox(), QComboBox()
         for label, value in zip(VIEW_NAMES, VIEWS):
             self.view.addItem(label, value)

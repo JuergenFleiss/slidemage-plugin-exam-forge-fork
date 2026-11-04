@@ -331,7 +331,7 @@ class AnswerRulesStore:
             kinds = data["exam_kinds"]
             if type(kinds) is not list or not set(kinds) <= set(KINDS):
                 raise ValueError("invalid exam question types")
-            rules = AnswerRules(**{use: AnswerRule(**data[use]) for use in ("revision", "elp")},
+            rules = AnswerRules(**{use: AnswerRule(**data[use]) for use in ("revision", "exam")},
                                 exam_kinds=tuple(kinds))
             rules.exam_rules()
             return rules

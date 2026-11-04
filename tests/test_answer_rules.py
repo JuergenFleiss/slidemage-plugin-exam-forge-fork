@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""A deck's answer rules: the store, the checks, scoring, Moodle and ELP output, and the Settings section."""
+"""A deck's answer rules: the store, the checks, scoring, Moodle and exam output, and the Settings section."""
 import json
 import re
 from dataclasses import replace
@@ -28,11 +28,11 @@ def test_rules_refuse_what_cannot_work():
         with pytest.raises(ValueError):
             AnswerRule(*args)
     with pytest.raises(ValueError, match="same number"):
-        AnswerRules(elp=AnswerRule(4, 5, 1, 3))
+        AnswerRules(exam=AnswerRule(4, 5, 1, 3))
     with pytest.raises(ValueError, match="With 6 answers and 1 correct, the 12 points of an easy question"):
         ExamRules(AnswerRule(6, 6, 1, 4))
     assert ExamRules(AnswerRule(6, 6, 2, 3)).answers.max_options == 6
-    assert AnswerRules(elp=AnswerRule(6, 6, 2, 3)).exam_rules() == ExamRules(AnswerRule(6, 6, 2, 3))
+    assert AnswerRules(exam=AnswerRule(6, 6, 2, 3)).exam_rules() == ExamRules(AnswerRule(6, 6, 2, 3))
 
 
 def test_checks_follow_the_rule():
@@ -40,8 +40,8 @@ def test_checks_follow_the_rule():
     assert question_issues(question(4, 2), multi) == [] and question_issues(question(4, 2), AnswerRules())
     assert question_issues(question(2, 1), multi) == ["have three to six answers"]
     assert question_issues(question(3, 3), multi) == ["mark one to two correct answers"]
-    assert exam_issues(question(4, 2, "elp"), ExamRules(AnswerRule(4, 4, 1, 3))) == []
-    assert exam_issues(question(4, 2, "elp"), ExamRules()) == ["An exam question must have exactly five answers."]
+    assert exam_issues(question(4, 2, "exam"), ExamRules(AnswerRule(4, 4, 1, 3))) == []
+    assert exam_issues(question(4, 2, "exam"), ExamRules()) == ["An exam question must have exactly five answers."]
 
 
 def test_scoring_follows_the_number_of_answers():
@@ -59,7 +59,7 @@ def test_store_defaults_round_trip_and_corrupt_file(tmp_path):
     assert AnswerRulesStore(bank.folder).load() == rules
     assert bank.folder / "answer-rules.json" in bank.files()   # copied when the deck's folder changes
     with pytest.raises(ValueError):
-        store.save(AnswerRules(elp=AnswerRule(6, 6, 1, 4)))
+        store.save(AnswerRules(exam=AnswerRule(6, 6, 1, 4)))
     assert store.load() == rules
     store.path.write_text(json.dumps({"schema_version": 1, "revision": {"min_options": 1}}))
     with pytest.raises(CorruptFileError):
@@ -78,10 +78,10 @@ def test_moodle_single_and_multiple_response():
         export_moodle_xml([question(4, 2)], rules=AnswerRules())
 
 
-def test_an_elp_exam_with_four_answers(tmp_path):
+def test_an_exam_exam_with_four_answers(tmp_path):
     bank = Bank(tmp_path / "bank", create=True)
     for n, difficulty in ((1, "easy"), (3, "hard")):
-        item = replace(question(4, n, "elp"), id=f"q{n}", difficulty=difficulty)
+        item = replace(question(4, n, "exam"), id=f"q{n}", difficulty=difficulty)
         bank.create(item)
         bank.set_status(item.id, 1, "reviewed")
     rules = ExamRules(AnswerRule(4, 4, 1, 3))
@@ -98,16 +98,16 @@ def test_settings_change_the_open_windows_rules(lab):
     window.questions.open_card("q1")                         # reviewed, one of two answers correct
     host.current_focus = Focus(deck.path, None, "slide")
     page = host.settings_tabs["Exam Forge"]()
-    rev_min, rev_max, _, rev_high, elp_count, _, elp_high = page.findChildren(QSpinBox)
-    assert [rev_min.value(), rev_max.value(), rev_high.value(), elp_count.value(), elp_high.value()] == [2, 8, 1, 5, 4]
+    rev_min, rev_max, _, rev_high, exam_count, _, exam_high = page.findChildren(QSpinBox)
+    assert [rev_min.value(), rev_max.value(), rev_high.value(), exam_count.value(), exam_high.value()] == [2, 8, 1, 5, 4]
     rev_min.setValue(3)
     assert AnswerRulesStore(bank.folder).load().revision == AnswerRule(3, 8, 1, 1)
     assert window.answer_rules.revision.min_options == 3
     assert "Off the answer rules" in row_text(window.questions.cards, "q1") and "attention" in keys(window.questions.topic_list)
     assert window.editor.status_line.text().startswith("Reviewed, but it no longer fits the answer rules: have three")
-    elp_count.setValue(6)                          # 12 points cannot be split for one correct of six
+    exam_count.setValue(6)                          # 12 points cannot be split for one correct of six
     notice = next(label for label in page.findChildren(type(page.ai_notice)) if label.text().startswith("Not saved"))
-    assert "With 6 answers" in notice.text() and AnswerRulesStore(bank.folder).load().elp.max_options == 5
+    assert "With 6 answers" in notice.text() and AnswerRulesStore(bank.folder).load().exam.max_options == 5
     next(b for b in page.findChildren(type(window.questions.write_button)) if b.text() == "Default answer rules").click()
     assert AnswerRulesStore(bank.folder).load() == AnswerRules() and window.answer_rules == AnswerRules()
     assert rev_min.value() == 2 and not notice.text()

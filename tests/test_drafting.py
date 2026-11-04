@@ -98,14 +98,14 @@ def test_draft_cannot_skip_review_and_provenance_survives_edit(tmp_path):
     assert revision(bank, first.id, reviewed.revision) == reviewed
 
 
-def test_default_model_is_preserved_verbatim_and_elp_rules_apply():
+def test_default_model_is_preserved_verbatim_and_exam_rules_apply():
     reply = replace(result(), route=Route("default-route", "chat", ""))
     assert parse_reply(reply, RULES, sources=(SourceLink(),))[0].origin.model == ""
     with pytest.raises(DraftReplyError, match="exactly five answers"):
-        parse_reply(reply, RULES, use="elp", sources=(SourceLink(),))
+        parse_reply(reply, RULES, use="exam", sources=(SourceLink(),))
     row = reply_row()
     row["options"] += [{"text": str(i), "correct": False, "rationale": "Incorrect sum"} for i in range(3)]
-    assert parse_reply(result([row]), RULES, use="elp", sources=(SourceLink(),))[0].use == "elp"
+    assert parse_reply(result([row]), RULES, use="exam", sources=(SourceLink(),))[0].use == "exam"
 
 
 def test_topic_is_not_requested_and_extra_topic_is_refused():
@@ -169,8 +169,8 @@ def test_bad_update_json_is_refused(text):
         parse_update_reply(replace(update_result(), text=text), existing(), RULES)
 
 
-def test_truncated_update_reply_and_elp_rules():
+def test_truncated_update_reply_and_exam_rules():
     with pytest.raises(DraftReplyError, match="truncated"):
         parse_update_reply(update_result(truncated=True), existing(), RULES)
     with pytest.raises(DraftReplyError, match="exactly five answers"):
-        parse_update_reply(update_result(), existing(use="elp"), RULES)
+        parse_update_reply(update_result(), existing(use="exam"), RULES)

@@ -380,7 +380,7 @@ class QuestionsTab(QWidget):
         summary = plural(len(item.options), "answer")
         if item.kind == "open":
             summary = "Model answer" if item.model_answer.strip() else "No model answer yet"
-        elif item.use == "elp":
+        elif item.use == "exam":
             summary += f" · {sum(o.correct for o in item.options)} correct"
         if compact:
             return passive(row([], [text, line(*chips)]))

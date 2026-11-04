@@ -19,7 +19,7 @@ def bank(tmp_path):
 
 def question(item_id="q1"):
     return Item(item_id, 1, "Question?", (Option("a", "Yes", True, "Why"), Option("b", "Also", True)),
-                "objective", "hard", "draft", "elp",
+                "objective", "hard", "draft", "exam",
                 (SourceLink("slide", "2", "en", "lecture", "hash", "Slide text"),), ("slide",),
                 Origin("ai", "route", "model"))
 

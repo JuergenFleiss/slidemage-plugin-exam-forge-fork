@@ -173,14 +173,14 @@ class ExamTab(QWidget):
         avoid = self.avoid.value()
         previous = self.history[0] if self.history and avoid else []
         self.avail = available(items, names, self.rules, previous, avoid)
-        waiting = Counter(names[i.id] for i in items if i.use == "elp" and i.status == "draft" and names[i.id])
+        waiting = Counter(names[i.id] for i in items if i.use == "exam" and i.status == "draft" and names[i.id])
         for name, (avail, draft) in self.notes.items():
             avail.setText(" · ".join(f"{self.avail[(name, kind, d)]} {heading.lower()}"
                                      for kind, d, heading in columns(self.rules.kinds)) + " reviewed")
             n = waiting[name]
             draft.setText(f"{plural(n, 'exam draft')} waiting for review" if n else "")
             draft.setVisible(bool(n))
-        lost = sum(1 for i in items if i.use == "elp" and i.status == "reviewed" and not names[i.id])
+        lost = sum(1 for i in items if i.use == "exam" and i.status == "reviewed" and not names[i.id])
         self.untopiced.setText(f"{plural(lost, 'reviewed exam question')} {agree(lost, 'has', 'have')}"
                                " no topic and can't be used." if lost else "")
         self.untopiced.setVisible(bool(lost))

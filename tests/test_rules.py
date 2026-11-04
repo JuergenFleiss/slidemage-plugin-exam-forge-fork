@@ -4,7 +4,7 @@
 import pytest
 
 from exam_forge.model import Item, Option
-from exam_forge.rules import (ELP_ANSWERS, MINUTES, POINTS, SCORING_FLOOR, AnswerRule, ExamRules, exam_issues,
+from exam_forge.rules import (EXAM_ANSWERS, MINUTES, POINTS, SCORING_FLOOR, AnswerRule, ExamRules, exam_issues,
                               exam_totals, scoring_table)
 
 
@@ -14,7 +14,7 @@ from exam_forge.rules import (ELP_ANSWERS, MINUTES, POINTS, SCORING_FLOOR, Answe
 ])
 def test_scoring_sheet_table(points, expected):
     assert SCORING_FLOOR == 0
-    rows = scoring_table(points, ELP_ANSWERS)
+    rows = scoring_table(points, EXAM_ANSWERS)
     assert [(r.correct_tick, r.wrong_tick) for r in rows] == expected
     for row in rows:
         assert row.correct_options * row.correct_tick + (5 - row.correct_options) * row.wrong_tick == 0
@@ -26,14 +26,14 @@ def test_points_minutes_and_totals():
     assert exam_totals(["easy", "hard"], {"easy": 36, "hard": 60}, {"easy": .1, "hard": .2}) == (96, 0.3)
     for value in (0, -12, 13, 12.0, True):
         with pytest.raises(ValueError):
-            scoring_table(value, ELP_ANSWERS)
+            scoring_table(value, EXAM_ANSWERS)
     with pytest.raises(ValueError, match="With 6 answers and 1 correct"):
         ExamRules(AnswerRule(6, 6, 1, 4))
     assert ExamRules(AnswerRule(6, 6, 1, 4), ("open",)).kinds == ("open",)  # Graded by hand: no ticks to split.
 
 
 def item_with(count, correct):
-    return Item('id', 1, options=tuple(Option(str(i), str(i), i < correct) for i in range(count)), use='elp')
+    return Item('id', 1, options=tuple(Option(str(i), str(i), i < correct) for i in range(count)), use='exam')
 
 
 @pytest.mark.parametrize('count,correct,valid', [

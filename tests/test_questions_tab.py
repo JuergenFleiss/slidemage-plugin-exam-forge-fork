@@ -45,10 +45,10 @@ def test_slides_follow_deck_order_and_topic_selection(lab):
 
 def test_cards_follow_deck_order_retired_last_and_show_other_slides(lab):
     host, _, bank, _, window, refs, link, _ = lab
-    bank.create(Item("elp", 1, "ELP on a", tuple(Option(uuid4().hex, str(n), n < 3) for n in range(5)),
-                     use="elp", sources=(link["a"],)))
+    bank.create(Item("exam", 1, "Exam on a", tuple(Option(uuid4().hex, str(n), n < 3) for n in range(5)),
+                     use="exam", sources=(link["a"],)))
     window.reload()
-    assert keys(window.questions.cards) == ["q4", "q2", "elp", "q1", "q5"]  # By question text, as in the exports.
+    assert keys(window.questions.cards) == ["q4", "q2", "exam", "q1", "q5"]  # By question text, as in the exports.
     assert window.questions.cards.itemWidget(window.questions.cards.item(4)).graphicsEffect() is not None
     assert "Also on slide 3" in card(window, 1) and "5 answers · 3 correct" in card(window, 2)
     pick(window.questions.slide_list, "b")
@@ -234,7 +234,7 @@ def test_review_dialog_never_overwrites_a_dirty_editor(lab, monkeypatch):
 
 def test_moodle_export_takes_every_reviewed_revision_question(lab, tmp_path, monkeypatch):
     host, _, bank, _, window, _, link, _ = lab
-    add(bank, "elp", "Reviewed ELP", [link["a"]], "reviewed", use="elp")
+    add(bank, "exam", "Reviewed exam question", [link["a"]], "reviewed", use="exam")
     exported, asked = [], []
     monkeypatch.setattr("exam_forge.ui.export_menu.export_moodle_xml",
                         lambda items, bank, rules: exported.extend(items) or b"<quiz/>")

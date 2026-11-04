@@ -109,7 +109,7 @@ def _screen(items: Sequence[Item], topics: Mapping[str, str], previous_exams, av
         raise ValueError("Supply one current revision per item ID")
     recent = {id_ for exam in previous_exams[-avoid_last:] for id_ in exam} if avoid_last else set()
     return [item for item in sorted(items, key=lambda i: i.id)
-            if item.status == "reviewed" and item.use == "elp" and not exam_issues(item, rules)
+            if item.status == "reviewed" and item.use == "exam" and not exam_issues(item, rules)
             and item.difficulty in DIFFICULTIES and topics.get(item.id) and item.id not in recent]
 
 
@@ -224,7 +224,7 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]], bluepr
         item = bank.get(item_id)
         if item.revision != revision:
             raise ConflictError(f"stale revision for {item_id}")
-        if item.status != "reviewed" or item.use != "elp":
+        if item.status != "reviewed" or item.use != "exam":
             raise ValueError(f"{item_id} must be a reviewed exam question")
         errors = exam_issues(item, rules)
         if errors:

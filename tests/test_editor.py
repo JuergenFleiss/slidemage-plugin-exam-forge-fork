@@ -17,7 +17,7 @@ def ticks(window):
     return [row.correct() for row in window.editor.rows]
 
 
-def test_ticks_are_a_radio_for_revision_and_multiple_for_elp_which_pads_to_five(env):
+def test_ticks_are_a_radio_for_revision_and_multiple_for_exam_which_pads_to_five(env):
     window = env[4]
     window.questions.new_question()
     ids = [row.option_id for row in window.editor.rows]
@@ -25,7 +25,7 @@ def test_ticks_are_a_radio_for_revision_and_multiple_for_elp_which_pads_to_five(
     window.editor.rows[0].tick.click()
     window.editor.rows[1].tick.click()
     assert ticks(window) == [False, True]
-    window.editor.use.set_value("elp")
+    window.editor.use.set_value("exam")
     window.editor.rows[0].tick.click()
     assert ticks(window) == [True, True, False, False, False] and [r.option_id for r in window.editor.rows[:2]] == ids
     assert not window.editor.add_button.isEnabled() and "exactly five answers" in window.editor.hint.text()
@@ -34,7 +34,7 @@ def test_ticks_are_a_radio_for_revision_and_multiple_for_elp_which_pads_to_five(
     for _ in range(3):
         window.editor.add_option()
     assert len(window.editor.rows) == 8 and not window.editor.add_button.isEnabled()
-    window.editor.use.set_value("elp")
+    window.editor.use.set_value("exam")
     assert len(window.editor.rows) == 8 and window.editor.rows[0].text.toPlainText() == "typed"  # Never deleted.
     assert "have exactly five answers" in reviewed_issues(window.editor.candidate(), window.answer_rules)
 

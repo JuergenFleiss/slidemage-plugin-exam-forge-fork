@@ -77,8 +77,7 @@ class Media:
 
 
 KINDS = {"choice": "Multiple choice", "open": "Open answer"}
-# Item.use "elp" is the exam: the stored name stays, the shown one is "Exam".
-USES = {"revision": "Revision quiz", "elp": "Exam"}
+USES = {"revision": "Revision quiz", "exam": "Exam"}
 NEXT_STATUS = {"draft": "reviewed", "reviewed": "retired", "retired": "draft"}
 STATUS = {"draft": ("Draft", "neutral"), "reviewed": ("Reviewed", "ok"), "retired": ("Retired", "muted")}  # name, tone
 
@@ -92,7 +91,7 @@ class Item:
     objective: str = ""
     difficulty: str = ""
     status: Literal["draft", "reviewed", "retired"] = "draft"
-    use: Literal["elp", "revision"] = "revision"
+    use: Literal["exam", "revision"] = "revision"
     sources: tuple[SourceLink, ...] = ()
     changed_slides: tuple[str, ...] = ()  # The last check's changed or unreadable slides, not revision content.
     origin: Origin = field(default_factory=Origin)

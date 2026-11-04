@@ -26,16 +26,16 @@ def real(request, monkeypatch):
     return request.getfixturevalue("env")
 
 
-def elp_options():
+def exam_options():
     return tuple(Option(str(i), f"Answer {i}", i == 0, "Why") for i in range(5))
 
 
 def test_every_view_runs_on_the_hosts_widgets(real):
     host, deck, bank, _, window = real
     link = link_slide(host, source(host, deck), "instructor")
-    item = bank.create(Item("plain", 1, stem="Q", difficulty="easy", use="elp", options=elp_options(), sources=(link,)))
+    item = bank.create(Item("plain", 1, stem="Q", difficulty="easy", use="exam", options=exam_options(), sources=(link,)))
     item = bank.set_status(item.id, 1, "reviewed")
-    draft = bank.create(Item("draft", 1, stem="AI", difficulty="hard", options=elp_options()[:2], sources=(link,),
+    draft = bank.create(Item("draft", 1, stem="AI", difficulty="hard", options=exam_options()[:2], sources=(link,),
                              origin=Origin("ai", "route", "model")))
     bank.create(Item("loose", 1, stem="No slide"))
     bank.set_changed_slides(item.id, (link.slide_id,))

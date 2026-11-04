@@ -21,14 +21,14 @@ OPEN = AnswerRules(exam_kinds=("open",))
 
 
 def open_item(item_id="o", difficulty="easy", **fields):
-    return Item(item_id, 1, "Explain Bayes' theorem.", use="elp", kind="open", difficulty=difficulty,
+    return Item(item_id, 1, "Explain Bayes' theorem.", use="exam", kind="open", difficulty=difficulty,
                 model_answer=fields.pop("model_answer", "P(A|B) = P(B|A) P(A) / P(B)"), grading_notes="2 points for",
                 **fields)
 
 
 def choice_item(item_id="c", difficulty="easy"):
     return Item(item_id, 1, "Pick", tuple(Option(str(i), f"O{i}", i == 0, "Why") for i in range(5)),
-                use="elp", difficulty=difficulty)
+                use="exam", difficulty=difficulty)
 
 
 def test_an_open_question_round_trips(tmp_path):
@@ -92,17 +92,17 @@ def test_documents_leave_room_and_the_key_holds_the_model_answer(tmp_path):
 
 def test_ai_drafts_and_updates_open_questions():
     link = SourceLink("s", "1", "en", "instructor", "h", "Slide text")
-    request = build_request((link,), OPEN, use="elp", kind="open")
+    request = build_request((link,), OPEN, use="exam", kind="open")
     assert '"model_answer"' in request.instructions and '"options"' not in request.instructions
     with pytest.raises(ValueError):
-        build_request((link,), AnswerRules(), use="elp", kind="open")    # the deck's exam is multiple choice
+        build_request((link,), AnswerRules(), use="exam", kind="open")    # the deck's exam is multiple choice
     row = {"slide": 1, "stem": "Explain", "model_answer": "Because", "grading_notes": "1 point",
            "objective": "Understand", "difficulty": "hard"}
     route = Route("r", "chat", "m")
-    item, = parse_reply(AiChatResult(json.dumps([row]), route), OPEN, sources=(link,), use="elp", kind="open")
+    item, = parse_reply(AiChatResult(json.dumps([row]), route), OPEN, sources=(link,), use="exam", kind="open")
     assert item.kind == "open" and item.model_answer == "Because" and not item.options
     with pytest.raises(DraftReplyError):
-        parse_reply(AiChatResult(json.dumps([{**row, "options": []}]), route), OPEN, sources=(link,), use="elp",
+        parse_reply(AiChatResult(json.dumps([{**row, "options": []}]), route), OPEN, sources=(link,), use="exam",
                     kind="open")
     update = build_update_request(item, "New text", OPEN)
     assert json.loads(update.text)["question"]["model_answer"] == "Because" and "options" not in update.text
@@ -119,7 +119,7 @@ def test_editor_writes_an_open_answer_question(lab):
     window.answer_rules_changed()
     window.questions.new_question()
     assert window.editor.kind_field.isHidden() and not window.editor.choice_box.isHidden()
-    window.editor.use.set_value("elp")
+    window.editor.use.set_value("exam")
     assert not window.editor.kind_field.isHidden()
     window.editor.kind.set_value("open")
     assert window.editor.choice_box.isHidden() and not window.editor.open_box.isHidden()

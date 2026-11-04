@@ -85,7 +85,7 @@ def test_invalid_inputs_fail_closed(tmp_path):
     opts = (Option('a', 'a', True), Option('b', 'b', True))
     for bad in (Item('bad', 1, options=opts), Item('bad', 1, options=(opts[0],)),
                 Item('bad', 1, '\x01', (opts[0], Option('b', 'b'))),
-                Item('secret', 1, 'SECRET STEM', (opts[0], Option('b', 'b')), use='elp')):
+                Item('secret', 1, 'SECRET STEM', (opts[0], Option('b', 'b')), use='exam')):
         with pytest.raises(ValueError):
             export_moodle_xml([bad], rules=AnswerRules())
     item, bank, _ = sample(tmp_path)
@@ -112,7 +112,7 @@ def test_one_row_per_question_in_deck_order_with_answers_side_by_side():
     topics = add_topic((), "Probability")
     topics = assign_slide(topics, topics[0].id, "b")
     items = [item("q1", "Nowhere"), item("q2", "On c and b", ["c", "b"], 3, difficulty="hard", objective="Bayes"),
-             item("q3", "On b", ["b"], use="elp", status="reviewed", assistant_note="Fixed order"),
+             item("q3", "On b", ["b"], use="exam", status="reviewed", assistant_note="Fixed order"),
              item("q4", "Retired on a", ["a"], status="retired"),
              item("q5", "AI on gone", ["gone"], origin=Origin("ai", "r", "m"), changed_slides=("gone",),
                   media=(Media("i.png", "0" * 64, "An image"),))]
@@ -158,7 +158,7 @@ def test_every_question_with_its_answers_in_deck_order(tmp_path):
     items = [
         Item("late", 1, "On <c>", (Option("x", "Yes & no", True, "Because"), Option("y", "Never", False, "")),
              sources=(SourceLink(slide_id="c"),), media=(image, gone), objective="Read fractions"),
-        Item("early", 1, "Explain Bayes.", use="elp", kind="open", difficulty="hard", status="reviewed",
+        Item("early", 1, "Explain Bayes.", use="exam", kind="open", difficulty="hard", status="reviewed",
              model_answer="Posterior ∝ likelihood × prior", grading_notes="Two points", assistant_note="Shared stem",
              sources=(SourceLink(slide_id="b"),)),
         Item("loose", 1, "Nowhere", status="retired"),

@@ -65,7 +65,7 @@ def lab(env):
     add(bank, "q4", "AI draft on a", [link["a"]], origin=Origin("ai", "route", "model"))
     add(bank, "q5", "Retired on a", [link["a"]], "retired")
     add(bank, "q6", "Nowhere")
-    add(bank, "q7", "Unlinked ELP", use="elp")
+    add(bank, "q7", "Unlinked exam question", use="exam")
     add(bank, "q8", "Retired nowhere", status="retired")
     window.reload()
     window.load_slides()
