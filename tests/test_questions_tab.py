@@ -64,19 +64,19 @@ def test_unsaved_work_blocks_every_navigation(lab, monkeypatch):
     asked = []
     monkeypatch.setattr(QMessageBox, "question", lambda *a: asked.append(1) or QMessageBox.StandardButton.Cancel)
     window.card_opened(window.cards.item(0))
-    window.stem.setPlainText("Typed but not saved")
+    window.editor.stem.setPlainText("Typed but not saved")
     pick(window.slide_list, "b")
     assert window.sel_slide == "a" and current_key(window.slide_list) == "a"
     pick(window.topic_list, topics[1].id)
     assert current_key(window.topic_list) == "all"
-    window.back_button.click()
+    window.editor.back_button.click()
     window.focus_switch.buttons()[1].click()
     assert not window.open_question("q3") and window.focus == "slides"
-    assert window.stack.currentWidget() is window.editor and window.stem.toPlainText() == "Typed but not saved"
+    assert window.stack.currentWidget() is window.editor and window.editor.stem.toPlainText() == "Typed but not saved"
     assert len(asked) == 5
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Discard)
     pick(window.slide_list, "b")
-    assert window.sel_slide == "b" and window.current is None
+    assert window.sel_slide == "b" and window.editor.current is None
 
 
 def test_needs_attention_lists_changed_and_ai_drafts(lab):
@@ -89,8 +89,8 @@ def test_needs_attention_lists_changed_and_ai_drafts(lab):
     pick(window.topic_list, "attention")
     assert keys(window.slide_list) == ["q2", "q3", "q4"]
     window.review_row_opened(window.slide_list.item(1))
-    assert window.current.id == "q3" and window.back_button.text() == "‹ Needs attention"
-    window.back_button.click()
+    assert window.editor.current.id == "q3" and window.editor.back_button.text() == "‹ Needs attention"
+    window.editor.back_button.click()
     assert window.view == "attention" and window.stack.currentWidget() is window.placeholder
 
 
@@ -101,7 +101,7 @@ def test_unlinked_questions_are_reachable_and_stay_reviewed(lab):
     pick(window.topic_list, "unlinked")
     assert keys(window.slide_list) == ["q6", "q10", "q7", "q8"]  # Retired last.
     window.review_row_opened(window.slide_list.item(1))
-    window.back_button.click()
+    window.editor.back_button.click()
     assert bank.get("q10").status == "reviewed" and window.view == "unlinked"
     for item in ("q6", "q7", "q8", "q10"):
         bank.save(replace(bank.get(item), status="draft", sources=(link["a"],)))
@@ -123,10 +123,10 @@ def test_reload_keeps_selection_and_unsaved_editor_text(lab):
     _, _, bank, _, window, _, _, _ = lab
     pick(window.slide_list, "c")
     window.card_opened(window.cards.item(0))
-    window.stem.setPlainText("Typing, not saved")
-    add(bank, "q11", "Arrives meanwhile", [window.links[0]])
+    window.editor.stem.setPlainText("Typing, not saved")
+    add(bank, "q11", "Arrives meanwhile", [window.editor.links[0]])
     window.reload()
-    assert window.sel_slide == "c" and window.stem.toPlainText() == "Typing, not saved" and window.dirty()
+    assert window.sel_slide == "c" and window.editor.stem.toPlainText() == "Typing, not saved" and window.editor.dirty()
     assert window.stack.currentWidget() is window.editor
 
 
@@ -185,9 +185,9 @@ def test_write_question_links_the_selected_slide(lab):
     pick(window.slide_list, "b")
     window.write_button.click()
     host.drain()
-    assert window.new_item and [l.slide_id for l in window.links] == ["b"]
-    window.stem.setPlainText("Fresh question")
-    assert window.save() and bank.get(window.current.id).sources[0].slide_id == "b"
+    assert window.editor.new_item and [l.slide_id for l in window.editor.links] == ["b"]
+    window.editor.stem.setPlainText("Fresh question")
+    assert window.editor.save() and bank.get(window.editor.current.id).sources[0].slide_id == "b"
 
 
 def test_sidebar_writes_for_the_focused_slide_and_opens_exam_forge(lab):
@@ -200,9 +200,9 @@ def test_sidebar_writes_for_the_focused_slide_and_opens_exam_forge(lab):
     host.current_focus = Focus(deck.path, refs["c"].path, "slide")
     write.click()
     host.drain()
-    assert window.sel_slide == "c" and [l.slide_id for l in window.links] == ["c"]
-    window.stem.setPlainText("From the slide")
-    assert window.save() and bank.get(window.current.id).sources[0].view == "instructor"
+    assert window.sel_slide == "c" and [l.slide_id for l in window.editor.links] == ["c"]
+    window.editor.stem.setPlainText("From the slide")
+    assert window.editor.save() and bank.get(window.editor.current.id).sources[0].view == "instructor"
     window.close()
     buttons["Open Exam Forge"].click()
     host.drain()
@@ -219,14 +219,14 @@ def test_review_dialog_never_overwrites_a_dirty_editor(lab, monkeypatch):
     spy.edit_requested.emit("q3")
     spy.accept()
     bank.set_changed_slides("q3", ())  # The dialog resolved the question meanwhile.
-    window.review_changes(window.current)
+    window.review_changes(window.editor.current)
     SpyDialog.made[-1].accept()
-    assert window.current.source_changed is False  # A clean editor shows the stored version.
-    window.stem.setPlainText("Mine")
-    window.review_changes(window.current)
+    assert window.editor.current.source_changed is False  # A clean editor shows the stored version.
+    window.editor.stem.setPlainText("Mine")
+    window.review_changes(window.editor.current)
     bank.set_changed_slides("q3", ("b",))
     SpyDialog.made[-1].accept()
-    assert window.stem.toPlainText() == "Mine" and window.dirty()
+    assert window.editor.stem.toPlainText() == "Mine" and window.editor.dirty()
 
 
 # -- export, palette, window --------------------------------------------------------------------------------
@@ -254,7 +254,7 @@ def test_the_window_guards_unsaved_work(lab, monkeypatch):
     assert window.windowTitle() == window.shell.windowTitle() == "Exam Forge · course"
     window.write_button.click()
     host.drain()
-    window.stem.setPlainText("Unsaved")
+    window.editor.stem.setPlainText("Unsaved")
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Cancel)
     assert not window.shell.close() and window.shell.isVisible()
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Discard)

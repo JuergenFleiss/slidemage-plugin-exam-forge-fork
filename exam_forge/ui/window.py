@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
 )
 from ..bank import AnswerRulesStore, BankError, TopicStore
 from ..rules import AnswerRules
-from .editor import ItemEditor
 from .exam_tab import ExamTab
 from .export_menu import ExportMenu
 from .kit import tone_sheet
@@ -37,18 +36,15 @@ class Tabs(QStackedWidget):
         self.setCurrentIndex(self.indexOf(page))
 
 
-class BankWindow(QuestionsTab, ItemEditor, QWidget):
+class BankWindow(QuestionsTab, QWidget):
     """The content of a host window, which the host closes with SlideMage; show and close go to that window."""
 
     def __init__(self, host, deck, bank, changed):
         super().__init__()
         self.host, self.deck, self.bank, self.changed = host, deck, bank, changed
-        self.current = self.baseline = None
-        self.new_item = False
         self.items = []
         self.topics = ()
         self.answer_rules = AnswerRules()
-        self.links = self.attachments = ()
         self.busy = False
         self.idle_callbacks = []
         self.shell = host.Window(f"Exam Forge · {deck.name}")
@@ -134,7 +130,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         # Replace the window's bank only when there is no worker using it.
         self.bank = bank
         self.folder_label.setText(str(bank.folder))
-        self.drop_editor()
+        self.editor.drop()
         self.stack.setCurrentWidget(self.placeholder)
         self.view, self.sel_slide, self.slides = "all", None, None
         self.checked_at = None
@@ -166,9 +162,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.load_answer_rules()
         self.exam_tab.invalidate()
         self.render()
-        if self.current is not None:
-            self.refresh_answers()
-            self.refresh_footer()
+        self.editor.refresh()
 
     def save_topics(self, topics):
         """Persist topics. A proposed exam was resolved with the old ones, so it is dropped."""
@@ -195,7 +189,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.busy = busy
         self.draft_button.setEnabled(not busy)
         self.write_button.setEnabled(not busy)
-        self.editor.setEnabled(not busy and self.current is not None)
+        self.editor.setEnabled(not busy and self.editor.current is not None)
         for widget in (self.check_button, self.export_button, self.exam_tab):
             widget.setEnabled(not busy)
         if busy:

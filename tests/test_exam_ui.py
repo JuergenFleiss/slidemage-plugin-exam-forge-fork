@@ -43,19 +43,19 @@ def issuing(app, tmp_path, monkeypatch):
     host.drain()
     ref = source(host, deck)
     window.new_question()
-    window.stem.setPlainText("Two plus two")
-    window.assistant_note.setPlainText("Shared stem with next item; keep option order; exclude together.")
-    window.use.setCurrentData("elp")
-    for number, row in enumerate(window.rows, 1):
+    window.editor.stem.setPlainText("Two plus two")
+    window.editor.assistant_note.setPlainText("Shared stem with next item; keep option order; exclude together.")
+    window.editor.use.set_value("elp")
+    for number, row in enumerate(window.editor.rows, 1):
         row.text.setPlainText(str(number))
-    window.rows[0].tick.click()
-    window.difficulty.setCurrentData("easy")
+    window.editor.rows[0].tick.click()
+    window.editor.difficulty.set_value("easy")
     with ThreadPoolExecutor() as executor:
-        window.links = (executor.submit(link_slide, host, ref, "instructor").result(),)
-    window.save()
-    window.approve_button.click()
+        window.editor.links = (executor.submit(link_slide, host, ref, "instructor").result(),)
+    window.editor.save()
+    window.editor.approve_button.click()
     host.drain()
-    assert window.current.status == "reviewed"
+    assert window.editor.current.status == "reviewed"
     topics = add_topic((), "Arithmetic")
     assert window.save_topics(assign_slide(topics, topics[0].id, "s1"))
     window.reload()
@@ -96,7 +96,7 @@ def approve(host, window):
 
 
 def add_reviewed(bank, window, item_id, **fields):
-    item = bank.create(replace(window.current, id=item_id, revision=1, status="draft", **fields))
+    item = bank.create(replace(window.editor.current, id=item_id, revision=1, status="draft", **fields))
     bank.set_status(item.id, item.revision, "reviewed")
     window.reload()
     window.exam_tab.refresh()
@@ -129,7 +129,7 @@ def test_swap_freeze_and_documents_keep_the_key_private(issuing, monkeypatch):
     view.documents(1)
     host.drain()
     exam_html = (host.root / "exam.html").read_text()
-    assert window.current.assistant_note in exam_html and "Correct —" not in exam_html
+    assert window.editor.current.assistant_note in exam_html and "Correct —" not in exam_html
     assert "Correct" in (host.root / "key.html").read_text() and any("holds answers" in w for w in warnings)
 
 
@@ -157,7 +157,7 @@ def test_a_new_pick_changes_the_seed_and_a_topic_save_discards_the_proposal(issu
 def test_a_changed_source_blocks_approval_without_a_way_around(issuing):
     host, _, bank, window, _, _ = issuing
     exam = propose(host, window)
-    bank.set_changed_slides(window.current.id, ("s1",), expected_sources=window.current.sources)
+    bank.set_changed_slides(window.editor.current.id, ("s1",), expected_sources=window.editor.current.sources)
     window.reload()  # As after any check: the tab reads the window's questions.
     host.drain()
     assert exam.blocked.text() == "1 picked question is linked to a changed slide. Review or swap before freezing."
@@ -186,7 +186,7 @@ def test_a_fresh_check_finding_a_change_blocks_the_freeze(issuing, when):
 def test_a_conflict_at_approval_stays_on_review(issuing, monkeypatch):
     host, _, bank, window, _, _ = issuing
     exam = propose(host, window)
-    bank.set_status(window.current.id, window.current.revision, "retired")
+    bank.set_status(window.editor.current.id, window.editor.current.revision, "retired")
     errors = []
     monkeypatch.setattr(window, "error", errors.append)
     exam.approve_button.click()
@@ -200,8 +200,8 @@ def test_editing_after_issue_leaves_the_manifest_and_documents_alone(issuing):
     view.documents(0)
     host.drain()
     before, exam_before = view.manifest_path.read_bytes(), (host.root / "exam.html").read_bytes()
-    window.stem.setPlainText("Changed after issue")
-    assert window.save()
+    window.editor.stem.setPlainText("Changed after issue")
+    assert window.editor.save()
     assert view.manifest_path.read_bytes() == before and (host.root / "exam.html").read_bytes() == exam_before
 
 
@@ -249,7 +249,7 @@ def test_corrections_go_to_a_separate_journal_and_a_failed_save_keeps_the_input(
 
 def test_unreadable_history_is_reported_and_valid_history_still_applies(issuing):
     host, _, bank, window, _, _ = issuing
-    question = window.current
+    question = window.editor.current
     replacement = add_reviewed(bank, window, "replacement")
     Manifest(json.dumps({"schema_version": 1, "bank_id": bank.id,
                          "items": [{"id": question.id}]}).encode()).write(bank.folder / "valid.manifest.json")

@@ -153,7 +153,7 @@ class Switch(QWidget):
         super().__init__()
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
-        self.clearable, self.value = clearable, "" if clearable else options[0][1]
+        self.clearable, self._value = clearable, "" if clearable else options[0][1]
         self.control = host.SegmentedControl([(value, label) for label, value in options])
         self.buttons = dict(zip((value for _, value in options), self.control.buttons()))
         self.control.changed.connect(self.pick)
@@ -162,24 +162,24 @@ class Switch(QWidget):
         self.sync()
 
     def sync(self):
-        if self.value in self.buttons:
-            self.control.set_current(self.value)
+        if self._value in self.buttons:
+            self.control.set_current(self._value)
         else:
             self.control.clear_current()
 
-    def currentData(self):
-        return self.value
+    def value(self):
+        return self._value
 
-    def setCurrentData(self, value):
+    def set_value(self, value):
         value = value or ""
-        changed = value != self.value
-        self.value = value
+        changed = value != self._value
+        self._value = value
         self.sync()
         if changed:
             self.changed.emit()
 
     def pick(self, value):
-        self.setCurrentData("" if self.clearable and value == self.value else value)
+        self.set_value("" if self.clearable and value == self._value else value)
         self.sync()
 
 

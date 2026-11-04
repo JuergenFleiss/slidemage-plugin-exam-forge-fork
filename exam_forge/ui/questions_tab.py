@@ -3,7 +3,6 @@
 """Questions tab: topics, slides and the questions of one slide in three columns; source checks, XML and table
 export.
 The middle column lists the slides, each with its number of questions, or the questions themselves."""
-from dataclasses import replace
 from datetime import datetime
 
 from PySide6.QtCore import Qt
@@ -25,6 +24,7 @@ from ..model import KINDS, STATUS, USES, agree, ai_draft, deck_order, plural, sl
 from ..rules import question_issues
 from ..sources import check_bank, fresh_deck, link_slide
 from .drafting import DraftDialog
+from .editor import ItemEditor
 from .kit import Box, Fit, deck_language, dot, label, line, passive, row, slide_title, tone
 from .review_changes import ReviewChangesDialog
 from .topic_dialog import TopicDialog
@@ -122,8 +122,11 @@ class QuestionsTab:
         self.placeholder = host.Label("", "secondary")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.stack.addWidget(self.placeholder)
-        self.build_editor(host, self.stack)
-        self.editor.setEnabled(False)
+        self.editor = ItemEditor(self)
+        self.editor.saved.connect(lambda _: self.reload())
+        self.editor.closed.connect(self.leave_editor)
+        self.editor.compare.connect(self.review_changes)
+        self.stack.addWidget(self.editor)
         self.refresh_ai_support()
         split.setSizes([260, 330, 590])
         split.setStretchFactor(2, 1)
@@ -350,7 +353,7 @@ class QuestionsTab:
     def listed_key(self):
         """The row of the middle column that is current: the open question's, or the selected slide's."""
         if self.listing():
-            return self.current.id if self.current is not None else None
+            return self.editor.current.id if self.editor.current is not None else None
         return self.sel_slide
 
     def card(self, item, compact=False):
@@ -421,7 +424,7 @@ class QuestionsTab:
 
     def show_page(self):
         # The editor stays while it holds a question; a dropped one would be a disabled panel that ignores input.
-        if self.stack.currentWidget() is self.editor and self.current is not None:
+        if self.stack.currentWidget() is self.editor and self.editor.current is not None:
             return
         if self.listing() or self.sel_slide is None:
             self.placeholder.setText("Select a question to open it." if self.listing()
@@ -451,14 +454,11 @@ class QuestionsTab:
         """Ask about unsaved work before the view changes; drop the editor when the answer allows it."""
         if not self.may_leave():
             return False
-        self.drop_editor()
+        self.editor.drop()
         return True
 
-    def drop_editor(self):
-        self.current = self.baseline = None
-        self.new_item = False
-        self.links = self.attachments = ()
-        self.editor.setEnabled(False)
+    def may_leave(self):
+        return self.editor.may_leave()
 
     def topic_changed(self, entry, _previous):
         key = entry.data(KEY) if entry else None
@@ -505,20 +505,27 @@ class QuestionsTab:
         except (OSError, BankError, KeyError) as exc:
             self.error(exc)
             return False
-        self.populate(item)
+        self.editor.populate(item)
+        self.show_editor()
         return True
 
-    def populate(self, item, new=False):
-        super().populate(item, new)
+    def new_question(self):
+        """Open the editor on a new question; False when unsaved work stays."""
+        if not self.editor.new_question():
+            return False
+        self.show_editor()
+        return True
+
+    def show_editor(self):
         self.stack.setCurrentWidget(self.editor)
         slide = self.sel_slide
-        self.set_back_label(f"‹ {self.slide_name(slide)}" if slide and not self.listing()
+        self.editor.set_back_label(f"‹ {self.slide_name(slide)}" if slide and not self.listing()
                             else f"‹ {self.view_name()}")
         if self.listing():
             self.sync_selection()
 
     def leave_editor(self):
-        self.drop_editor()
+        self.editor.drop()
         self.stack.setCurrentWidget(self.placeholder)
         self.render()
 
@@ -538,7 +545,7 @@ class QuestionsTab:
         except (OSError, BankError, KeyError) as exc:
             self.error(exc)
             return False
-        self.drop_editor()
+        self.editor.drop()
         self.stack.setCurrentWidget(self.placeholder)
         slides = slide_ids(item)
         if slides:
@@ -547,7 +554,8 @@ class QuestionsTab:
             self.view, self.sel_slide = "unlinked", None
             self.render()
         self.tabs.setCurrentIndex(0)
-        self.populate(item)
+        self.editor.populate(item)
+        self.show_editor()
         return True
 
     def open_selected_slide(self):
@@ -571,7 +579,7 @@ class QuestionsTab:
         if code != dialog.DialogCode.Accepted:
             return
         if dialog.created and self.may_leave():
-            self.drop_editor()
+            self.editor.drop()
             self.view, self.sel_slide = dialog.topic_id, None
         self.render()
         self.exam_tab.refresh()
@@ -596,14 +604,15 @@ class QuestionsTab:
 
     def reviewed(self, *_):
         self.reload()
-        if self.current is None or self.new_item or self.dirty():
+        editor = self.editor
+        if editor.current is None or editor.new_item or editor.dirty():
             return
         try:
-            latest = self.bank.get(self.current.id)
+            latest = self.bank.get(editor.current.id)
         except (OSError, BankError, KeyError):
             return
-        if latest != self.current:
-            self.populate(latest)
+        if latest != editor.current:
+            editor.populate(latest)
 
     # -- writing and drafting ------------------------------------------------------------------------------
 
@@ -611,12 +620,11 @@ class QuestionsTab:
         ref = self.slide_ref(self.sel_slide)
         if ref is None or not self.new_question():
             return
-        created, host = self.current, self.host
+        created, host = self.editor.current, self.host
 
         def done(link):
-            if self.current is created:
-                self.links += (link,)
-                self.render_links()
+            if self.editor.current is created:
+                self.editor.add_link(link)
 
         self.work(lambda: link_slide(host, ref, "instructor"), done)
 
@@ -624,12 +632,11 @@ class QuestionsTab:
         """Sidebar: select the slide and open a new question already linked to it."""
         if not self.may_leave():
             return
-        self.drop_editor()
+        self.editor.drop()
         self.stack.setCurrentWidget(self.placeholder)
         self.select(link.slide_id)
         if self.new_question():
-            self.links = (link,)
-            self.render_links()
+            self.editor.add_link(link)
 
     def draft_with_ai(self):
         if not ai_enabled(self.host) or not self.may_leave():
@@ -648,7 +655,7 @@ class QuestionsTab:
 
             def saved(drafts):
                 self.reload()
-                self.drop_editor()
+                self.editor.drop()
                 self.stack.setCurrentWidget(self.placeholder)
                 slides = [s for d in drafts for s in slide_ids(d)]
                 if slides:
@@ -688,9 +695,7 @@ class QuestionsTab:
             self.slides = list({ref.id: ref for ref in reversed(refs)}.values())[::-1]
             self.render()
             self.update_footer()
-            if self.current is not None:  # Its slide labels and banner come from these slides.
-                self.draw_links()
-                self.update_header(self.current)
+            self.editor.refresh()  # Its slide labels and banner come from these slides.
 
         host.run_in_background(lambda: host.deck_slides(fresh_deck(deck), "instructor", language), done)
 
@@ -715,13 +720,8 @@ class QuestionsTab:
             if report.errors:
                 self.error("\n".join(map(str, report.errors)))
                 return
-            if self.current and not self.new_item:
-                # A marker is not revision content. Leave every typed field intact.
-                latest = next((item for item in self.items if item.id == self.current.id), None)
-                if latest:
-                    self.current = replace(self.current, changed_slides=latest.changed_slides)
-                    self.baseline = replace(self.baseline, changed_slides=latest.changed_slides)
-                    self.update_header(self.current)
+            for item in self.items:
+                self.editor.take_check(item)
             if then:
                 then(report)
 

@@ -51,11 +51,11 @@ def test_every_view_runs_on_the_hosts_widgets(real):
         assert window.open_question(question)
         host.drain()
         assert window.stack.currentWidget() is window.editor
-        window.back()
+        window.editor.back()
     assert window.new_question()
-    window.update_header(window.current)
-    window.populate(bank.get(item.id))
-    window.back()
+    window.editor.update_header(window.editor.current)
+    window.editor.populate(bank.get(item.id))
+    window.editor.back()
 
     window.host.settings().set("ai_support", True)
     for dialog in (TopicDialog(window, None), ReviewChangesDialog(window, [bank.get(item.id)], link.slide_id),

@@ -182,16 +182,31 @@ class AnswerRow(QWidget):
         return Option(self.option_id, self.text.toPlainText(), self.correct(), self.why.toPlainText())
 
 
-class ItemEditor:
-    def build_editor(self, host, split):
+class ItemEditor(QWidget):
+    """The question editor. The window holds the bank, deck, rules, topics and slides and runs the editor's work; the
+    editor tells its tab when it stored a question, when it closes, and which question to compare."""
+
+    saved = Signal(object)    # Item: a new revision or status is stored.
+    closed = Signal()         # The back link was pressed and may_leave agreed.
+    compare = Signal(object)  # Item: Compare was pressed.
+
+    def __init__(self, window):
+        super().__init__()
+        self.window, self.host = window, window.host
+        host = self.host
+        self.current = self.baseline = None
+        self.new_item = False
+        self.links = self.attachments = ()
         self._loading = False
         self.rows = []
         self.link_grid_buttons = []
-        self.editor = host.Page()
-        self.editor.body.setContentsMargins(0, 0, 0, 0)
-        split.addWidget(self.editor)
+        page = host.Page()
+        page.body.setContentsMargins(0, 0, 0, 0)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(page)
         card = host.Card()
-        self.editor.body.addWidget(card)
+        page.body.addWidget(card)
         outer = card.layout()
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -216,7 +231,7 @@ class ItemEditor:
         self.source_banner = tone(host.Label("A linked slide changed after this question was written."), "violet")
         self.source_banner.setWordWrap(True)
         self.compare_button = host.Button("Compare", compact=True)
-        self.compare_button.clicked.connect(lambda: self.review_changes(self.current))
+        self.compare_button.clicked.connect(lambda: self.compare.emit(self.current))
         self.still_button = host.Button("Still correct", compact=True)
         self.still_button.clicked.connect(self.still_correct)
         self.source_bar = Box()
@@ -334,17 +349,18 @@ class ItemEditor:
         self.kind.changed.connect(self.kind_changed)
         for chip in (self.ai_tag, self.draft_tag, self.source_bar):
             chip.hide()
+        self.setEnabled(False)
 
     # -- state ---------------------------------------------------------------------------------------------
 
     def candidate(self):
         # Answers typed before switching to Open answer stay in the editor until it is left, but are not saved.
-        is_open = self.kind.currentData() == "open"
+        is_open = self.kind.value() == "open"
         return replace(self.current, stem=self.stem.toPlainText(),
                        options=() if is_open else tuple(r.option() for r in self.rows),
-                       objective=self.objective.text(), difficulty=self.difficulty.currentData(),
-                       use=self.use.currentData(), sources=self.links, media=self.attachments,
-                       assistant_note=self.assistant_note.toPlainText(), kind=self.kind.currentData(),
+                       objective=self.objective.text(), difficulty=self.difficulty.value(),
+                       use=self.use.value(), sources=self.links, media=self.attachments,
+                       assistant_note=self.assistant_note.toPlainText(), kind=self.kind.value(),
                        model_answer=self.model_answer.toPlainText() if is_open else "",
                        grading_notes=self.grading_notes.toPlainText() if is_open else "")
 
@@ -352,8 +368,8 @@ class ItemEditor:
         return self.current is not None and (self.new_item or self.candidate() != self.baseline)
 
     def may_leave(self):
-        if self.busy:
-            self.error("Wait for the current operation to finish.")
+        if self.window.busy:
+            self.window.error("Wait for the current operation to finish.")
             return False
         if not self.dirty():
             return True
@@ -364,14 +380,12 @@ class ItemEditor:
             return self.save()
         return answer == QMessageBox.StandardButton.Discard
 
-    def toast(self, text):
-        """Shell hook: tell the user something went well."""
-
-    def leave_editor(self):
-        """Shell hook: the back link was pressed and may_leave agreed."""
-
-    def review_changes(self, item):
-        """Shell hook: Compare was pressed."""
+    def drop(self):
+        """Close the question without asking; the caller has already asked."""
+        self.current = self.baseline = None
+        self.new_item = False
+        self.links = self.attachments = ()
+        self.setEnabled(False)
 
     def set_back_label(self, text):
         self.back_button.setText(text)
@@ -379,7 +393,7 @@ class ItemEditor:
 
     def back(self):
         if self.may_leave():
-            self.leave_editor()
+            self.closed.emit()
 
     def touch(self, *_):
         if self._loading or self.current is None:
@@ -400,13 +414,13 @@ class ItemEditor:
         for option in item.options:
             self.add_option(option)
         self.objective.setText(item.objective)
-        self.use.setCurrentData(item.use)
-        self.kind.setCurrentData(item.kind)
+        self.use.set_value(item.use)
+        self.kind.set_value(item.kind)
         self.model_answer.setPlainText(item.model_answer)
         self.grading_notes.setPlainText(item.grading_notes)
-        self.difficulty.setCurrentData(item.difficulty)
+        self.difficulty.set_value(item.difficulty)
         self._loading = False
-        self.editor.setEnabled(True)
+        self.setEnabled(True)
         self.close_link_grid()
         self.update_header(item)
         self.draw_links()
@@ -414,6 +428,20 @@ class ItemEditor:
         self.refresh_answers()
         self.baseline = self.candidate()
         self.refresh_footer()
+
+    def refresh(self):
+        """The deck's answer rules or slides changed: show what they mean for the open question."""
+        if self.current is not None:
+            self.draw_links()
+            self.update_header(self.current)
+            self.refresh_answers()
+
+    def take_check(self, latest):
+        """A source check stored which slides changed. That is not revision content: every typed field stays."""
+        if self.current is not None and not self.new_item and latest.id == self.current.id:
+            self.current = replace(self.current, changed_slides=latest.changed_slides)
+            self.baseline = replace(self.baseline, changed_slides=latest.changed_slides)
+            self.update_header(self.current)
 
     def update_header(self, item):
         # Like the cards: an AI draft until it is reviewed, AI-assisted for good after that.
@@ -426,7 +454,7 @@ class ItemEditor:
         set_chip(self.status_chip, "New question" if self.new_item else name, chip_tone)
         set_chip(self.rev_chip, f"rev {item.revision}")
         self.rev_chip.setVisible(not self.new_item)
-        first = self.slide_ref(item.changed_slides[0]) if item.changed_slides else None
+        first = self.window.slide_ref(item.changed_slides[0]) if item.changed_slides else None
         self.source_banner.setText(f"Slide {first.position} changed after this question was written." if first
                                    else "A linked slide changed after this question was written.")
         self.source_bar.setVisible(item.source_changed)
@@ -443,12 +471,12 @@ class ItemEditor:
             for button in buttons:
                 button.setEnabled(False)
             return
-        dirty, issues = self.dirty(), reviewed_issues(self.candidate(), self.answer_rules)
+        dirty, issues = self.dirty(), reviewed_issues(self.candidate(), self.window.answer_rules)
         status = item.status
         if status == "retired":
             issues = []
         # The answer rules can change after a question was reviewed.
-        off_rules = status == "reviewed" and not dirty and question_issues(item, self.answer_rules)
+        off_rules = status == "reviewed" and not dirty and question_issues(item, self.window.answer_rules)
         if issues and (dirty or status == "draft"):
             text = "Before marking reviewed: " + " · ".join(issues)
         elif off_rules:
@@ -476,7 +504,7 @@ class ItemEditor:
     # -- answers -------------------------------------------------------------------------------------------
 
     def rule(self):
-        return self.answer_rules.of(self.use.currentData())
+        return self.window.answer_rules.of(self.use.value())
 
     def cap(self):
         return self.rule().max_options
@@ -509,30 +537,30 @@ class ItemEditor:
         if self._loading:
             return
         # A revision quiz is multiple choice; an exam question takes a type the deck's exam uses.
-        kinds = self.answer_rules.kinds(self.use.currentData())
+        kinds = self.window.answer_rules.kinds(self.use.value())
         self._loading = True
-        if self.kind.currentData() not in kinds:
-            self.kind.setCurrentData(kinds[0])
+        if self.kind.value() not in kinds:
+            self.kind.set_value(kinds[0])
         self._loading = False
         self.kind_changed()
 
     def kind_changed(self):
         if self._loading:
             return
-        if self.kind.currentData() == "choice":
+        if self.kind.value() == "choice":
             self._loading = True
-            while len(self.rows) < (self.rule().min_options if self.use.currentData() == "elp" else 2):
+            while len(self.rows) < (self.rule().min_options if self.use.value() == "elp" else 2):
                 self.add_option()
             self._loading = False
         self.touch()
 
     def refresh_answers(self):
-        use, kind = self.use.currentData(), self.kind.currentData()
+        use, kind = self.use.value(), self.kind.value()
         self.hint.setText(f"{USES[use]}: {describe(self.rule())}")
         self.choice_box.setVisible(kind != "open")
         self.open_box.setVisible(kind == "open")
         # The switch shows for an exam question, and for any question whose type its use does not allow.
-        self.kind_field.setVisible(use == "elp" or kind not in self.answer_rules.kinds(use))
+        self.kind_field.setVisible(use == "elp" or kind not in self.window.answer_rules.kinds(use))
         self.add_button.setEnabled(len(self.rows) < self.cap())
         for number, row in enumerate(self.rows, 1):
             row.tick.setAccessibleName(f"Option {number} is correct")
@@ -546,19 +574,19 @@ class ItemEditor:
     # -- lifecycle -----------------------------------------------------------------------------------------
 
     def save(self, *_):
-        if self.current is None or self.busy:
+        if self.current is None or self.window.busy:
             return False
         if not self.dirty():
             return True
         item = replace(self.candidate(), status="draft")
         try:
-            saved = self.bank.create(item) if self.new_item else self.bank.save(item)
+            saved = self.window.bank.create(item) if self.new_item else self.window.bank.save(item)
         except (OSError, BankError, ValueError) as exc:
-            self.error(exc)
+            self.window.error(exc)
             return False
         self.populate(saved)
-        self.reload()
-        self.toast(f"Saved revision {saved.revision} as Draft.")
+        self.saved.emit(saved)
+        self.window.toast(f"Saved revision {saved.revision} as Draft.")
         return True
 
     def change_status(self, target):
@@ -567,16 +595,16 @@ class ItemEditor:
         if target == "draft" and self.current.status == "draft":
             return
         if target == "reviewed":
-            issues = reviewed_issues(self.current, self.answer_rules)
+            issues = reviewed_issues(self.current, self.window.answer_rules)
             if issues:
-                self.error("Before marking reviewed: " + " · ".join(issues))
+                self.window.error("Before marking reviewed: " + " · ".join(issues))
                 return
         item = self.current
 
         def proceed(report):
             checked = report.items[0]
             if checked.item.revision != item.revision:
-                self.error("Question changed during the check. Your editor is intact; save or reopen before continuing.")
+                self.window.error("Question changed during the check. Your editor is intact; save or reopen before continuing.")
                 return
             if checked.source_changed:
                 details = "\n".join("• " + line for line in source_details(checked))
@@ -584,33 +612,33 @@ class ItemEditor:
                                f"{target}? The Source changed flag remains.", warning=True):
                     return
             try:
-                updated = self.bank.set_status(item.id, item.revision, target)
+                updated = self.window.bank.set_status(item.id, item.revision, target)
                 self.populate(updated)
-                self.reload()
+                self.saved.emit(updated)
             except (OSError, BankError, ValueError) as exc:
-                self.error(exc)
+                self.window.error(exc)
 
-        self.check_sources(then=proceed, item_ids=[item.id])
+        self.window.check_sources(then=proceed, item_ids=[item.id])
 
     def still_correct(self):
         """Accept the slides as they are now; the status is kept and the flag cleared."""
-        if self.current is None or self.new_item or self.busy:
+        if self.current is None or self.new_item or self.window.busy:
             return
         if self.dirty():
             if not self.may_leave():
                 return
             if self.dirty():  # Discarded: show the stored question again.
                 self.populate(self.current)
-        item, host, deck, bank = self.current, self.host, self.deck, self.bank
+        item, host, deck, bank = self.current, self.host, self.window.deck, self.window.bank
 
         def work():
             return bank.rebaseline(item.id, item.revision, rebaseline_links(host, fresh_deck(deck), item))
 
         def done(updated):
             self.populate(updated)
-            self.reload()
-            self.toast("Kept · matches the current slide.")
-        self.work(work, done)
+            self.saved.emit(updated)
+            self.window.toast("Kept · matches the current slide.")
+        self.window.work(work, done)
 
     # -- linked slides -------------------------------------------------------------------------------------
 
@@ -620,7 +648,7 @@ class ItemEditor:
             row = Box()
             line = QHBoxLayout(row)
             line.setContentsMargins(0, 0, 0, 0)
-            name = self.host.Button(self.slide_name(link.slide_id), compact=True)
+            name = self.host.Button(self.window.slide_name(link.slide_id), compact=True)
             name.setToolTip(f"{link.slide_id} · {link.view} · {link.language} · open in SlideMage")
             name.clicked.connect(partial(self.open_source, link))
             remove = self.host.Button("✕", compact=True)
@@ -636,8 +664,13 @@ class ItemEditor:
         self.draw_links()
         self.touch()
 
+    def add_link(self, link):
+        if not any(s.slide_id == link.slide_id for s in self.links):
+            self.links += (link,)
+            self.render_links()
+
     def update_topic(self):
-        topic = topic_of(self.candidate(), self.topics) if self.current is not None else None
+        topic = topic_of(self.candidate(), self.window.topics) if self.current is not None else None
         self.topic_label.setText("Topic from first slide:" if topic else "No topic")
         dot(topic, self.topic_dot)
         self.topic_name.setText(topic.name if topic else "")
@@ -647,18 +680,18 @@ class ItemEditor:
         self.render_links()
 
     def open_source(self, link, *_):
-        host, deck = self.host, self.deck
+        host, deck = self.host, self.window.deck
 
         def done(ref, error):
             if isinstance(error, Unresolved):
-                self.error("Source slide is missing or ambiguous. Link it again from the grid.")
+                self.window.error("Source slide is missing or ambiguous. Link it again from the grid.")
             elif error:
-                self.error(error)
+                self.window.error(error)
             else:
                 try:
                     host.open_slide(ref)
                 except (OSError, ValueError, RuntimeError) as exc:
-                    self.error(exc)
+                    self.window.error(exc)
         host.run_in_background(lambda: SlideIndex(host, fresh_deck(deck)).find(link), done)
 
     def close_link_grid(self):
@@ -668,18 +701,18 @@ class ItemEditor:
 
     def toggle_link_grid(self):
         """The deck's slides as the window lists them; a slide is linked in the instructor view."""
-        if self.link_grid.isVisibleTo(self.editor):
+        if self.link_grid.isVisibleTo(self):
             self.close_link_grid()
             return
         self.close_link_grid()
         linked = {s.slide_id for s in self.links}
-        for index, ref in enumerate(self.slides or ()):
+        for index, ref in enumerate(self.window.slides or ()):
             button = self.host.Button(f"{ref.position} · {slide_title(ref)}", compact=True)
             button.setEnabled(ref.id not in linked)
             button.clicked.connect(partial(self.link_slide_ref, ref))
             self.link_grid_buttons.append(button)
             self.link_grid_layout.addWidget(button, index // 2, index % 2)
-        if not self.slides:
+        if not self.window.slides:
             self.link_grid_layout.addWidget(self.host.caption("No slides found in this deck yet."), 0, 0)
         self.link_grid.show()
 
@@ -688,10 +721,8 @@ class ItemEditor:
 
         def done(link):
             self.close_link_grid()
-            if not any(s.slide_id == link.slide_id for s in self.links):
-                self.links += (link,)
-                self.render_links()
-        self.work(lambda: link_slide(host, ref, "instructor"), done)
+            self.add_link(link)
+        self.window.work(lambda: link_slide(host, ref, "instructor"), done)
 
     # -- images --------------------------------------------------------------------------------------------
 
@@ -700,7 +731,7 @@ class ItemEditor:
         self.image_rows = []
         for media in self.attachments:
             try:
-                data = self.bank.read_media(media)
+                data = self.window.bank.read_media(media)
             except (OSError, BankError):
                 data = None
             row = ImageRow(self.host, media, data)
@@ -716,12 +747,12 @@ class ItemEditor:
             mime = image_type(data)
             if mime is None:
                 raise ValueError(f"Use a {IMAGE_NAMES} image.")
-            media = self.bank.store_media("image" + IMAGE_TYPES[mime][1][0], data)
+            media = self.window.bank.store_media("image" + IMAGE_TYPES[mime][1][0], data)
         except (OSError, BankError, ValueError) as exc:
-            self.error(exc)
+            self.window.error(exc)
             return
         if any(m.sha256 == media.sha256 for m in self.attachments):
-            self.error("This image is already attached to this question.")
+            self.window.error("This image is already attached to this question.")
             return
         self.attachments += (media,)
         self.render_media()
@@ -731,7 +762,7 @@ class ItemEditor:
         try:
             data = Path(path).read_bytes()
         except OSError as exc:
-            self.error(exc)
+            self.window.error(exc)
             return
         self.add_image(data)
 
@@ -743,7 +774,7 @@ class ItemEditor:
     def paste_image(self):
         image = QGuiApplication.clipboard().image()
         if image.isNull():
-            self.error("The clipboard holds no image. Copy one first.")
+            self.window.error("The clipboard holds no image. Copy one first.")
             return
         self.add_image(png_bytes(image))
 

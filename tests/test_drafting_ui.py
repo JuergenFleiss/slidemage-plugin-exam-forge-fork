@@ -58,9 +58,9 @@ def test_the_request_carries_only_the_ticked_slide_text_and_drafts_arrive_as_ai_
     chat.done(result(), None)
     host.drain()
     window.card_opened(window.cards.item(0))
-    draft = window.current
-    assert draft.status == "draft" and draft.sources[0].slide_id == ref.id and window.draft_tag.isVisible()
-    assert window.ai_tag.toolTip() == "captured-route · captured-model"
+    draft = window.editor.current
+    assert draft.status == "draft" and draft.sources[0].slide_id == ref.id and window.editor.draft_tag.isVisible()
+    assert window.editor.ai_tag.toolTip() == "captured-route · captured-model"
 
 
 def test_preview_and_request_share_one_source_read(env, monkeypatch):

@@ -326,17 +326,17 @@ def fill(window, link=True):
     """Write and save a two-answer question in the open window, linked to slide s1."""
     from exam_forge.sources import link_slide
     window.new_question()
-    window.stem.setPlainText("What is two plus two?")
-    first, second = window.rows
+    window.editor.stem.setPlainText("What is two plus two?")
+    first, second = window.editor.rows
     first.text.setPlainText("4")
     first.tick.click()
     first.why.setPlainText("Two pairs.")
     second.text.setPlainText("3")
-    window.objective.setText("Add two numbers")
+    window.editor.objective.setText("Add two numbers")
     if link:
-        window.links = (link_slide(window.host, source(window.host, window.deck), "instructor"),)
-    assert window.save()
-    return window.current
+        window.editor.links = (link_slide(window.host, source(window.host, window.deck), "instructor"),)
+    assert window.editor.save()
+    return window.editor.current
 
 
 def revision(bank, item_id, number):
