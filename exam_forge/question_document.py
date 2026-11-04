@@ -18,13 +18,11 @@ from .elp_document import (
     chips,
     figure,
     heading,
-    image_mime,
     key_option,
     model_answer,
 )
-from .model import KINDS, USES, Item, Media, plural, slide_ids, slide_label
+from .model import KINDS, USES, Item, Media, Topic, image_type, plural, slide_ids, slide_label, topic_of
 from .table_export import STATUS, deck_order
-from .topics import Topic, topic_of
 
 
 def _image(media: Media, read_media: Callable[[Media], bytes] | None) -> str:
@@ -32,7 +30,7 @@ def _image(media: Media, read_media: Callable[[Media], bytes] | None) -> str:
         raw = read_media(media) if read_media is not None else None
     except Exception:  # noqa: BLE001 - any unreadable image is named, never fatal
         raw = None
-    mime = image_mime(raw) if raw else None
+    mime = image_type(raw) if raw else None
     if mime is None:
         return f'<p class="meta">Image not available: {_text(media.name)} — {_text(media.alt)}</p>'
     return figure(raw, mime, media.alt)

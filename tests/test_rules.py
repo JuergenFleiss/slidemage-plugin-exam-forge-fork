@@ -1,9 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
+"""Exam scoring, totals and answer checks."""
 import pytest
 
-from exam_forge.elp import SCORING_FLOOR, DifficultyRules, ElpRules, check_elp, scoring_table
-from exam_forge.model import ELP_ANSWERS, Item, Option
+from exam_forge.model import Item, Option
+from exam_forge.rules import (ELP_ANSWERS, MINUTES, POINTS, SCORING_FLOOR, AnswerRule, ExamRules, exam_issues,
+                              exam_totals, scoring_table)
 
 
 @pytest.mark.parametrize("points, expected", [
@@ -18,17 +20,16 @@ def test_scoring_sheet_table(points, expected):
         assert row.correct_options * row.correct_tick + (5 - row.correct_options) * row.wrong_tick == 0
 
 
-def test_rules_and_invalid_values():
-    assert ElpRules() == ElpRules(DifficultyRules(12, 2.5), DifficultyRules(24, 5))
-    assert ElpRules(easy=DifficultyRules(36, 7.5)).easy.minutes == 7.5
+def test_points_minutes_and_totals():
+    assert (POINTS, MINUTES) == ({"easy": 12, "hard": 24}, {"easy": 2.5, "hard": 5})
+    assert exam_totals(["easy"] * 6 + ["hard"] * 6) == (216, 45) and exam_totals([]) == (0, 0)
+    assert exam_totals(["easy", "hard"], {"easy": 36, "hard": 60}, {"easy": .1, "hard": .2}) == (96, 0.3)
     for value in (0, -12, 13, 12.0, True):
         with pytest.raises(ValueError):
-            DifficultyRules(value, 2.5)
-        with pytest.raises(ValueError):
             scoring_table(value, ELP_ANSWERS)
-    for value in (0, -1, float('inf'), float('nan'), True, '5'):
-        with pytest.raises(ValueError):
-            DifficultyRules(12, value)
+    with pytest.raises(ValueError, match="With 6 answers and 1 correct"):
+        ExamRules(AnswerRule(6, 6, 1, 4))
+    assert ExamRules(AnswerRule(6, 6, 1, 4), ("open",)).kinds == ("open",)  # Graded by hand: no ticks to split.
 
 
 def item_with(count, correct):
@@ -39,5 +40,5 @@ def item_with(count, correct):
     (5, 1, True), (5, 2, True), (5, 3, True), (5, 4, True),
     (4, 1, False), (6, 1, False), (5, 0, False), (5, 5, False),
 ])
-def test_elp_item_needs_five_answers_one_to_four_correct(count, correct, valid):
-    assert (check_elp(item_with(count, correct), ELP_ANSWERS, ("choice",)) == []) is valid
+def test_an_exam_question_needs_five_answers_one_to_four_correct(count, correct, valid):
+    assert (exam_issues(item_with(count, correct), ExamRules()) == []) is valid

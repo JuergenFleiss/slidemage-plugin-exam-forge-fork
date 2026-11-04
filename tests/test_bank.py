@@ -20,7 +20,7 @@ def bank(tmp_path):
 def question(item_id="q1"):
     return Item(item_id, 1, "Question?", (Option("a", "Yes", True, "Why"), Option("b", "Also", True)),
                 "objective", "hard", "draft", "elp",
-                (SourceLink("slide", "2", "en", "lecture", "hash", "Slide text"),), True,
+                (SourceLink("slide", "2", "en", "lecture", "hash", "Slide text"),), ("slide",),
                 Origin("ai", "route", "model"))
 
 
@@ -35,8 +35,7 @@ def test_round_trip(bank):
     assert json.loads((bank.folder / "bank.json").read_text())["schema_version"] == stored(bank)["schema_version"] == 1
     assert set(stored(bank)["revisions"][0]) == {"id", "revision", "stem", "options", "objective", "difficulty",
                                                  "status", "use", "sources", "origin", "media", "assistant_note",
-                                                 "ai_edit_route", "ai_edit_model", "kind", "model_answer",
-                                                 "grading_notes"}  # Every field, always.
+                                                 "ai_edit", "kind", "model_answer", "grading_notes"}  # Every field.
 
 
 def test_status_cycle_refuses_other_transitions_and_stale_revisions(bank):
@@ -70,11 +69,14 @@ def test_ai_provenance_is_permanent(bank):
     item = bank.create(question())
     with pytest.raises(ValueError, match="origin"):
         bank.save(replace(item, origin=Origin()))
-    ai = bank.save(replace(item, ai_edit_route="route-a", ai_edit_model="m"))
+    ai = bank.save(replace(item, ai_edit=Origin("ai", "route-a", "m")))
     with pytest.raises(ValueError, match="AI-assisted"):
-        bank.save(replace(ai, ai_edit_route="", ai_edit_model=""))
-    assert bank.save(replace(ai, stem="Human edit")).ai_edit_route == "route-a"
-    assert bank.set_status("q1", 3, "reviewed").ai_edit_route == "route-a" and revision(bank, "q1", 1).ai_edit_route == ""
+        bank.save(replace(ai, ai_edit=Origin()))
+    with pytest.raises(ValueError, match="route"):
+        Origin("ai")
+    assert bank.save(replace(ai, stem="Human edit")).ai_edit.route == "route-a"
+    assert bank.set_status("q1", 3, "reviewed").ai_edit.route == "route-a"
+    assert revision(bank, "q1", 1).ai_edit == Origin()
 
 
 def test_ids_are_never_reused_even_after_a_failed_creation(bank, monkeypatch):
@@ -82,28 +84,30 @@ def test_ids_are_never_reused_even_after_a_failed_creation(bank, monkeypatch):
     bank.set_status(item.id, bank.set_status(item.id, 1, "reviewed").revision, "retired")
     with pytest.raises(ConflictError):
         bank.create(question())
-    write = storage._atomic_write
+    write = storage._write_json
 
     def fail_item(path, data):
         if path.name == "q2.json":
             raise OSError("interrupted")
         write(path, data)
 
-    monkeypatch.setattr(storage, "_atomic_write", fail_item)
+    monkeypatch.setattr(storage, "_write_json", fail_item)
     with pytest.raises(OSError):
         bank.create(question("q2"))
     with pytest.raises(ConflictError):
         bank.create(question("q2"))
 
 
-def test_the_source_marker_is_stored_beside_the_revisions(bank):
-    item = bank.create(replace(question(), source_changed=False))
-    changed = bank.set_source_changed(item.id, True)
-    assert changed.revision == 1 and stored(bank)["source_changed"] is True
-    assert len(stored(bank)["revisions"]) == 1 and "source_changed" not in stored(bank)["revisions"][0]
+def test_the_changed_slides_are_stored_beside_the_revisions(bank):
+    item = bank.create(replace(question(), changed_slides=()))
+    changed = bank.set_changed_slides(item.id, ("slide",))
+    assert changed.revision == 1 and changed.source_changed and stored(bank)["changed_slides"] == ["slide"]
+    assert len(stored(bank)["revisions"]) == 1 and "changed_slides" not in stored(bank)["revisions"][0]
     edited = bank.save(replace(item, stem="Edited"))
-    assert edited.revision == 2 and edited.source_changed
-    assert bank.set_source_changed(item.id, False).revision == 2 and len(stored(bank)["revisions"]) == 2
+    assert edited.revision == 2 and Bank(bank.folder).get(item.id).changed_slides == ("slide",)
+    assert bank.set_changed_slides(item.id, ()).revision == 2 and len(stored(bank)["revisions"]) == 2
+    with pytest.raises(ValueError):
+        bank.set_changed_slides(item.id, ("",))
 
 
 @pytest.mark.parametrize("status", ["draft", "reviewed", "retired"])
@@ -113,15 +117,15 @@ def test_rebaseline_keeps_the_status_and_clears_the_marker(bank, status):
         current = bank.set_status("q1", current.revision, target)
     links = (SourceLink("slide", "3", "en", "lecture", "new", "New text"),)
     updated = bank.rebaseline("q1", current.revision, links)
-    assert updated == replace(current, revision=current.revision + 1, sources=links, source_changed=False)
+    assert updated == replace(current, revision=current.revision + 1, sources=links, changed_slides=())
 
 
 def test_rebaseline_refusals(bank):
     item = bank.create(question())
     same = (SourceLink("slide", "9", "en", "lecture", "x"),)
-    for item_id, revision in (("q1", 5), ("missing", 1)):
+    for item_id, number in (("q1", 5), ("missing", 1)):
         with pytest.raises(ConflictError):
-            bank.rebaseline(item_id, revision, same)
+            bank.rebaseline(item_id, number, same)
     for sources in ((), (SourceLink("other"),), same * 2):
         with pytest.raises(ValueError, match="same slides"):
             bank.rebaseline("q1", item.revision, sources)
@@ -182,7 +186,7 @@ def test_a_corrupt_item_is_reported_and_the_others_load(bank, field, value):
 def test_newer_schemas_and_a_missing_index_are_refused(bank):
     bank.create(question())
     for path, read in ((bank.folder / "q1.json", bank.load), (bank.folder / "bank.json", lambda: Bank(bank.folder))):
-        path.write_text(json.dumps({**json.loads(path.read_text()), "schema_version": storage.SCHEMA_VERSION + 1}))
+        path.write_text(json.dumps({**json.loads(path.read_text()), "schema_version": storage.FORMAT_VERSION + 1}))
         with pytest.raises(SchemaError):
             read()
     (bank.folder / "bank.json").unlink()

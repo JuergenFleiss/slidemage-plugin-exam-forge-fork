@@ -3,26 +3,14 @@
 from collections import Counter
 from dataclasses import replace
 from itertools import product
-from pathlib import Path
 
 import pytest
-from fake_host import FakeDeck, FakeHost
-from slidemage.plugin_api import SlideRef, SlideSource
 
-from exam_forge.assembly import (
-    Blueprint,
-    assemble,
-    available,
-    check_approval,
-    swap,
-    waiting_elp_drafts,
-)
-from exam_forge.bank import Bank, ConflictError
-from exam_forge.elp import DifficultyRules, ElpRules
+from exam_forge.assembly import Blueprint, assemble, available, swap, waiting_elp_drafts
 from exam_forge.model import Item, Option
-from exam_forge.sources import link_slide
+from exam_forge.rules import ExamRules
 
-RULES = ElpRules()
+RULES = ExamRules()
 
 
 def item(id_, *, topic="a", difficulty="easy", sources=(), **kwargs):
@@ -30,12 +18,6 @@ def item(id_, *, topic="a", difficulty="easy", sources=(), **kwargs):
     return Item(id_, 1, stem=id_, objective=topic, difficulty=difficulty,
                 options=tuple(Option(str(i), f"Option {i}", i < 2) for i in range(5)),
                 status="reviewed", use="elp", sources=sources, **kwargs)
-
-
-def ref(id_, position, language="en", **kwargs):
-    return SlideRef(id=id_, id_slug=f"{id_}-{language}-Title", path=Path(f"/{id_}.tex"),
-                    position=position, language=language, language_read=language,
-                    version="1-0-0", **kwargs)
 
 
 def pool():
@@ -98,18 +80,17 @@ def test_topic_comes_from_topic_of_and_a_question_without_one_is_left_out():
 
 
 def test_recent_exams_and_ineligible_questions_are_left_out():
-    questions = [item("old"), item("recent", source_changed=True), item("new")]
+    questions = [item("old"), item("recent", changed_slides=("s",)), item("new")]
     questions += [replace(item("draft"), status="draft"), replace(item("quiz"), use="revision"),
                   replace(item("bad"), options=()), item("unknown", difficulty="medium"), item("off", topic="off")]
     blueprint = Blueprint({"a": {"easy": 1}}, avoid_last=1)
     result = assemble(questions, blueprint, seed=4, topic_of=topic, rules=RULES, previous_exams=[["old"], ["recent"]])
     assert {q.id for q in result.candidates} == {"old", "new"}
-    assert assemble([item("recent", source_changed=True)], replace(blueprint, avoid_last=0), seed=1,
+    assert assemble([item("recent", changed_slides=("s",))], replace(blueprint, avoid_last=0), seed=1,
                     topic_of=topic, rules=RULES, previous_exams=[["recent"]]).feasible
     assert not assemble([item("recent")], blueprint, seed=1, topic_of=topic, rules=RULES, previous_exams=[["recent"]]).feasible
-    rules = ElpRules(easy=DifficultyRules(36, 0.1))
-    custom = assemble([item(str(i)) for i in range(3)], bp(a=(3, 0)), seed=1, topic_of=topic, rules=rules)
-    assert custom.feasible and custom.total_minutes == 0.3 and custom.total_points == 108
+    three = assemble([item(str(i)) for i in range(3)], bp(a=(3, 0)), seed=1, topic_of=topic, rules=RULES)
+    assert three.feasible and three.total_minutes == 7.5 and three.total_points == 36
 
 
 def test_swap_only_within_same_topic_and_difficulty():
@@ -155,41 +136,4 @@ def test_invalid_blueprint_configuration(kwargs):
     cells = {"easy": 0, "hard": 0, "open easy": 0, "open hard": 0}
     assert Blueprint({"a": {"easy": 2}, "b": {}}, avoid_last=3).as_dict() == {
         "counts": {"a": {**cells, "easy": 2}, "b": cells}, "avoid_last": 3}
-
-
-def test_approval_always_rechecks_fingerprints_and_requires_acknowledgement(tmp_path):
-    host, deck = FakeHost(tmp_path), FakeDeck("Deck", tmp_path / "deck.tex")
-    slide = ref("a", 1)
-    host.slides[(deck.path, "instructor", "en")] = [slide]
-    host.sources[slide] = SlideSource("Original text")
-    bank = Bank(tmp_path / "bank", create=True)
-    source = link_slide(host, slide, "instructor")
-    draft = replace(item("q", sources=(source,)), status="draft")
-    bank.create(draft)
-    reviewed = bank.set_status(draft.id, 1, "reviewed")
-    selection = assemble([reviewed], bp(a=(1, 0)), seed=1, topic_of=topic, rules=RULES)
-
-    def check():
-        calls = []
-        check_approval(host, deck, bank, selection, lambda result, error: calls.append((result, error)))
-        assert len(calls) == 1
-        return calls[0]
-
-    first, error = check()
-    assert error is None and not first.changed and first.selection.items == selection.items
-    host.sources[slide] = SlideSource("Overwritten without changing version")
-    changed, error = check()
-    assert error is None and [row.item.id for row in changed.changed] == ["q"]
-    assert bank.get("q").source_changed and selection.items[0].source_changed is False
-    assert changed.selection.items[0].source_changed
-    host.sources[slide] = SlideSource("Original text")
-    restored, error = check()
-    assert error is None and not restored.changed and not bank.get("q").source_changed
-    bank.save(replace(reviewed, status="draft", stem="Edited"))
-    stale, error = check()
-    assert stale is None and isinstance(error, ConflictError)
-    (bank.folder / "q.json").write_text("broken", encoding="utf-8")
-    failed, error = check()
-    assert failed is None and error is not None
-
 

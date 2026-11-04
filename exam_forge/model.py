@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Stored question types. Validation for a particular output belongs outside the model."""
+"""Stored types: questions, their slide links, images and provenance, and the topics that group slides. Validation for
+a particular output belongs outside the model."""
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,23 @@ class Origin:
             raise ValueError("author origin cannot have a route or model")
 
 
+# Supported images: media type -> (name, file suffixes with the stored one first, how the content starts).
+IMAGE_TYPES = {
+    "image/png": ("PNG", (".png",), rb"\x89PNG\r\n\x1a\n"),
+    "image/jpeg": ("JPEG", (".jpg", ".jpeg"), rb"\xff\xd8\xff"),
+    "image/gif": ("GIF", (".gif",), rb"GIF8[79]a"),
+    "image/webp": ("WebP", (".webp",), rb"RIFF.{4}WEBP"),
+}
+_NAMES = [name for name, _, _ in IMAGE_TYPES.values()]
+IMAGE_NAMES = ", ".join(_NAMES[:-1]) + " or " + _NAMES[-1]
+IMAGE_SUFFIXES = tuple(suffix for _, suffixes, _ in IMAGE_TYPES.values() for suffix in suffixes)
+
+
+def image_type(raw: bytes) -> str | None:
+    """The media type of a supported image, judged by its content."""
+    return next((mime for mime, (_, _, start) in IMAGE_TYPES.items() if re.match(start, raw, re.DOTALL)), None)
+
+
 @dataclass(frozen=True)
 class Media:
     """An immutable image in the bank's media folder."""
@@ -59,6 +78,7 @@ class Media:
 KINDS = {"choice": "Multiple choice", "open": "Open answer"}
 # Item.use "elp" is the exam: the stored name stays, the shown one is "Exam".
 USES = {"revision": "Revision quiz", "elp": "Exam"}
+NEXT_STATUS = {"draft": "reviewed", "reviewed": "retired", "retired": "draft"}
 
 
 @dataclass(frozen=True)
@@ -72,90 +92,37 @@ class Item:
     status: Literal["draft", "reviewed", "retired"] = "draft"
     use: Literal["elp", "revision"] = "revision"
     sources: tuple[SourceLink, ...] = ()
-    source_changed: bool = False  # Current item-level check, not revision content.
+    changed_slides: tuple[str, ...] = ()  # The last check's changed or unreadable slides, not revision content.
     origin: Origin = field(default_factory=Origin)
     media: tuple[Media, ...] = ()
     assistant_note: str = ""
-    ai_edit_route: str = ""  # Per revision; non-empty once an AI assisted an edit.
-    ai_edit_model: str = ""
+    ai_edit: Origin = field(default_factory=Origin)  # Per revision; an AI origin once an AI assisted an edit.
     # An open-answer question has no options: its model answer and grading notes go only into the private key.
     kind: Literal["choice", "open"] = "choice"
     model_answer: str = ""
     grading_notes: str = ""
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", tuple(self.options))
-        object.__setattr__(self, "sources", tuple(self.sources))
-        object.__setattr__(self, "media", tuple(self.media))
+        for name in ("options", "sources", "changed_slides", "media"):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
         if len({entry.name for entry in self.media}) != len(self.media):
             raise ValueError("media filenames must be unique")
         if not self.id or type(self.revision) is not int or self.revision < 1:
             raise ValueError("item needs an id and a positive revision")
-        if self.status not in ("draft", "reviewed", "retired"):
+        if self.status not in NEXT_STATUS:
             raise ValueError("invalid status")
-        if self.use not in ("elp", "revision"):
+        if self.use not in USES:
             raise ValueError("invalid use")
         if self.kind not in KINDS:
             raise ValueError("invalid question type")
         if len({option.id for option in self.options}) != len(self.options):
             raise ValueError("option IDs must be unique")
+        if any(type(slide) is not str or not slide for slide in self.changed_slides):
+            raise ValueError("invalid changed slide")
 
-
-MAX_OPTIONS = 10
-_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
-
-
-@dataclass(frozen=True)
-class AnswerRule:
-    """How many answers a question of one use has, and how many of them are correct. One answer is always wrong."""
-
-    min_options: int
-    max_options: int
-    min_correct: int
-    max_correct: int
-
-    def __post_init__(self) -> None:
-        if any(type(value) is not int for value in
-               (self.min_options, self.max_options, self.min_correct, self.max_correct)):
-            raise ValueError("answer counts must be whole numbers")
-        if not 2 <= self.min_options <= self.max_options <= MAX_OPTIONS:
-            raise ValueError(f"answers must be between 2 and {MAX_OPTIONS}, the smaller number first")
-        if not 1 <= self.min_correct <= self.max_correct:
-            raise ValueError("at least one answer must be correct, the smaller number first")
-        if self.max_correct >= self.max_options:
-            raise ValueError("at least one answer must be wrong")
-
-
-REVISION_ANSWERS = AnswerRule(2, 8, 1, 1)
-ELP_ANSWERS = AnswerRule(5, 5, 1, 4)
-
-
-@dataclass(frozen=True)
-class AnswerRules:
-    """A deck's answer rules: revision quizzes (Moodle, multiple choice) and exams, whose question types the deck
-    chooses. Every multiple-choice exam question has the same number of answers."""
-
-    revision: AnswerRule = REVISION_ANSWERS
-    elp: AnswerRule = ELP_ANSWERS
-    exam_kinds: tuple[str, ...] = ("choice",)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "exam_kinds", tuple(k for k in KINDS if k in self.exam_kinds))
-        if not self.exam_kinds:
-            raise ValueError("an exam needs at least one question type")
-        if self.elp.min_options != self.elp.max_options:
-            raise ValueError("every multiple-choice exam question has the same number of answers")
-
-    def of(self, use: str) -> AnswerRule:
-        return self.elp if use == "elp" else self.revision
-
-    def kinds(self, use: str) -> tuple[str, ...]:
-        return self.exam_kinds if use == "elp" else ("choice",)
-
-
-
-def number_word(n: int) -> str:
-    return _WORDS[n] if 0 <= n < len(_WORDS) else str(n)
+    @property
+    def source_changed(self) -> bool:
+        return bool(self.changed_slides)
 
 
 def plural(n: int, word: str) -> str:
@@ -175,47 +142,69 @@ def slide_label(slide_id: str, position: int | None = None, title: str = "") -> 
     return f"Slide {position} · {title}" if title else f"Slide {position}"
 
 
-def span(low: int, high: int) -> str:
-    """'exactly five' or 'one to four'."""
-    return f"exactly {number_word(low)}" if low == high else f"{number_word(low)} to {number_word(high)}"
+# -- topics: named, coloured groups of slides; a question's topic comes from its first linked slide -----------------
+
+PALETTE = ("blue", "green", "red", "teal", "pink", "slate")  # Kept clear of the reserved violet and amber accents.
 
 
-def describe(rule: AnswerRule) -> str:
-    return f"{span(rule.min_options, rule.max_options)} answers, {span(rule.min_correct, rule.max_correct)} correct"
+@dataclass(frozen=True)
+class Topic:
+    id: str
+    name: str
+    color: str
+    slides: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id:
+            raise ValueError("topic needs an id")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("topic needs a name")
+        if self.color not in PALETTE:
+            raise ValueError("unknown topic colour")
+        if any(not isinstance(slide, str) or not slide for slide in self.slides):
+            raise ValueError("invalid slide id in topic")
+        if len(set(self.slides)) != len(self.slides):
+            raise ValueError("duplicate slide in topic")
 
 
-def answer_issues(item: Item, rule: AnswerRule) -> list[str]:
-    """What breaks the rule, in words that follow 'must' or a list of things to do."""
-    count, correct = len(item.options), sum(option.correct for option in item.options)
-    issues = []
-    if not rule.min_options <= count <= rule.max_options:
-        issues.append(f"have {span(rule.min_options, rule.max_options)} answers")
-    if not rule.min_correct <= correct <= rule.max_correct:
-        plural = "" if rule.max_correct == 1 else "s"
-        issues.append(f"mark {span(rule.min_correct, rule.max_correct)} correct answer{plural}")
-    elif correct >= count:
-        issues.append("leave at least one answer wrong")
-    return issues
+def validate_topics(topics) -> None:
+    """Topic names are unique regardless of case, and a slide is in at most one topic."""
+    names, slides = set(), set()
+    for topic in topics:
+        key = topic.name.strip().casefold()
+        if key in names:
+            raise ValueError(f"duplicate topic name: {topic.name}")
+        names.add(key)
+        if slides & set(topic.slides):
+            raise ValueError("a slide can be in only one topic")
+        slides |= set(topic.slides)
 
 
-def kind_issues(item: Item, kinds: tuple[str, ...]) -> list[str]:
-    """answer_issues for a question of any type: its type must be allowed; an open one needs a model answer."""
-    if item.kind not in kinds:
-        return [" or ".join("be multiple choice" if k == "choice" else "be an open-answer question" for k in kinds)]
-    return []
+def next_color(topics) -> str:
+    """The colour a new topic gets: the first unused one, or round the palette again."""
+    topics = tuple(topics)
+    used = {t.color for t in topics}
+    return next((c for c in PALETTE if c not in used), PALETTE[len(topics) % len(PALETTE)])
 
 
-def type_issues(item: Item, kinds: tuple[str, ...], rule: AnswerRule) -> list[str]:
-    """What breaks a use's rules: its allowed types, then a model answer or the answer rule."""
-    issues = kind_issues(item, kinds)
-    if issues:
-        return issues
-    if item.kind == "open":
-        return [] if item.model_answer.strip() else ["have a model answer"]
-    return answer_issues(item, rule)
+def add_topic(topics, name: str) -> tuple[Topic, ...]:
+    return tuple(topics) + (Topic(uuid4().hex, name.strip(), next_color(topics)),)
 
 
-def question_issues(item: Item, rules: AnswerRules) -> list[str]:
-    """What breaks the deck's rules for this question's use and type."""
-    return type_issues(item, rules.kinds(item.use), rules.of(item.use))
+def rename_topic(topics, topic_id: str, name: str) -> tuple[Topic, ...]:
+    return tuple(replace(t, name=name.strip()) if t.id == topic_id else t for t in topics)
 
+
+def delete_topic(topics, topic_id: str) -> tuple[Topic, ...]:
+    return tuple(t for t in topics if t.id != topic_id)
+
+
+def assign_slide(topics, topic_id: str | None, slide_id: str) -> tuple[Topic, ...]:
+    """Move a slide into a topic, out of any other; None leaves it without one."""
+    return tuple(replace(t, slides=tuple(s for s in t.slides if s != slide_id) + ((slide_id,) if t.id == topic_id else ()))
+                 for t in topics)
+
+
+def topic_of(item, topics) -> Topic | None:
+    slide = item.sources[0].slide_id if item.sources else ""
+    return next((t for t in topics if slide and slide in t.slides), None)

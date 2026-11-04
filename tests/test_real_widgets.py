@@ -38,7 +38,7 @@ def test_every_view_runs_on_the_hosts_widgets(real):
     draft = bank.create(Item("draft", 1, stem="AI", difficulty="hard", options=elp_options()[:2], sources=(link,),
                              origin=Origin("ai", "route", "model")))
     bank.create(Item("loose", 1, stem="No slide"))
-    bank.set_source_changed(item.id, True)
+    bank.set_changed_slides(item.id, (link.slide_id,))
     window.load_topics()
     window.check_sources()
     host.drain()

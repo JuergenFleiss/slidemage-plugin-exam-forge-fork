@@ -11,7 +11,6 @@ from fake_host import FakeDeck, FakeHost
 from slidemage.plugin_api import SlideRef, SlideSource
 
 from exam_forge.bank import Bank, ConflictError
-from exam_forge.elp import ElpRules
 from exam_forge.manifest import (
     ChangedSourcesError,
     Manifest,
@@ -20,6 +19,7 @@ from exam_forge.manifest import (
     read_corrections,
 )
 from exam_forge.model import Item, Option
+from exam_forge.rules import ExamRules
 from exam_forge.sources import link_slide
 
 
@@ -45,7 +45,7 @@ def setup(tmp_path):
 def test_issue_is_detached_and_persistent_after_edit_and_retirement(setup, tmp_path):
     host, deck, _, bank = setup
     blueprint = {"topics": {"x": 2}}
-    manifest = freeze(host, deck, bank, [("q1", 2), ("q2", 2)], blueprint, ElpRules(), topic_of=lambda i: "T-" + i.id)
+    manifest = freeze(host, deck, bank, [("q1", 2), ("q2", 2)], blueprint, ExamRules(), topic_of=lambda i: "T-" + i.id)
     path = tmp_path / "exam.json"
     manifest.write(path)
     blueprint["topics"]["x"] = 9
@@ -113,12 +113,13 @@ def test_checks_all_sources_before_issue(setup):
     host, deck, ref, bank = setup
     host.sources[ref] = SlideSource(text="changed")
     with pytest.raises(ChangedSourcesError) as error:
-        freeze(host, deck, bank, [("q1", 2), ("q2", 2)], {}, ElpRules(), topic_of=lambda i: "t")
+        freeze(host, deck, bank, [("q1", 2), ("q2", 2)], {}, ExamRules(), topic_of=lambda i: "t")
     assert [c.item.id for c in error.value.checks] == ["q1", "q2"]
     assert all(c.sources[0].status == "changed" for c in error.value.checks)
+    assert bank.get("q1").changed_slides == ("s",)  # Recorded, so the Questions tab shows it too.
     host.slides[(deck.path, "instructor", "en")] = []
     with pytest.raises(ChangedSourcesError) as error:
-        freeze(host, deck, bank, [("q1", 2)], {}, ElpRules(), topic_of=lambda i: "t")
+        freeze(host, deck, bank, [("q1", 2)], {}, ExamRules(), topic_of=lambda i: "t")
     assert error.value.checks[0].sources[0].status == "missing"
 
 
@@ -130,7 +131,7 @@ def test_detects_edit_during_source_check(setup, monkeypatch):
         return read(ref)
     monkeypatch.setattr(host, "slide_source", edit)
     with pytest.raises(ConflictError):
-        freeze(host, deck, bank, [("q1", 2)], {}, ElpRules(), topic_of=lambda i: "t")
+        freeze(host, deck, bank, [("q1", 2)], {}, ExamRules(), topic_of=lambda i: "t")
 
 
 def test_corrections_survive_a_truncated_line_and_refuse_a_corrupt_one(tmp_path):

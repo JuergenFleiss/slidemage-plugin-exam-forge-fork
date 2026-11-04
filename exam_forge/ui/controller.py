@@ -7,10 +7,9 @@ from PySide6.QtWidgets import QLabel
 
 from ..bank import Bank, BankError
 from ..folder import remembered_folder
-from ..sources import link_slide
+from ..sources import DeckSnapshot, fresh_deck, link_slide
 from .first_use import change_bank, choose_bank
 from .window import BankWindow
-from .work import DeckSnapshot, fresh_deck
 
 SIDEBAR_KEY = "bank"
 

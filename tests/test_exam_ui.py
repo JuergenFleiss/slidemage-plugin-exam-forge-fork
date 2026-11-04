@@ -15,8 +15,8 @@ from slidemage.plugin_api import SlideSource
 from exam_forge.assembly import Blueprint
 from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
+from exam_forge.model import add_topic, assign_slide
 from exam_forge.sources import link_slide
-from exam_forge.topics import add_topic, assign_slide
 from exam_forge.ui.corrections import _SHEETS
 
 
@@ -157,7 +157,7 @@ def test_a_new_pick_changes_the_seed_and_a_topic_save_discards_the_proposal(issu
 def test_a_changed_source_blocks_approval_without_a_way_around(issuing):
     host, _, bank, window, _, _ = issuing
     exam = propose(host, window)
-    bank.set_source_changed(window.current.id, True, expected_sources=window.current.sources)
+    bank.set_changed_slides(window.current.id, ("s1",), expected_sources=window.current.sources)
     exam.sync_flags()  # As on returning to the tab.
     host.drain()
     assert exam.blocked.text() == "1 picked question is linked to a changed slide. Review or swap before freezing."

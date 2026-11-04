@@ -16,9 +16,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .bank import SCHEMA_VERSION, Bank, ConflictError
-from .elp import SCORING_FLOOR, ElpRules, check_elp, scoring_table
+from .bank import FORMAT_VERSION, Bank, ConflictError
 from .model import Item
+from .rules import MINUTES, POINTS, SCORING_FLOOR, ExamRules, exam_issues, scoring_table
 from .sources import ItemCheck, check_item
 
 
@@ -38,7 +38,7 @@ class Manifest:
 
     def __post_init__(self) -> None:
         data = json.loads(self.encoded)
-        if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+        if not isinstance(data, dict) or data.get("schema_version") != FORMAT_VERSION:
             raise ValueError("unsupported manifest schema")
 
     def data(self) -> dict:
@@ -67,11 +67,12 @@ class Manifest:
 
 
 def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
-           blueprint: dict, rules: ElpRules,
+           blueprint: dict, rules: ExamRules,
            *, topic_of: Callable[[Item], str]) -> Manifest:
     """Check and freeze selected current reviewed revisions, preserving their order.
 
-    ChangedSourcesError carries every failing ItemCheck. Other failures abort the
+    ChangedSourcesError carries every failing ItemCheck, and the bank records their
+    changed slides, so the Questions tab shows them too. Other failures abort the
     entire issue. Blueprint must contain JSON values; no caller-owned mutable
     object or bank media is retained in the returned snapshot. Each item snapshot
     stores the resolved topic name, so later topic changes do not alter it.
@@ -86,13 +87,15 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
             raise ConflictError(f"stale revision for {item_id}")
         if item.status != "reviewed" or item.use != "elp":
             raise ValueError(f"{item_id} must be a reviewed exam question")
-        errors = check_elp(item, rules.answers, rules.kinds)
+        errors = exam_issues(item, rules)
         if errors:
             raise ValueError(f"{item_id}: {' '.join(errors)}")
         items.append(item)
     checks = [check_item(host, deck, item) for item in items]
     changed = [check for check in checks if check.source_changed]
     if changed:
+        for check in changed:
+            bank.set_changed_slides(check.item.id, check.changed_slides, expected_sources=check.item.sources)
         raise ChangedSourcesError(changed)
     attachments = {}
     for item in items:
@@ -103,14 +106,16 @@ def freeze(host, deck, bank: Bank, selections: Iterable[tuple[str, int]],
         if bank.get(item.id) != item:
             raise ConflictError(f"question changed during freeze: {item.id}")
     data = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": FORMAT_VERSION,
         "bank_id": bank.id,
         "items": [{**asdict(item), "topic": topic_of(item)} for item in items],
         "media_base64": attachments,
         "blueprint": blueprint,
-        "scoring": {"rules": asdict(rules), "floor": SCORING_FLOOR,
+        "scoring": {"rules": {**{d: {"points": POINTS[d], "minutes": MINUTES[d]} for d in POINTS},
+                              "answers": asdict(rules.answers), "kinds": list(rules.kinds)},
+                    "floor": SCORING_FLOOR,
                     "tables": {str(p): [asdict(row) for row in scoring_table(p, rules.answers)]
-                               for p in (rules.easy.points, rules.hard.points)} if "choice" in rules.kinds else {}},
+                               for p in POINTS.values()} if "choice" in rules.kinds else {}},
     }
     return Manifest(json.dumps(data, ensure_ascii=False, sort_keys=True,
                                allow_nan=False, separators=(",", ":")).encode("utf-8"))

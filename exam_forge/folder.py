@@ -9,9 +9,9 @@ import shutil
 import subprocess
 
 from .bank import Bank
+from .sources import VIEWS
 
 _SETTINGS_KEY = "bank_folders"
-_VIEWS = ("instructor", "during-course", "after-course")
 
 
 def _absolute(path: str | Path) -> Path:
@@ -49,7 +49,7 @@ def folder_warnings(host, deck, folder: str | Path) -> list[str]:
     """Describe risks in a selection, resolving symlinks before containment checks."""
     folder = _absolute(folder)
     warnings = []
-    if any(_inside(folder, _absolute(host.deck_output_folder(deck, view))) for view in _VIEWS):
+    if any(_inside(folder, _absolute(host.deck_output_folder(deck, view))) for view in VIEWS):
         warnings.append("This folder is inside a deck output folder and may be shared with the output.")
     project = _absolute(host.project_root())
     if _inside(folder, project) and not _ignored_by_git(folder, project):

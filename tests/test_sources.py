@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Source changes, unavailable sources and the worker/UI boundary against FakeHost."""
+"""Source changes, unavailable sources, the slide-text diff, and the worker/UI boundary against FakeHost."""
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -14,25 +14,15 @@ from slidemage.plugin_api import MediaDescription, SlideRef, SlideSource
 
 from exam_forge.bank import Bank, ConflictError, CorruptFileError, SchemaError
 from exam_forge.model import Item
-from exam_forge.sources import check_bank, check_item, fingerprint, link_slide, rebaseline_links
+from exam_forge.sources import check_bank, check_item, fingerprint, link_slide, rebaseline_links, word_diff
 
 
 class BackgroundHost(FakeHost):
-    """Queues work; complete() runs it on a real worker and calls done on this thread. Records every read."""
+    """Records every read."""
 
     def __init__(self, root):
         super().__init__(root)
-        self.pending, self.deck_reads, self.source_reads = [], [], []
-
-    def run_in_background(self, work, done):
-        self.pending.append((work, done))
-
-    def complete(self):
-        work, done = self.pending.pop(0)
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(work)
-            error = future.exception()
-        done(None if error else future.result(), error)
+        self.deck_reads, self.source_reads = [], []
 
     def deck_slides(self, deck, view, language):
         self.deck_reads.append((get_ident(), view, language))
@@ -74,11 +64,11 @@ def status(env, item):
 
 
 def run_bank(env, bank, **kwargs):
-    completed = []
-    check_bank(env.host, env.deck, bank, lambda result, error: completed.append((result, error)), **kwargs)
-    assert not completed
-    env.host.complete()
-    return completed[0]
+    """check_bank on a worker thread, as the window runs it: (report, error)."""
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(check_bank, env.host, env.deck, bank, **kwargs)
+        error = future.exception()
+    return None if error else future.result(), error
 
 
 def deck(env, *refs):
@@ -218,19 +208,19 @@ def test_the_bank_check_runs_on_the_worker_and_sets_the_marker_without_a_revisio
     before = json.loads((bank.folder / "q1.json").read_text())["revisions"]
     env.host.sources[env.ref] = replace(env.source, text="New source")
     env.host.source_reads.clear()
-    flag_threads, setter = [], bank.set_source_changed
-    monkeypatch.setattr(bank, "set_source_changed", lambda *a, **k: flag_threads.append(get_ident()) or setter(*a, **k))
+    flag_threads, setter = [], bank.set_changed_slides
+    monkeypatch.setattr(bank, "set_changed_slides", lambda *a, **k: flag_threads.append(get_ident()) or setter(*a, **k))
     report, error = run_bank(env, bank)
     assert error is None and not report.errors
     assert env.host.source_reads[0][0] != get_ident() and flag_threads[0] != get_ident()
     saved = Bank(bank.folder).get(item.id)
-    assert saved == replace(reviewed, source_changed=True) and report.items[0].item == saved
+    assert saved == replace(reviewed, changed_slides=("a",)) and report.items[0].item == saved
     assert json.loads((bank.folder / "q1.json").read_text())["revisions"] == before  # No new baseline either.
 
 
 def test_a_restored_source_clears_the_marker_and_a_check_can_take_a_subset(env):
     item = question(env)
-    bank = make_bank(env, item, question(env, "q2", source_changed=True))
+    bank = make_bank(env, item, question(env, "q2", changed_slides=("a",)))
     env.host.sources[env.ref] = replace(env.source, text="Changed")
     first, _ = run_bank(env, bank, item_ids=[item.id, item.id])
     assert len(first.items) == 1 and first.items[0].source_changed
@@ -243,9 +233,10 @@ def test_a_restored_source_clears_the_marker_and_a_check_can_take_a_subset(env):
 def test_one_missing_link_flags_the_item_and_no_links_clear_an_old_marker(env):
     item = question(env)
     bank = make_bank(env, replace(item, sources=(*item.sources, replace(item.sources[0], slide_id="removed"))),
-                     Item("unlinked", 1, source_changed=True))
+                     Item("unlinked", 1, changed_slides=("gone",)))
     report, _ = run_bank(env, bank)
     assert [source.status for source in report.items[0].sources] == ["unchanged", "missing"]
+    assert bank.get(item.id).changed_slides == ("removed",)
     assert bank.get(item.id).source_changed and not bank.get("unlinked").source_changed
 
 
@@ -271,7 +262,7 @@ def test_worker_errors_reach_the_callback(env, monkeypatch, failure):
             raise expected("failed")
 
         monkeypatch.setattr(bank if failure == "write" else env.host,
-                            "set_source_changed" if failure == "write" else "slide_source", fail)
+                            "set_changed_slides" if failure == "write" else "slide_source", fail)
     report, error = run_bank(env, bank)
     assert report is None and isinstance(error, expected)
 
@@ -282,8 +273,8 @@ def test_an_edit_during_the_check_is_never_overwritten(env, monkeypatch, edit):
     bank = make_bank(env, original)
     read = env.host.slide_source
     if edit == "links":
-        bank.set_source_changed(original.id, True)
-        change = replace(original, sources=(), source_changed=True)
+        bank.set_changed_slides(original.id, ("a",))
+        change = replace(original, sources=(), changed_slides=("a",))
     else:
         env.host.sources[env.ref] = replace(env.source, text="Changed source")
         change = replace(original, stem="Edited stem")
@@ -312,3 +303,22 @@ def test_rebaseline_follows_the_current_slide_and_refuses_missing_or_ambiguous(e
     deck(env)
     with pytest.raises(ValueError, match="missing"):
         rebaseline_links(env.host, env.deck, item)
+
+
+def test_changed_words_are_flagged_and_adjacent_segments_merge():
+    old, new = word_diff("The cat sat on the mat", "The dog sat on the red mat")
+    assert old == [("The ", False), ("cat", True), (" sat on the mat", False)]
+    assert new == [("The ", False), ("dog", True), (" sat on the ", False), ("red ", True), ("mat", False)]
+
+
+@pytest.mark.parametrize("old,new", [
+    ("", ""), ("", "new text"), ("old text", ""), ("same\n\n text", "same\n\n text"),
+    (" a  b\r\n", "a b"), ("α β γ", "α γ δ"),
+])
+def test_both_sides_reproduce_their_input(old, new):
+    left, right = word_diff(old, new)
+    assert "".join(t for t, _ in left) == old and "".join(t for t, _ in right) == new
+    for side in (left, right):
+        assert all(a[1] != b[1] for a, b in zip(side, side[1:]))
+    if old == new:
+        assert not any(c for _, c in left + right)

@@ -14,13 +14,13 @@ from pathlib import Path
 import pytest
 
 from exam_forge.bank import Bank
-from exam_forge.elp import DifficultyRules, ElpRules
 from exam_forge.elp_document import export_elp_documents
 from exam_forge.manifest import Manifest, freeze
 from exam_forge.model import Item, Option
+from exam_forge.rules import ExamRules
 
 
-def sample(tmp_path, rules=None):
+def sample(tmp_path):
     """A real frozen bank; this same input produces the fixture pair."""
     def chunk(kind, data):
         return (struct.pack('>I', len(data)) + kind + data
@@ -57,7 +57,7 @@ def sample(tmp_path, rules=None):
         bank.set_status(item.id, 1, 'reviewed')
     # Reverse lexical ID order deliberately; the renderer must not sort either list.
     manifest = freeze(None, None, bank, [(i.id, 2) for i in items],
-                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, rules or ElpRules(), topic_of=lambda i: 'Numbers')
+                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, ExamRules(), topic_of=lambda i: 'Numbers')
     return manifest, bank, png
 
 
@@ -165,23 +165,27 @@ def test_exam_contains_no_key_even_in_hidden_metadata(tmp_path):
 
 
 def test_frozen_rules_tables_floor_and_option_ids(tmp_path):
-    manifest, _, _ = sample(tmp_path, ElpRules(DifficultyRules(36, .1), DifficultyRules(60, .2)))
+    manifest, _, _ = sample(tmp_path)
     exam, key = export_elp_documents(manifest)
-    assert '96 points; 0.3 planned minutes' in exam
     rows = Document(key).rows
-    assert rows[1] == ['1 — shaded-fraction r2', 'A (decimal), C (whole)', '36', '+18', '-12']
-    assert rows[2] == ['2 — quadratic-function r2', 'A (at-zero), B (at-three), D (derivative)', '60', '+20', '-30']
+    assert rows[1] == ['1 — shaded-fraction r2', 'A (decimal), C (whole)', '12', '+6', '-4']
+    assert rows[2] == ['2 — quadratic-function r2', 'A (at-zero), B (at-three), D (derivative)', '24', '+8', '-12']
     for points, frozen in manifest.data()['scoring']['tables'].items():
         for row in frozen:
             assert [points, str(row['correct_options']), f'{row["correct_tick"]:+d}', f'{row["wrong_tick"]:+d}'] in rows
     def change(data):
         # Distinguish reading the frozen values from recomputing them with today's rules.
-        data['scoring']['tables']['36'][1]['correct_tick'] = 17
+        data['scoring']['tables']['12'][1]['correct_tick'] = 17
         data['scoring']['floor'] = 2
     changed_exam, changed_key = export_elp_documents(altered(manifest, change))
     assert changed_exam == exam
-    assert Document(changed_key).rows[1][-2:] == ['+17', '-12']
+    assert Document(changed_key).rows[1][-2:] == ['+17', '-4']
     assert 'Floor per question: 2 points.' in changed_key
+
+    def minutes(data):
+        data['scoring']['rules']['easy']['minutes'] = .1
+        data['scoring']['rules']['hard']['minutes'] = .2
+    assert '36 points; 0.3 planned minutes' in export_elp_documents(altered(manifest, minutes))[0]
 
 
 def test_escaping_all_text_and_attributes_without_changing_math(tmp_path):

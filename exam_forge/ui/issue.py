@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Third step: freeze the approved exam, save its documents, record corrections."""
 from datetime import datetime, timezone
-from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,9 +16,10 @@ from PySide6.QtWidgets import (
 from ..elp_document import export_elp_documents
 from ..manifest import ChangedSourcesError, Manifest, freeze
 from ..model import plural
+from ..rules import exam_totals
+from ..sources import fresh_deck
 from .corrections import open_corrections
 from .editor import accent_color
-from .work import fresh_deck
 
 
 def issued_at(path):
@@ -34,9 +34,8 @@ def issued_at(path):
 def manifest_totals(data):
     """'N questions · P points · M min' from the frozen items and rules."""
     items, rules = data["items"], data["scoring"]["rules"]
-    rows = [rules[i["difficulty"]] for i in items]
-    points = sum(r["points"] for r in rows)
-    minutes = float(sum((Decimal(str(r["minutes"])) for r in rows), Decimal(0)))
+    points, minutes = exam_totals((i["difficulty"] for i in items), {d: rules[d]["points"] for d in ("easy", "hard")},
+                                  {d: rules[d]["minutes"] for d in ("easy", "hard")})
     return f"{plural(len(items), 'question')} · {points} points · {minutes:g} min"
 
 
@@ -126,8 +125,9 @@ class IssueView(QWidget):
             self.window.set_busy(False)
             if isinstance(error, ChangedSourcesError):
                 self.exam.selection = selection
-                self.exam.mark_changed({c.item.id: True for c in error.checks})
+                self.exam.mark_changed({c.item.id: c.changed_slides for c in error.checks})
                 self.exam.set_step(1)
+                self.window.reload()   # freeze recorded the changed slides
             elif error:
                 self.window.error(error)
             else:

@@ -9,10 +9,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from ..answer_rules import AnswerRulesStore, exam_rules
-from ..bank import BankError
-from ..model import AnswerRules
-from ..topics import TopicStore
+from ..bank import AnswerRulesStore, BankError, TopicStore
+from ..rules import AnswerRules
 from .editor import ItemEditor
 from .exam_tab import ExamTab
 from .export_menu import ExportMenu
@@ -137,7 +135,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.drop_editor()
         self.stack.setCurrentWidget(self.placeholder)
         self.view, self.sel_slide, self.slides = "all", None, None
-        self.changed_links, self.checked_at = {}, None
+        self.checked_at = None
         self.exam_tab.reset()
         self.load_topics()
         self.load_answer_rules()
@@ -159,7 +157,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         except (OSError, BankError, ValueError) as exc:
             self.answer_rules = AnswerRules()
             self.error(f"{exc} The default answer rules apply.")
-        self.exam_tab.rules = exam_rules(self.answer_rules)
+        self.exam_tab.rules = self.answer_rules.exam_rules()
 
     def answer_rules_changed(self):
         """Settings saved new rules: a proposed exam was screened with the old ones, so it is dropped."""

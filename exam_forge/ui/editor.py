@@ -26,23 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from ..bank import BankError
-from ..elp_document import image_mime
-from ..model import (
-    KINDS,
-    USES,
-    Item,
-    Option,
-    describe,
-    question_issues,
-    slide_label,
-)
-from ..sources import check_item, link_slide, rebaseline_links
-from ..topics import topic_color, topic_of
-from .work import SCROLL_STYLE, fresh_deck, slide_title
+from ..model import IMAGE_NAMES, IMAGE_SUFFIXES, IMAGE_TYPES, KINDS, USES, Item, Option, image_type, topic_of
+from ..rules import describe, question_issues
+from ..sources import SlideIndex, Unresolved, fresh_deck, link_slide, rebaseline_links
+from .work import SCROLL_STYLE, slide_title
 
 PRIVATE = "Only in the private key."
-IMAGE_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
-IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.gif *.webp)"
+IMAGE_FILTER = f"Images ({' '.join('*' + suffix for suffix in IMAGE_SUFFIXES)})"
 THUMB_WIDTH, THUMB_HEIGHT = 160, 100
 TA_WARNING = "Shared stem, exclusions or fixed option order. This appears in the exam file; do not put answers here."
 
@@ -59,6 +49,16 @@ def accent_color(widget, amber=False):
 
 def red_color(widget):
     return "#fca5a5" if is_dark(widget) else "#a8231a"
+
+
+# Topic colour key: (light, dark). Kept clear of the reserved violet and amber accents.
+_TOPIC_COLORS = {"blue": ("#1d4ed8", "#60a5fa"), "green": ("#15803d", "#4ade80"),
+                 "red": ("#b91c1c", "#f87171"), "teal": ("#0f766e", "#2dd4bf"),
+                 "pink": ("#be185d", "#f472b6"), "slate": ("#475569", "#94a3b8")}
+
+
+def topic_color(key, dark):
+    return _TOPIC_COLORS[key][1 if dark else 0]
 
 
 def accent(widget, amber=False):
@@ -181,7 +181,7 @@ class StemEdit(QPlainTextEdit):
     @staticmethod
     def image_file(source):
         files = (url.toLocalFile() for url in source.urls() if url.isLocalFile())
-        return next((name for name in files if Path(name).suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp")), "")
+        return next((name for name in files if Path(name).suffix.lower() in IMAGE_SUFFIXES), "")
 
     def canInsertFromMimeData(self, source):
         return bool(self.image_file(source)) or source.hasImage() or super().canInsertFromMimeData(source)
@@ -284,9 +284,7 @@ class AnswerRow(QWidget):
 class ItemEditor:
     def build_editor(self, host, split):
         self._loading = False
-        self.labels, self.labels_tried, self.context_gen, self.context_key = {}, set(), 0, None
         self.rows = []
-        self.last_link_context = ("instructor", host.deck_language(self.deck))
         self.link_grid_buttons = []
         self.editor = host.Page()
         self.editor.body.setContentsMargins(0, 0, 0, 0)
@@ -518,8 +516,6 @@ class ItemEditor:
         self.grading_notes.setPlainText(item.grading_notes)
         self.difficulty.setCurrentData(item.difficulty)
         self._loading = False
-        if item.sources:
-            self.last_link_context = (item.sources[-1].view, item.sources[-1].language)
         self.editor.setEnabled(True)
         self.close_link_grid()
         self.update_header(item)
@@ -528,12 +524,10 @@ class ItemEditor:
         self.refresh_answers()
         self.baseline = self.candidate()
         self.refresh_footer()
-        if not item.source_changed and {s.slide_id for s in item.sources} - self.labels.keys():
-            self.load_context()
 
     def update_header(self, item):
-        ai_edit = bool(item.ai_edit_route)
-        provenance = (f"{item.ai_edit_route} · {item.ai_edit_model}" if ai_edit
+        ai_edit = item.ai_edit.kind == "ai"
+        provenance = (f"{item.ai_edit.route} · {item.ai_edit.model}" if ai_edit
                       else f"{item.origin.route} · {item.origin.model}")
         draft = item.status == "draft"
         self.ai_tag.setToolTip(provenance)
@@ -544,21 +538,14 @@ class ItemEditor:
         set_chip(self.status_chip, "New question" if self.new_item else item.status.title(), tone)
         set_chip(self.rev_chip, f"rev {item.revision}")
         self.rev_chip.setVisible(not self.new_item)
-        key = (item.id, item.revision, item.source_changed)
-        if key != self.context_key:
-            self.context_key = key
-            if item.source_changed:
-                self.set_banner(None)
-                self.load_context()
+        first = self.slide_ref(item.changed_slides[0]) if item.changed_slides else None
+        self.source_banner.setText(f"Slide {first.position} changed after this question was written." if first
+                                   else "A linked slide changed after this question was written.")
         self.source_bar.setVisible(item.source_changed)
         self.source_banner.setVisible(item.source_changed)
         self.compare_button.setVisible(item.source_changed)
         self.still_button.setVisible(item.source_changed)
         self.refresh_footer()
-
-    def set_banner(self, position):
-        self.source_banner.setText(f"Slide {position} changed after this question was written." if position
-                                   else "A linked slide changed after this question was written.")
 
     def refresh_footer(self):
         item = self.current
@@ -752,16 +739,13 @@ class ItemEditor:
 
     # -- linked slides -------------------------------------------------------------------------------------
 
-    def slide_label(self, link):
-        return slide_label(link.slide_id, *self.labels.get(link.slide_id, ()))
-
     def draw_links(self):
         clear(self.link_box)
         for index, link in enumerate(self.links):
             row = Box()
             line = QHBoxLayout(row)
             line.setContentsMargins(0, 0, 0, 0)
-            name = self.host.Button(self.slide_label(link), compact=True)
+            name = self.host.Button(self.slide_name(link.slide_id), compact=True)
             name.setToolTip(f"{link.slide_id} · {link.view} · {link.language} · open in SlideMage")
             name.clicked.connect(partial(self.open_source, link))
             remove = self.host.Button("✕", compact=True)
@@ -775,9 +759,6 @@ class ItemEditor:
 
     def render_links(self):
         self.draw_links()
-        missing = {s.slide_id for s in self.links} - self.labels.keys() - self.labels_tried
-        if missing and self.current is not None:
-            self.load_context()
         self.touch()
 
     def update_topic(self):
@@ -788,66 +769,24 @@ class ItemEditor:
             dot = f"<span style='color:{topic_color(topic.color, is_dark(self))}'>●</span>"
             self.topic_label.setText(f"Topic from first slide: {dot} {escape(topic.name)}")
 
-    def load_context(self):
-        """Resolve slide titles and the changed slide's position on the worker."""
-        item, links, host, deck = self.current, self.links, self.host, self.deck
-        self.context_gen += 1
-        generation = self.context_gen
-        if item is None or not links:
-            return
-        self.labels_tried |= {s.slide_id for s in links}
-        wanted = item.source_changed and not self.new_item
-
-        def work():
-            snapshot, decks, labels = fresh_deck(deck), {}, {}
-            for link in links:
-                context = (link.view, link.language)
-                if context not in decks:
-                    decks[context] = host.deck_slides(snapshot, *context)
-                refs = [r for r in decks[context] if r.id == link.slide_id]
-                refs = [r for r in refs if (r.version or "") == link.version] or refs
-                if refs:
-                    labels[link.slide_id] = (refs[0].position, slide_title(refs[0]))
-            position = None
-            if wanted:
-                first = next((c.source for c in check_item(host, snapshot, item).sources if c.status != "unchanged"), None)
-                position = labels.get(first.slide_id, (None,))[0] if first else None
-            return labels, position
-
-        def done(result, error):
-            if error or generation != self.context_gen:
-                return
-            labels, position = result
-            self.labels.update(labels)
-            self.draw_links()
-            self.set_banner(position)
-        host.run_in_background(work, done)
-
     def remove_source(self, index, *_):
         self.links = tuple(s for i, s in enumerate(self.links) if i != index)
         self.render_links()
 
     def open_source(self, link, *_):
-        deck = self.deck
+        host, deck = self.host, self.deck
 
-        def work():
-            return self.host.deck_slides(fresh_deck(deck), link.view, link.language)
-
-        def done(refs, error):
-            if error:
+        def done(ref, error):
+            if isinstance(error, Unresolved):
+                self.error("Source slide is missing or ambiguous. Link it again from the grid.")
+            elif error:
                 self.error(error)
-                return
-            matches = [r for r in refs if r.id == link.slide_id]
-            exact = [r for r in matches if (r.version or "") == link.version]
-            matches = exact or matches
-            if len({r.path for r in matches}) == 1:
+            else:
                 try:
-                    self.host.open_slide(matches[0])
+                    host.open_slide(ref)
                 except (OSError, ValueError, RuntimeError) as exc:
                     self.error(exc)
-            else:
-                self.error("Source slide is missing or ambiguous. Link it again from the grid.")
-        self.host.run_in_background(work, done)
+        host.run_in_background(lambda: SlideIndex(host, fresh_deck(deck)).find(link), done)
 
     def close_link_grid(self):
         self.link_grid.hide()
@@ -855,41 +794,31 @@ class ItemEditor:
         clear(self.link_grid_layout)
 
     def toggle_link_grid(self):
+        """The deck's slides as the window lists them; a slide is linked in the instructor view."""
         if self.link_grid.isVisibleTo(self.editor):
             self.close_link_grid()
             return
-        deck, host = self.deck, self.host
-        view, language = self.last_link_context
+        self.close_link_grid()
+        linked = {s.slide_id for s in self.links}
+        for index, ref in enumerate(self.slides or ()):
+            button = self.host.Button(f"{ref.position} · {slide_title(ref)}", compact=True)
+            button.setEnabled(ref.id not in linked)
+            button.clicked.connect(partial(self.link_slide_ref, ref))
+            self.link_grid_buttons.append(button)
+            self.link_grid_layout.addWidget(button, index // 2, index % 2)
+        if not self.slides:
+            self.link_grid_layout.addWidget(self.host.caption("No slides found in this deck yet."), 0, 0)
+        self.link_grid.show()
 
-        def work():
-            return host.deck_slides(fresh_deck(deck), view, language)
-
-        def done(refs):
-            self.close_link_grid()
-            linked = {s.slide_id for s in self.links}
-            for index, ref in enumerate(refs):
-                button = host.Button(f"{ref.position} · {slide_title(ref)}", compact=True)
-                button.setEnabled(ref.id not in linked)
-                button.clicked.connect(partial(self.link_slide_ref, ref, view))
-                self.link_grid_buttons.append(button)
-                self.link_grid_layout.addWidget(button, index // 2, index % 2)
-            if not refs:
-                self.link_grid_layout.addWidget(host.caption("No slides found for this view and language."), 0, 0)
-            self.link_grid.show()
-        self.work(work, done)
-
-    def link_slide_ref(self, ref, view, *_):
+    def link_slide_ref(self, ref, *_):
         host = self.host
 
         def done(link):
             self.close_link_grid()
-            if any(s.slide_id == link.slide_id for s in self.links):
-                return
-            self.labels[ref.id] = (ref.position, slide_title(ref))
-            self.last_link_context = (view, link.language)
-            self.links += (link,)
-            self.render_links()
-        self.work(lambda: link_slide(host, ref, view), done)
+            if not any(s.slide_id == link.slide_id for s in self.links):
+                self.links += (link,)
+                self.render_links()
+        self.work(lambda: link_slide(host, ref, "instructor"), done)
 
     # -- images --------------------------------------------------------------------------------------------
 
@@ -914,10 +843,10 @@ class ItemEditor:
     def add_image(self, data):
         """Store an image for this question and put the cursor on its description."""
         try:
-            mime = image_mime(data)
+            mime = image_type(data)
             if mime is None:
-                raise ValueError("Use a PNG, JPEG, GIF or WebP image.")
-            media = self.bank.store_media("image" + IMAGE_SUFFIXES[mime], data)
+                raise ValueError(f"Use a {IMAGE_NAMES} image.")
+            media = self.bank.store_media("image" + IMAGE_TYPES[mime][1][0], data)
         except (OSError, BankError, ValueError) as exc:
             self.error(exc)
             return

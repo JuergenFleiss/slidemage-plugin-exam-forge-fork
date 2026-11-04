@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
 )
 
-from ..topics import add_topic, assign_slide, delete_topic, rename_topic, topic_color
-from .editor import is_dark, red_color
+from ..model import add_topic, assign_slide, delete_topic, next_color, rename_topic
+from .editor import is_dark, red_color, topic_color
 from .sheet import Sheet
 from .work import SCROLL_STYLE, slide_title
 
@@ -71,7 +71,7 @@ class TopicDialog(Sheet):
         self.recolor()
 
     def own_color(self):
-        key = self.topic.color if self.topic else add_topic(self.shell.topics, "x")[-1].color
+        key = self.topic.color if self.topic else next_color(self.shell.topics)
         return topic_color(key, is_dark(self.shell))
 
     def recolor(self, *_):

@@ -3,9 +3,8 @@
 import csv
 import io
 
-from exam_forge.model import Item, Media, Option, Origin, SourceLink
+from exam_forge.model import Item, Media, Option, Origin, SourceLink, add_topic, assign_slide
 from exam_forge.table_export import questions_csv
-from exam_forge.topics import add_topic, assign_slide
 
 
 def rows(data):
@@ -24,7 +23,7 @@ def test_one_row_per_question_in_deck_order_with_answers_side_by_side():
     items = [item("q1", "Nowhere"), item("q2", "On c and b", ["c", "b"], 3, difficulty="hard", objective="Bayes"),
              item("q3", "On b", ["b"], use="elp", status="reviewed", assistant_note="Fixed order"),
              item("q4", "Retired on a", ["a"], status="retired"),
-             item("q5", "AI on gone", ["gone"], origin=Origin("ai", "r", "m"), source_changed=True,
+             item("q5", "AI on gone", ["gone"], origin=Origin("ai", "r", "m"), changed_slides=("gone",),
                   media=(Media("i.png", "0" * 64, "An image"),))]
     table = rows(questions_csv(items, topics, {"a": (1, "Title a"), "b": (2, "Title b"), "c": (3, "Title c")}))
     head, body = table[0], {row[0]: dict(zip(table[0], row)) for row in table[1:]}

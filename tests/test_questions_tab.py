@@ -9,8 +9,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QDialog, QMessageBox
 from slidemage.plugin_api import Focus
 
-from exam_forge.model import Item, Option, Origin, SourceLink
-from exam_forge.topics import TopicStore, assign_slide
+from exam_forge.bank import TopicStore
+from exam_forge.model import Item, Option, Origin, SourceLink, assign_slide
 
 
 def card(window, n):
@@ -82,9 +82,9 @@ def test_unsaved_work_blocks_every_navigation(lab, monkeypatch):
 def test_needs_attention_lists_changed_and_ai_drafts(lab):
     _, _, bank, _, window, _, link, _ = lab
     # A draft the AI edited needs attention too; a reviewed question that is merely AI-origin does not.
-    bank.save(replace(bank.get("q2"), ai_edit_route="route", ai_edit_model="model"))
+    bank.save(replace(bank.get("q2"), ai_edit=Origin("ai", "route", "model")))
     add(bank, "q9", "AI but reviewed", [link["a"]], "reviewed", origin=Origin("ai", "route", "model"))
-    bank.set_source_changed("q5", True)  # Retired: never needs attention.
+    bank.set_changed_slides("q5", ("a",))  # Retired: never needs attention.
     window.reload()
     pick(window.topic_list, "attention")
     assert keys(window.slide_list) == ["q2", "q3", "q4"]
@@ -218,13 +218,13 @@ def test_review_dialog_never_overwrites_a_dirty_editor(lab, monkeypatch):
     assert [i.id for i in spy.args[1]] == ["q3"] and spy.args[2] == "b"
     spy.edit_requested.emit("q3")
     spy.accept()
-    bank.set_source_changed("q3", False)  # The dialog resolved the question meanwhile.
+    bank.set_changed_slides("q3", ())  # The dialog resolved the question meanwhile.
     window.review_changes(window.current)
     SpyDialog.made[-1].accept()
     assert window.current.source_changed is False  # A clean editor shows the stored version.
     window.stem.setPlainText("Mine")
     window.review_changes(window.current)
-    bank.set_source_changed("q3", True)
+    bank.set_changed_slides("q3", ("b",))
     SpyDialog.made[-1].accept()
     assert window.stem.toPlainText() == "Mine" and window.dirty()
 
@@ -237,7 +237,7 @@ def test_moodle_export_takes_every_reviewed_revision_question(lab, tmp_path, mon
     add(bank, "elp", "Reviewed ELP", [link["a"]], "reviewed", use="elp")
     exported, asked = [], []
     monkeypatch.setattr("exam_forge.ui.questions_tab.export_moodle_xml",
-                        lambda items, bank, rule: exported.extend(items) or b"<quiz/>")
+                        lambda items, bank, rules: exported.extend(items) or b"<quiz/>")
     monkeypatch.setattr("exam_forge.ui.questions_tab.QFileDialog.getSaveFileName",
                         lambda *a: asked.append(a) or (str(tmp_path / "all"), ""))
     pick(window.topic_list, "attention")  # No filter applies.

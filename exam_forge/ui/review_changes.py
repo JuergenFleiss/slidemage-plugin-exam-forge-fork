@@ -11,12 +11,10 @@ from PySide6.QtWidgets import (
 from slidemage.plugin_api import AiChatError
 
 from ..ai_support import NO_REPLY, ai_service
-from ..diffing import word_diff
 from ..drafting import DraftReplyError, build_update_request, parse_update_reply
-from ..sources import _resolve, rebaseline_links
+from ..sources import SlideIndex, fresh_deck, rebaseline_links, word_diff
 from .editor import accent, accent_color
 from .sheet import Sheet
-from .work import fresh_deck
 
 
 def ordered(item, slide_id):
@@ -111,15 +109,12 @@ class ReviewChangesDialog(Sheet):
         self.message.setText("Reading the current slide text…")
 
         def work():
-            deck, decks, out = fresh_deck(self.shell.deck), {}, {}
+            index, out = SlideIndex(self.host, fresh_deck(self.shell.deck)), {}
             for item in items:
                 entries = []
                 for link in ordered(item, slide_id):
                     try:
-                        context = (link.view, link.language)
-                        if context not in decks:
-                            decks[context] = self.host.deck_slides(deck, *context)
-                        ref = _resolve(decks[context], link)
+                        ref = index.find(link)
                         entries.append((link, self.host.slide_source(ref).text, ref.title or ""))
                     except Exception as exc:
                         entries.append((link, exc, ""))
@@ -289,7 +284,7 @@ class ReviewChangesDialog(Sheet):
 
         def work():
             bank.save(replace(updated, sources=links))
-            return bank.set_source_changed(item.id, False)  # Written against the new text.
+            return bank.set_changed_slides(item.id, ())  # Written against the new text.
 
         def done(saved, error):
             if self.state["active"]:

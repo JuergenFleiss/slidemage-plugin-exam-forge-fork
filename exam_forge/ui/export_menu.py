@@ -4,7 +4,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu, QWidgetAction
 
-from ..model import question_issues
+from ..rules import question_issues
 
 
 class ExportMenu(QMenu):

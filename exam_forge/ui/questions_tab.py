@@ -24,18 +24,18 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..bank import BankError, _atomic_write_bytes
-from ..model import KINDS, USES, plural, question_issues, slide_ids, slide_label
+from ..bank import BankError, atomic_write_bytes
+from ..model import KINDS, USES, plural, slide_ids, slide_label, topic_of
 from ..moodle_xml import export_moodle_xml
-from ..sources import check_bank, link_slide
 from ..question_document import questions_html
+from ..rules import question_issues
+from ..sources import check_bank, fresh_deck, link_slide
 from ..table_export import questions_csv
-from ..topics import topic_color, topic_of
 from .drafting import DraftDialog
-from .editor import Box, accent_color, is_dark
+from .editor import Box, accent_color, is_dark, topic_color
 from .review_changes import ReviewChangesDialog
 from .topic_dialog import TopicDialog
-from .work import fresh_deck, slide_title
+from .work import slide_title
 
 KEY = Qt.ItemDataRole.UserRole
 REVIEW = ("attention", "unlinked")
@@ -44,7 +44,7 @@ FOCUS = (("slides", "Slides"), ("questions", "Questions"))
 
 
 def ai_draft(item):
-    return item.status == "draft" and (item.origin.kind == "ai" or bool(item.ai_edit_route))
+    return item.status == "draft" and "ai" in (item.origin.kind, item.ai_edit.kind)
 
 
 def off_rules(item, rules):
@@ -130,7 +130,7 @@ class QuestionsTab:
         self.focus = "slides"
         self.slides = None
         self.slide_gen = 0
-        self.changed_links, self.checked_at = {}, None
+        self.checked_at = None
         self.syncing = False
         self.topic_dialog = self.review_dialog = None
         split = QSplitter()
@@ -220,11 +220,8 @@ class QuestionsTab:
     # -- model ---------------------------------------------------------------------------------------------
 
     def changed_on(self, item):
-        """The linked slides that changed under a flagged question; all of them until a check says which."""
-        if not item.source_changed or item.status == "retired":
-            return []
-        own = slide_ids(item)
-        return [s for s in own if s in self.changed_links.get(item.id, ())] or own
+        """The linked slides that changed under a question that is still in use."""
+        return [] if item.status == "retired" else list(item.changed_slides)
 
     def changed_slides(self):
         return {slide for item in self.items for slide in self.changed_on(item)}
@@ -707,19 +704,14 @@ class QuestionsTab:
         ref = self.slide_ref(self.sel_slide)
         if ref is None or not self.new_question():
             return
-        created, host, deck = self.current, self.host, self.deck
-        view, language = self.last_link_context
-
-        def work():
-            refs = [r for r in host.deck_slides(fresh_deck(deck), view, language) if r.id == ref.id]
-            return link_slide(host, refs[0] if refs else ref, view)
+        created, host = self.current, self.host
 
         def done(link):
             if self.current is created:
                 self.links += (link,)
                 self.render_links()
 
-        self.work(work, done)
+        self.work(lambda: link_slide(host, ref, "instructor"), done)
 
     def start_question(self, link):
         """Sidebar: select the slide and open a new question already linked to it."""
@@ -794,35 +786,22 @@ class QuestionsTab:
             self.slides = list({ref.id: ref for ref in reversed(refs)}.values())[::-1]
             self.render()
             self.update_footer()
+            if self.current is not None:  # Its slide labels and banner come from these slides.
+                self.draw_links()
+                self.update_header(self.current)
 
         host.run_in_background(lambda: host.deck_slides(fresh_deck(deck), "instructor", language), done)
-
-    def record_check(self, report, partial):
-        if not partial:
-            self.changed_links = {}
-        for checked in report.items:
-            changed = [s.source.slide_id for s in checked.sources if s.status != "unchanged"]
-            if checked.source_changed and changed:
-                self.changed_links[checked.item.id] = changed
-            else:
-                self.changed_links.pop(checked.item.id, None)
-        self.checked_at = datetime.now()
 
     def check_sources(self, *_, then=None, item_ids=None):
         if self.busy:
             return
-        self.set_busy(True)
         self.notice.setText("Checking sources…")
+        host, deck, bank = self.host, self.deck, self.bank
 
-        def checked(report, error):
-            self.set_busy(False)
-            if report is not None:
-                self.record_check(report, item_ids is not None)
+        def checked(report):
+            self.checked_at = datetime.now()
             self.reload()
             self.load_slides()
-            if error:
-                self.error(error)
-                return
             if report.errors:
                 self.error("\n".join(map(str, report.errors)))
                 return
@@ -830,21 +809,14 @@ class QuestionsTab:
                 # A marker is not revision content. Leave every typed field intact.
                 latest = next((item for item in self.items if item.id == self.current.id), None)
                 if latest:
-                    self.current = replace(self.current, source_changed=latest.source_changed)
-                    self.baseline = replace(self.baseline, source_changed=latest.source_changed)
+                    self.current = replace(self.current, changed_slides=latest.changed_slides)
+                    self.baseline = replace(self.baseline, changed_slides=latest.changed_slides)
                     self.update_header(self.current)
             self.notice.setText(f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}.")
             if then:
                 then(report)
 
-        def prepared(deck, error):
-            if error:
-                checked(None, error)
-            else:
-                check_bank(self.host, deck, self.bank, checked, item_ids=item_ids)
-
-        deck = self.deck
-        self.host.run_in_background(lambda: fresh_deck(deck), prepared)
+        self.work(lambda: check_bank(host, fresh_deck(deck), bank, item_ids), checked)
 
     def export(self):
         if not self.may_leave():
@@ -852,7 +824,7 @@ class QuestionsTab:
         self.check_sources(then=self.export_checked)
 
     def export_checked(self, report):
-        rule = self.answer_rules.revision
+        rules = self.answer_rules
         reviewed = [checked.item for checked in report.items
                     if checked.item.status == "reviewed" and checked.item.use == "revision"]
         items = [item for item in reviewed if not question_issues(item, self.answer_rules)]
@@ -884,7 +856,7 @@ class QuestionsTab:
         def work():
             if any(self.bank.get(item.id) != item for item in items):
                 raise BankError("A question changed during export. Check slides and try again.")
-            _atomic_write_bytes(Path(filename), export_moodle_xml(items, bank=self.bank, rule=rule), ".moodle-")
+            atomic_write_bytes(Path(filename), export_moodle_xml(items, bank=self.bank, rules=rules), ".moodle-")
             return len(items)
 
         def done(count, error):
@@ -925,7 +897,7 @@ class QuestionsTab:
 
         def work():
             items, corrupt = self.bank.load()
-            _atomic_write_bytes(Path(filename), render(items, topics, slides), ".questions-")
+            atomic_write_bytes(Path(filename), render(items, topics, slides), ".questions-")
             return len(items), len(corrupt)
 
         def done(counts, error):

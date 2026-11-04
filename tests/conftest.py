@@ -11,9 +11,8 @@ from fake_host import FakeDeck, GuiHost, activate, add, make_slides
 from PySide6.QtWidgets import QApplication
 
 from exam_forge.folder import open_chosen_folder
-from exam_forge.model import Origin
+from exam_forge.model import Origin, add_topic, assign_slide
 from exam_forge.sources import link_slide
-from exam_forge.topics import add_topic, assign_slide
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +61,7 @@ def lab(env):
     add(bank, "q1", "Reviewed on a", [link["a"]], "reviewed", difficulty="easy")
     add(bank, "q2", "Draft on a and c", [link["a"], link["c"]])
     add(bank, "q3", "Reviewed on b", [link["b"]], "reviewed")
-    bank.set_source_changed("q3", True)
+    bank.set_changed_slides("q3", ("b",))
     add(bank, "q4", "AI draft on a", [link["a"]], origin=Origin("ai", "route", "model"))
     add(bank, "q5", "Retired on a", [link["a"]], "retired")
     add(bank, "q6", "Nowhere")

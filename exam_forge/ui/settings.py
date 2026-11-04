@@ -5,10 +5,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QPlainTextEdit, QSpinBox, QWidget
 
 from ..ai_support import ai_service
-from ..answer_rules import AnswerRulesStore, exam_rules
-from ..bank import BankError
+from ..bank import AnswerRulesStore, BankError
 from ..drafting import DEFAULT_GUIDANCE
-from ..model import KINDS, MAX_OPTIONS, AnswerRule, AnswerRules
+from ..model import KINDS
+from ..rules import MAX_OPTIONS, AnswerRule, AnswerRules
 
 
 def add_folder_section(host, controller, page, folder_changed=lambda: None):
@@ -103,7 +103,6 @@ def add_rules_section(host, controller, page):
 
     def save(rules):
         try:
-            exam_rules(rules)
             state["store"].save(rules)
         except (OSError, ValueError) as exc:
             notice.setText(f"Not saved: {exc}")

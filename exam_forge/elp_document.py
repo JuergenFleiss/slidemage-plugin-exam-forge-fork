@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from decimal import Decimal
 from html import escape
 from typing import TYPE_CHECKING
 
-from .model import number_word
+from .model import IMAGE_NAMES, image_type
+from .rules import exam_totals, number_word
 
 if TYPE_CHECKING:
     # manifest imports host-facing source checks; rendering needs no host or Qt.
@@ -99,19 +99,6 @@ def marker(correct: bool) -> str:
     return f'<span class="mk" aria-label="{label}">{glyph}</span>'
 
 
-def image_mime(raw: bytes) -> str | None:
-    """The media type of a supported image, judged by its content."""
-    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
-        return 'image/png'
-    if raw.startswith(b'\xff\xd8\xff'):
-        return 'image/jpeg'
-    if raw.startswith((b'GIF87a', b'GIF89a')):
-        return 'image/gif'
-    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
-        return 'image/webp'
-    return None
-
-
 def figure(raw: bytes, mime: str, alt: str) -> str:
     """An embedded image with its description as alt text and caption."""
     encoded = base64.b64encode(raw).decode('ascii')
@@ -148,9 +135,9 @@ def _image(media: dict, attachments: dict) -> str:
         raise ValueError(f'Missing or invalid snapshot image: {name}') from exc
     if hashlib.sha256(raw).hexdigest() != media['sha256']:
         raise ValueError(f'Snapshot image hash mismatch: {name}')
-    mime = image_mime(raw)
+    mime = image_type(raw)
     if mime is None:
-        raise ValueError(f'Unsupported image {name}: use PNG, JPEG, GIF or WebP')
+        raise ValueError(f'Unsupported image {name}: use {IMAGE_NAMES}')
     return figure(raw, mime, media['alt'])
 
 
@@ -191,7 +178,6 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
     scoring = data['scoring']
     total = scoring['rules']['answers']['max_options']
     exam, key, sheet = [], [], []
-    points, minutes = 0, Decimal(0)
     for number, item in enumerate(data['items'], 1):
         difficulty = item['difficulty']
         if difficulty not in ('easy', 'hard'):
@@ -220,9 +206,11 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                                 for i, option in enumerate(options) if option['correct'])
             sheet.append(f'<tr>{name}<td>{_text(answers)}</td><td>{rule["points"]}</td>'
                          f'<td>{row["correct_tick"]:+d}</td><td>{row["wrong_tick"]:+d}</td></tr>')
-        points += rule['points']
-        minutes += Decimal(str(rule['minutes']))
-    summary = f'<p class="lead">{len(exam)} questions; {points} points; {minutes} planned minutes.</p>'
+    rules = scoring['rules']
+    points, minutes = exam_totals((item['difficulty'] for item in data['items']),
+                                  {d: rules[d]['points'] for d in ('easy', 'hard')},
+                                  {d: rules[d]['minutes'] for d in ('easy', 'hard')})
+    summary = f'<p class="lead">{len(exam)} questions; {points} points; {minutes:g} planned minutes.</p>'
     exam.insert(0, summary)
     exam.insert(1, '<p>Entry copy: item and option order follows the manifest. '
                 'The exam software handles shuffling.</p>')

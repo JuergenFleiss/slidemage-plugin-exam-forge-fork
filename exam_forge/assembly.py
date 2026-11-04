@@ -1,21 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Exact exam blueprint selection, swaps and the pre-approval source check.
-
-Approval and freeze each recheck sources.
-"""
+"""Exact exam blueprint selection and swaps; freeze checks the sources again before issuing."""
 from __future__ import annotations
 
 import random
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from decimal import Decimal
 
-from .bank import Bank, ConflictError
-from .elp import ElpRules, check_elp
 from .model import Item, plural
-from .sources import BankCheck, ItemCheck, check_bank
+from .rules import ExamRules, exam_issues, exam_totals
 
 _DIFFICULTIES = ("easy", "hard")
 # A blueprint cell: a difficulty for multiple choice; "open easy" and "open hard" for open answers.
@@ -29,7 +23,7 @@ def cell_of(item: Item) -> str:
 
 @dataclass(frozen=True)
 class Blueprint:
-    """Exact counts per topic and cell (CELLS); minutes follow from ElpRules."""
+    """Exact counts per topic and cell (CELLS); points and minutes follow from the difficulties."""
 
     counts: Mapping[str, Mapping[str, int]]
     avoid_last: int = 0
@@ -56,7 +50,7 @@ class Blueprint:
 @dataclass(frozen=True)
 class Assembly:
     blueprint: Blueprint
-    rules: ElpRules
+    rules: ExamRules
     seed: int
     items: tuple[Item, ...]
     candidates: tuple[Item, ...]
@@ -69,12 +63,11 @@ class Assembly:
 
     @property
     def total_minutes(self) -> float:
-        return float(sum((Decimal(str(getattr(self.rules, i.difficulty).minutes))
-                          for i in self.items), Decimal(0)))
+        return exam_totals(i.difficulty for i in self.items)[1]
 
     @property
     def total_points(self) -> int:
-        return sum(getattr(self.rules, i.difficulty).points for i in self.items)
+        return exam_totals(i.difficulty for i in self.items)[0]
 
     def alternatives(self, item_id: str) -> tuple[Item, ...]:
         """Unselected candidates in the same topic and cell as a selected item."""
@@ -88,18 +81,18 @@ class Assembly:
 
 
 def _screen(items: Sequence[Item], topic_of: Callable[[Item], str], previous_exams, avoid_last: int,
-            rules: ElpRules) -> list[Item]:
+            rules: ExamRules) -> list[Item]:
     """The eligible questions, ordered by ID: reviewed exam questions that fit the rules, have a topic and a
     difficulty, and were not used in the last `avoid_last` exams."""
     if len({i.id for i in items}) != len(items):
         raise ValueError("Supply one current revision per item ID")
     recent = {id_ for exam in previous_exams[-avoid_last:] for id_ in exam} if avoid_last else set()
     return [item for item in sorted(items, key=lambda i: i.id)
-            if item.status == "reviewed" and item.use == "elp" and not check_elp(item, rules.answers, rules.kinds)
+            if item.status == "reviewed" and item.use == "elp" and not exam_issues(item, rules)
             and item.difficulty in _DIFFICULTIES and topic_of(item) and item.id not in recent]
 
 
-def available(items: Sequence[Item], topic_of: Callable[[Item], str], rules: ElpRules, previous_exams=(),
+def available(items: Sequence[Item], topic_of: Callable[[Item], str], rules: ExamRules, previous_exams=(),
               avoid_last: int = 0) -> dict[str, dict[str, int]]:
     """Eligible counts per topic and cell, as assemble would see them."""
     result: dict[str, dict[str, int]] = {}
@@ -116,7 +109,7 @@ def waiting_elp_drafts(items: Sequence[Item], topic_of: Callable[[Item], str]) -
 
 
 def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
-             topic_of: Callable[[Item], str], rules: ElpRules,
+             topic_of: Callable[[Item], str], rules: ExamRules,
              previous_exams: Sequence[Sequence[str]] = ()) -> Assembly:
     """Select reviewed exam questions, with no relaxed constraints or partial result.
 
@@ -160,40 +153,3 @@ def swap(selection: Assembly, outgoing_id: str, incoming_id: str) -> Assembly:
     items = tuple(pool[incoming_id] if i.id == outgoing_id else i for i in selection.items)
     return replace(selection, items=items)
 
-
-@dataclass(frozen=True)
-class ApprovalCheck:
-    selection: Assembly
-    sources: BankCheck
-
-    @property
-    def changed(self) -> tuple[ItemCheck, ...]:
-        return tuple(row for row in self.sources.items if row.source_changed)
-
-
-def check_approval(host, deck, bank: Bank, selection: Assembly,
-                   done: Callable[[ApprovalCheck | None, BaseException | None], None]) -> None:
-    """Always check afresh, report changes, reject stale selected revisions.
-
-    Uses sources.check_bank's worker and callback convention. A failed check
-    produces no approval object. No status transition or manifest is written.
-    """
-    if not selection.feasible:
-        raise ValueError("Cannot approve an infeasible selection")
-
-    def checked(report, error):
-        if error is not None:
-            done(None, error)
-            return
-        current = {row.item.id: row.item for row in report.items}
-        if report.errors or set(current) != {i.id for i in selection.items}:
-            done(None, ConflictError("Not all selected questions could be checked"))
-            return
-        if any(current[i.id] != replace(i, source_changed=current[i.id].source_changed)
-               for i in selection.items):
-            done(None, ConflictError("Selected questions changed; assemble or swap again"))
-            return
-        updated = replace(selection, items=tuple(current[i.id] for i in selection.items))
-        done(ApprovalCheck(updated, report), None)
-
-    check_bank(host, deck, bank, checked, item_ids=[i.id for i in selection.items])

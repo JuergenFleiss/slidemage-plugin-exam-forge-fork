@@ -105,7 +105,7 @@ def test_still_correct_keeps_the_status_and_takes_the_new_baseline(env, monkeypa
 def test_still_correct_on_a_stale_revision_keeps_the_fields(env):
     host, _, bank, _, window = env
     item = fill(window)
-    window.populate(bank.set_source_changed(item.id, True))
+    window.populate(bank.set_changed_slides(item.id, ("s1",)))
     window.stem.setPlainText("Typed")
     bank.save(replace(bank.get(item.id), stem="Their edit"))
     window.baseline = window.candidate()  # No unsaved changes, but the revision is stale.
@@ -128,29 +128,22 @@ def test_back_asks_about_unsaved_edits(env, monkeypatch):
     assert backs == [1] and window.bank.get(window.current.id).stem == "Typed"
 
 
-def test_the_link_grid_reads_on_the_worker_and_keeps_the_last_view_and_language(env):
+def test_the_link_grid_lists_the_decks_slides_and_links_in_the_instructor_view(env):
     host, deck, _, _, window = env
-    ref = source(host, deck)
+    source(host, deck)
+    window.load_slides()
+    host.drain()
     window.new_question()
     window.link_button.click()
-    assert window.busy and not window.link_grid_buttons
-    host.drain()
-    assert host.read_threads and [b.text() for b in window.link_grid_buttons] == ["1 · Addition"]
+    assert [b.text() for b in window.link_grid_buttons] == ["1 · Addition"]
     window.link_grid_buttons[0].click()
+    assert window.busy  # The slide is read on the worker.
     host.drain()
     link, = window.links
-    assert link.slide_id == "s1" and link.text == "Two plus two = four" and window.slide_label(link) == "Slide 1 · Addition"
+    assert (link.slide_id, link.view, link.language, link.text) == ("s1", "instructor", "en", "Two plus two = four")
+    assert window.link_box.itemAt(0).widget().findChild(type(window.write_button)).text() == "Slide 1 · Addition"
     window.remove_source(0)
     assert "link a slide" in window.status_line.text()
-    other = replace(ref, id="s2", position=2, language_read="de")
-    host.slides[(deck.path, "after-course", "de")] = [other]
-    host.sources[other] = SlideSource(text="Anderer Text")
-    window.last_link_context = ("after-course", "de")
-    window.link_button.click()
-    host.drain()
-    window.link_grid_buttons[0].click()
-    host.drain()
-    assert (window.links[0].view, window.links[0].language) == ("after-course", "de")
 
 
 def test_ai_chips_and_the_dark_palette_recolour_text_only(env):
@@ -168,6 +161,6 @@ def test_ai_chips_and_the_dark_palette_recolour_text_only(env):
     assert all("background" not in w.styleSheet() for w in (window.editor, window.stem, window.status_line))
     window.populate(bank.set_status("ai", 1, "reviewed"))
     assert window.ai_tag.isVisible() and not window.draft_tag.isVisible() and window.ai_tag.toolTip() == "r · m"
-    edited = bank.create(Item("edit", 1, "E", ai.options, ai_edit_route="route", ai_edit_model="mod"))
+    edited = bank.create(Item("edit", 1, "E", ai.options, ai_edit=Origin("ai", "route", "mod")))
     window.populate(edited)
     assert window.ai_tag.isVisible() and window.ai_tag.toolTip() == "route · mod"

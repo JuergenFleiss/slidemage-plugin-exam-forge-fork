@@ -15,7 +15,8 @@ from html import escape
 from xml.etree import ElementTree as ET
 
 from .bank import Bank
-from .model import AnswerRule, Item, answer_issues
+from .model import Item
+from .rules import AnswerRules, question_issues
 
 
 def _text(value: str) -> str:
@@ -40,21 +41,23 @@ def _fraction(share: int, sign: int = 1) -> str:
     return f'{sign * round(100 / share, 5):.5f}'.rstrip('0').rstrip('.')
 
 
-def export_moodle_xml(items: Iterable[Item], *, rule: AnswerRule, bank: Bank | None = None) -> bytes:
+def export_moodle_xml(items: Iterable[Item], *, rules: AnswerRules, bank: Bank | None = None) -> bytes:
     """Return UTF-8 XML. Only revision-quiz questions go to Moodle; an exam question is refused.
 
     The caller decides which items to export; status does not imply release or
-    approval. Each selected item must follow `rule`; its images are read from `bank`. A rule that allows one correct answer makes single-answer
+    approval. Each selected item must follow the deck's revision-quiz rule; its
+    images are read from `bank`. A rule that allows one correct answer makes single-answer
     questions; otherwise every question is multiple-response: the correct
     answers share 100% and the wrong ones -100%, so the format does not tell how
     many are correct. Only answer fractions encode the correctness flag.
     Rationales become per-answer feedback.
     """
+    rule = rules.revision
     root = ET.Element('quiz')
     for item in items:
         if item.use != 'revision':
             raise ValueError(f'{item.id}: exam questions never go to Moodle')
-        issues = answer_issues(item, rule)
+        issues = question_issues(item, rules)
         if issues:
             raise ValueError(f'{item.id}: the question must {" and ".join(issues)}')
         question = ET.SubElement(root, 'question', {'type': 'multichoice'})

@@ -13,8 +13,7 @@ import csv
 import io
 from collections.abc import Iterable, Mapping
 
-from .model import KINDS, USES, Item, slide_ids, slide_label
-from .topics import Topic, topic_of
+from .model import KINDS, USES, Item, Topic, slide_ids, slide_label, topic_of
 
 STATUS = {"draft": "Draft", "reviewed": "Reviewed", "retired": "Retired"}
 FORMULA = ("=", "+", "-", "@", "\t", "\r")
@@ -47,7 +46,7 @@ def questions_csv(items: Iterable[Item], topics: Iterable[Topic] = (),
     for item in items:
         topic = topic_of(item, topics)
         names = [slide_label(slide, *slides.get(slide, ())) for slide in slide_ids(item)]
-        origin = "AI" if item.origin.kind == "ai" else "AI-assisted" if item.ai_edit_route else "Author"
+        origin = "AI" if item.origin.kind == "ai" else "AI-assisted" if item.ai_edit.kind == "ai" else "Author"
         row = [item.id, str(item.revision), STATUS[item.status], USES[item.use], KINDS[item.kind],
                item.difficulty.title(), topic.name if topic else "", "; ".join(names), item.objective, item.stem,
                item.model_answer, item.grading_notes]

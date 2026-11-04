@@ -14,13 +14,13 @@ from PySide6.QtWidgets import (
 from slidemage.plugin_api import AiChatError
 
 from ..ai_support import NO_REPLY, ai_service
-from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
+from ..drafting import DraftReplyError, build_request, parse_reply
 from ..model import KINDS, SourceLink, plural
-from ..sources import fingerprint
+from ..sources import VIEWS, fingerprint, fresh_deck
 from .sheet import Sheet
-from .work import fresh_deck, slide_title
+from .work import slide_title
 
-VIEWS = (("Instructor view", "instructor"), ("During course", "during-course"), ("After course", "after-course"))
+VIEW_NAMES = ("Instructor view", "During course", "After course")
 
 
 def key(ref):
@@ -79,7 +79,7 @@ class DraftDialog(Sheet):
         for kind in kinds:
             self.use.addItem("Exam" if len(kinds) == 1 else f"Exam · {KINDS[kind].lower()}", ("elp", kind))
         self.view, self.language = QComboBox(), QComboBox()
-        for label, value in VIEWS:
+        for label, value in zip(VIEW_NAMES, VIEWS):
             self.view.addItem(label, value)
         codes = list(host.project_languages())          # the main language first: the default
         try:
@@ -227,14 +227,13 @@ class DraftDialog(Sheet):
         self.message.setText("Preparing selected sources…")
 
         def work():
-            slides = []
+            links = []
             for ref, source in zip(refs, sources):
                 if isinstance(source, Exception):
                     raise source
-                link = SourceLink(ref.id, ref.version or "", language, view, fingerprint(source), source.text)
-                slides.append(DraftSlide(link, source))
-            request = build_request(tuple(slides), self.rules, use=use, guidance=guidance, count=count, kind=kind)
-            return request, tuple(s.link for s in slides)
+                links.append(SourceLink(ref.id, ref.version or "", language, view, fingerprint(source), source.text))
+            links = tuple(links)
+            return build_request(links, self.rules, use=use, guidance=guidance, count=count, kind=kind), links
 
         def ready(prepared, error):
             if not self.state["active"]:

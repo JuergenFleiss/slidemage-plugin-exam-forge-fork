@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exam tab in three steps: counts, review and swap, then freeze and save."""
 from dataclasses import replace
-from decimal import Decimal
 from secrets import randbits
 
 from PySide6.QtCore import QEvent, Qt
@@ -18,21 +17,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..assembly import (
-    Blueprint,
-    assemble,
-    available,
-    check_approval,
-    swap,
-    waiting_elp_drafts,
-)
-from ..elp import ElpRules
+from ..assembly import Blueprint, assemble, available, swap, waiting_elp_drafts
 from ..manifest import Manifest
-from ..model import plural, slide_label
-from ..topics import topic_color, topic_name
-from .editor import accent_color, clear, is_dark, red_color
+from ..model import plural, topic_of
+from ..rules import MINUTES, POINTS, ExamRules, exam_totals
+from .editor import accent_color, clear, is_dark, red_color, topic_color
 from .issue import IssueView
-from .work import SCROLL_STYLE, fresh_deck
+from .work import SCROLL_STYLE
 
 STEPS = ("Counts", "Review & swap", "Freeze & save")
 def count_columns(kinds):
@@ -61,34 +52,13 @@ def read_history(bank):
     return previous, errors
 
 
-def slide_labels(host, deck, items):
-    """Item ID -> 'Slide N' from the deck's refs for the item's first link, else the slide ID."""
-    wanted = {}
-    for item in items:
-        if item.sources:
-            link = item.sources[0]
-            wanted.setdefault((link.view, link.language), []).append((item.id, link.slide_id))
-    labels = {}
-    for (view, language), pairs in wanted.items():
-        try:
-            refs = {}
-            for ref in host.deck_slides(deck, view, language):
-                refs.setdefault(ref.id, ref)
-        except (OSError, ValueError):
-            refs = {}
-        for item_id, slide_id in pairs:
-            ref = refs.get(slide_id)
-            labels[item_id] = slide_label(slide_id, ref.position if ref else None)
-    return labels
-
-
 class ExamTab(QWidget):
     def __init__(self, window):
         super().__init__()
         self.window, self.host = window, window.host
-        self.rules = ElpRules()
+        self.rules = ExamRules()
         self.selection = self.pick_topics = None
-        self.labels, self.counts, self.cells, self.rows = {}, {}, {}, {}
+        self.counts, self.cells, self.rows = {}, {}, {}
         self.avail, self.history, self.token = {}, None, 0
         layout = QVBoxLayout(self)
         self.steps = QHBoxLayout()
@@ -138,10 +108,9 @@ class ExamTab(QWidget):
         title = QVBoxLayout()
         heading = self.host.Label("New exam", "title")
         title.addWidget(heading)
-        r = self.rules
-        title.addWidget(self.muted(f"Picks only reviewed exam questions. Easy = {r.easy.points} points, "
-                              f"{number(r.easy.minutes)} min · Hard = {r.hard.points} points, "
-                              f"{number(r.hard.minutes)} min."))
+        title.addWidget(self.muted(f"Picks only reviewed exam questions. Easy = {POINTS['easy']} points, "
+                                   f"{number(MINUTES['easy'])} min · Hard = {POINTS['hard']} points, "
+                                   f"{number(MINUTES['hard'])} min."))
         head.addLayout(title, 1)
         issued = self.host.Button("Open issued manifest…")
         issued.clicked.connect(self.open_issued)
@@ -231,7 +200,7 @@ class ExamTab(QWidget):
 
     def compute_avail(self):
         topics, items = self.window.topics, self.window.items
-        of = lambda item: topic_name(item, topics)  # noqa: E731
+        of = lambda item: getattr(topic_of(item, topics), "name", "")  # noqa: E731
         avoid = self.avoid.value()
         previous = self.history[0] if self.history and avoid else []
         self.avail = available(items, of, self.rules, previous, avoid)
@@ -267,10 +236,8 @@ class ExamTab(QWidget):
                 cell[key + "_over"].setVisible(over)
                 if over:
                     short.append(f"{name} ({heading.lower()})")
-        r = self.rules
-        minutes = easy * Decimal(str(r.easy.minutes)) + hard * Decimal(str(r.hard.minutes))
-        for key, value in (("questions", easy + hard), ("points", easy * r.easy.points + hard * r.hard.points),
-                           ("minutes", number(float(minutes)))):
+        points, minutes = exam_totals(["easy"] * easy + ["hard"] * hard)
+        for key, value in (("questions", easy + hard), ("points", points), ("minutes", number(minutes))):
             self.totals[key].setText(str(value))
         reason = ("Not enough reviewed questions for " + ", ".join(short) + ". Lower the counts first."
                   if short else "" if easy + hard or not self.cells else "Choose at least one question.")
@@ -363,9 +330,9 @@ class ExamTab(QWidget):
             self.window.error(exc)
             return
         topics = topics if topics is not None else self.window.topics
-        bank, deck, host, rules = self.window.bank, self.window.deck, self.host, self.rules
+        bank, rules = self.window.bank, self.rules
         history, seed = self.history, randbits(64)
-        topic_of = lambda item: topic_name(item, topics)  # noqa: E731
+        of = lambda item: getattr(topic_of(item, topics), "name", "")  # noqa: E731
 
         def work():
             items, errors = bank.load()
@@ -374,12 +341,11 @@ class ExamTab(QWidget):
             previous, errors = [], []
             if blueprint.avoid_last:
                 previous, errors = history or read_history(bank)
-            selection = assemble(items, blueprint, seed=seed, topic_of=topic_of, rules=rules,
-                                 previous_exams=previous)
-            return selection, (previous, errors), slide_labels(host, fresh_deck(deck), selection.candidates)
+            selection = assemble(items, blueprint, seed=seed, topic_of=of, rules=rules, previous_exams=previous)
+            return selection, (previous, errors)
 
         def done(data):
-            selection, history, self.labels = data
+            selection, history = data
             if blueprint.avoid_last:
                 self.history = history
                 self.compute_avail()
@@ -473,15 +439,13 @@ class ExamTab(QWidget):
         stem.setWordWrap(True)
         text.addWidget(stem)
         meta = QHBoxLayout()
-        rule = getattr(self.rules, item.difficulty)
-        chip = self.host.Chip(f"{item.difficulty.capitalize()} · {rule.points} pts")
+        chip = self.host.Chip(f"{item.difficulty.capitalize()} · {POINTS[item.difficulty]} pts")
         meta.addWidget(chip)
         if item.kind == "open":
             meta.addWidget(self.host.Chip("Open answer", "muted"))
         if item.media:
             meta.addWidget(self.host.Chip(f"{len(item.media)} image{'s' if len(item.media) != 1 else ''}", "muted"))
-        meta.addWidget(self.muted(self.labels.get(item.id) or
-                             (slide_label(item.sources[0].slide_id) if item.sources else "No slide")))
+        meta.addWidget(self.muted(self.window.slide_name(item.sources[0].slide_id) if item.sources else "No slide"))
         row = self.rows[item.id] = {"stem": stem, "chip": chip, "changed": None, "review": None}
         if item.source_changed:
             row["changed"] = self.host.Chip("Slide changed")
@@ -528,7 +492,7 @@ class ExamTab(QWidget):
             return
 
         def work():
-            return {i.id: bank.get(i.id).source_changed for i in selection.items}
+            return {i.id: bank.get(i.id).changed_slides for i in selection.items}
 
         def done(flags, error):
             if error:
@@ -538,35 +502,16 @@ class ExamTab(QWidget):
         self.host.run_in_background(work, done)
 
     def mark_changed(self, flags):
-        """flags: item ID -> source_changed. Re-render when any selected flag differs."""
-        items = tuple(replace(i, source_changed=flags.get(i.id, i.source_changed))
-                      for i in self.selection.items)
+        """flags: item ID -> changed slides. Re-render when any selected question's differ."""
+        items = tuple(replace(i, changed_slides=flags.get(i.id, i.changed_slides)) for i in self.selection.items)
         if items != self.selection.items:
             self.selection = replace(self.selection, items=items)
             self.render_review()
 
     def approve(self):
-        if self.selection is None or self.window.busy or self.changed_ids():
-            return
-        selection, bank, deck = self.selection, self.window.bank, self.window.deck
-        self.window.set_busy(True)
-
-        def checked(report, error):
-            self.window.set_busy(False)
-            if error:
-                self.window.error(error)
-            elif report.changed:
-                self.selection = report.selection
-                self.render_review()
-            else:
-                self.issue.freeze(report.selection)
-
-        def prepared(snapshot, error):
-            if error:
-                checked(None, error)
-            else:
-                check_approval(self.host, snapshot, bank, selection, checked)
-        self.host.run_in_background(lambda: fresh_deck(deck), prepared)
+        """Freeze checks every source afresh; a changed one leads back here."""
+        if self.selection is not None and not self.window.busy and not self.changed_ids():
+            self.issue.freeze(self.selection)
 
     def frozen(self):
         """A manifest was issued or opened: show it; later exams see it in their history."""

@@ -5,9 +5,8 @@ import zlib
 from dataclasses import replace
 
 from exam_forge.bank import Bank
-from exam_forge.model import Item, Option, SourceLink
+from exam_forge.model import Item, Option, SourceLink, add_topic, assign_slide
 from exam_forge.question_document import questions_html
-from exam_forge.topics import add_topic, assign_slide
 
 
 def png():

@@ -11,8 +11,9 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from exam_forge.bank import Bank
-from exam_forge.model import REVISION_ANSWERS, Item, Option
+from exam_forge.model import Item, Option
 from exam_forge.moodle_xml import _fraction, export_moodle_xml
+from exam_forge.rules import AnswerRules
 
 
 def sample(tmp_path):
@@ -52,7 +53,7 @@ class ExtractHTML(HTMLParser):
 def test_sample_matches_fixed_structure_and_fixture(tmp_path):
     item, bank, png = sample(tmp_path)
     image = item.media[0]
-    xml = export_moodle_xml([item], rule=REVISION_ANSWERS, bank=bank)
+    xml = export_moodle_xml([item], rules=AnswerRules(), bank=bank)
     assert xml == (Path(__file__).parent / 'fixtures/sample_moodle.xml').read_bytes()
     # The fixture is what Moodle imports; these say why it is right.
     q = ET.fromstring(xml).find('question')
@@ -68,7 +69,7 @@ def test_sample_matches_fixed_structure_and_fixture(tmp_path):
 def test_escaping_html_xml_and_math():
     item = Item('id<&', 1, 'Less < & >\n' + r'\( x < y \)', (
         Option('a', '<b> &', True, 'why < &'), Option('b', 'no', False)))
-    q = ET.fromstring(export_moodle_xml([item], rule=REVISION_ANSWERS))[0]
+    q = ET.fromstring(export_moodle_xml([item], rules=AnswerRules()))[0]
     assert q.findtext('name/text') == 'id<& r1'
     html = ExtractHTML()
     html.feed(q.findtext('questiontext/text'))
@@ -83,10 +84,10 @@ def test_invalid_inputs_fail_closed(tmp_path):
                 Item('bad', 1, '\x01', (opts[0], Option('b', 'b'))),
                 Item('secret', 1, 'SECRET STEM', (opts[0], Option('b', 'b')), use='elp')):
         with pytest.raises(ValueError):
-            export_moodle_xml([bad], rule=REVISION_ANSWERS)
+            export_moodle_xml([bad], rules=AnswerRules())
     item, bank, _ = sample(tmp_path)
     with pytest.raises(ValueError, match='requires its bank'):
-        export_moodle_xml([item], rule=REVISION_ANSWERS)
+        export_moodle_xml([item], rules=AnswerRules())
     assert _fraction(0) == '0' and _fraction(1) == '100' and _fraction(3) == '33.33333'
     assert _fraction(2, -1) == '-50' and _fraction(0, -1) == '0'
     for value in (-1, 33.33333, 10, True):

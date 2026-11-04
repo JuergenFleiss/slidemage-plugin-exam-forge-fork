@@ -7,26 +7,13 @@ from dataclasses import replace
 import pytest
 from slidemage.plugin_api import AiChatResult, Route
 
-from exam_forge.answer_rules import AnswerRulesStore
 from exam_forge.assembly import Blueprint, assemble, available
-from exam_forge.bank import Bank
-from exam_forge.drafting import (
-    DraftReplyError,
-    DraftSlide,
-    build_request,
-    build_update_request,
-    parse_reply,
-)
-from exam_forge.elp import ElpRules, check_elp
+from exam_forge.bank import AnswerRulesStore, Bank
+from exam_forge.drafting import DraftReplyError, build_request, build_update_request, parse_reply
 from exam_forge.elp_document import export_elp_documents
 from exam_forge.manifest import freeze
-from exam_forge.model import (
-    AnswerRules,
-    Item,
-    Option,
-    SourceLink,
-    question_issues,
-)
+from exam_forge.model import Item, Option, SourceLink
+from exam_forge.rules import AnswerRules, ExamRules, exam_issues, question_issues
 from exam_forge.table_export import questions_csv
 
 BOTH = AnswerRules(exam_kinds=("choice", "open"))
@@ -57,7 +44,7 @@ def test_rules_for_each_use_and_type():
     assert question_issues(open_item(model_answer=" "), OPEN) == ["have a model answer"]
     assert question_issues(choice_item(), OPEN) == ["be an open-answer question"]
     assert question_issues(replace(open_item(), use="revision"), BOTH) == ["be multiple choice"]
-    assert check_elp(open_item(), AnswerRules().elp, ("open",)) == []
+    assert exam_issues(open_item(), ExamRules(kinds=("open",))) == []
     with pytest.raises(ValueError):
         AnswerRules(exam_kinds=())
     with pytest.raises(ValueError):
@@ -74,9 +61,9 @@ def test_proposals_count_each_type_separately():
     items = [replace(choice_item(f"c{i}"), status="reviewed") for i in range(3)]
     items += [replace(open_item(f"o{i}", "hard"), status="reviewed") for i in range(2)]
     of = lambda item: "t"
-    rules = ElpRules(kinds=("choice", "open"))
+    rules = ExamRules(kinds=("choice", "open"))
     assert available(items, of, rules) == {"t": {"easy": 3, "hard": 0, "open easy": 0, "open hard": 2}}
-    assert available(items, of, ElpRules())["t"]["open hard"] == 0   # multiple choice only: open ones excluded
+    assert available(items, of, ExamRules())["t"]["open hard"] == 0   # multiple choice only: open ones excluded
     picked = assemble(items, Blueprint({"t": {"easy": 2, "open hard": 1}}), seed=1, topic_of=of, rules=rules)
     assert sorted(i.kind for i in picked.items) == ["choice", "choice", "open"]
     assert [i.id for i in picked.alternatives(next(i.id for i in picked.items if i.kind == "open"))] in (["o0"], ["o1"])
@@ -91,32 +78,32 @@ def test_documents_leave_room_and_the_key_holds_the_model_answer(tmp_path):
     for item in (choice_item(), open_item(difficulty="hard")):
         bank.create(item)
         bank.set_status(item.id, 1, "reviewed")
-    manifest = freeze(None, None, bank, [("c", 2), ("o", 2)], {}, ElpRules(kinds=("choice", "open")),
+    manifest = freeze(None, None, bank, [("c", 2), ("o", 2)], {}, ExamRules(kinds=("choice", "open")),
                       topic_of=lambda i: "t")
     assert manifest.data()["schema_version"] == 1
     exam, key = export_elp_documents(manifest)
     assert exam.count('class="answer-space"') == 1 and "P(A|B)" not in exam
     assert "P(A|B) = P(B|A) P(A) / P(B)" in key and "2 points for" in key and "graded by hand" in key
     assert "Frozen scoring tables" in key and "36 points" in exam
-    only_open = freeze(None, None, bank, [("o", 2)], {}, ElpRules(kinds=("open",)), topic_of=lambda i: "t")
+    only_open = freeze(None, None, bank, [("o", 2)], {}, ExamRules(kinds=("open",)), topic_of=lambda i: "t")
     assert "Frozen scoring tables" not in export_elp_documents(only_open)[1]
     with pytest.raises(ValueError, match="be multiple choice"):
-        freeze(None, None, bank, [("o", 2)], {}, ElpRules(), topic_of=lambda i: "t")
+        freeze(None, None, bank, [("o", 2)], {}, ExamRules(), topic_of=lambda i: "t")
 
 
 def test_ai_drafts_and_updates_open_questions():
-    slide = DraftSlide(SourceLink("s", "1", "en", "instructor", "h"), type("S", (), {"text": "Slide text"})())
-    request = build_request((slide,), OPEN, use="elp", kind="open")
+    link = SourceLink("s", "1", "en", "instructor", "h", "Slide text")
+    request = build_request((link,), OPEN, use="elp", kind="open")
     assert '"model_answer"' in request.instructions and '"options"' not in request.instructions
     with pytest.raises(ValueError):
-        build_request((slide,), AnswerRules(), use="elp", kind="open")    # the deck's exam is multiple choice
+        build_request((link,), AnswerRules(), use="elp", kind="open")    # the deck's exam is multiple choice
     row = {"slide": 1, "stem": "Explain", "model_answer": "Because", "grading_notes": "1 point",
            "objective": "Understand", "difficulty": "hard"}
     route = Route("r", "chat", "m")
-    item, = parse_reply(AiChatResult(json.dumps([row]), route), OPEN, sources=(slide.link,), use="elp", kind="open")
+    item, = parse_reply(AiChatResult(json.dumps([row]), route), OPEN, sources=(link,), use="elp", kind="open")
     assert item.kind == "open" and item.model_answer == "Because" and not item.options
     with pytest.raises(DraftReplyError):
-        parse_reply(AiChatResult(json.dumps([{**row, "options": []}]), route), OPEN, sources=(slide.link,), use="elp",
+        parse_reply(AiChatResult(json.dumps([{**row, "options": []}]), route), OPEN, sources=(link,), use="elp",
                     kind="open")
     update = build_update_request(item, "New text", OPEN)
     assert json.loads(update.text)["question"]["model_answer"] == "Because" and "options" not in update.text

@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from exam_forge.bank import CorruptFileError, SchemaError
-from exam_forge.model import Item, SourceLink
-from exam_forge.topics import (PALETTE, Topic, TopicStore, add_topic, assign_slide, delete_topic,
-                               rename_topic, topic_color, topic_name, topic_of)
+from exam_forge.bank import CorruptFileError, SchemaError, TopicStore
+from exam_forge.model import (PALETTE, Item, SourceLink, Topic, add_topic, assign_slide, delete_topic, next_color,
+                              rename_topic, topic_of)
+from exam_forge.ui.editor import topic_color
 
 
 def item(*slides):
@@ -59,6 +59,7 @@ def test_helpers():
     for n in range(7):
         topics = add_topic(topics, f"T{n}")
     assert topics[6].color == PALETTE[0] and len({t.id for t in topics}) == 8
+    assert next_color(topics[:2]) == PALETTE[2] and next_color(()) == PALETTE[0]
     a, b = topics[:2]
     renamed = rename_topic(topics, a.id, "Renamed")
     assert renamed[0].name == "Renamed" and renamed[1] == b and topics[0].name == "Cells"
@@ -75,6 +76,5 @@ def test_topic_of_first_slide_only():
     assert topic_of(item("s1", "s2"), topics).id == "b"
     assert topic_of(item("s3", "s2"), topics) is None
     assert topic_of(item(), topics) is None
-    assert topic_name(item("s2"), topics) == "A"
-    assert topic_name(item(), topics) == ""
+    assert topic_of(item("s2"), topics).name == "A"
 

@@ -35,7 +35,7 @@ def review(env):
     bank.create(Item("q1", 1, "What is two plus two?", (Option("a", "4", True, "yes"), Option("b", "3", False, "no")),
                      sources=(link,)))
     bank.set_status("q1", 1, "reviewed")
-    item = bank.set_source_changed("q1", True)
+    item = bank.set_changed_slides("q1", ("s1",))
 
     def open_dialog(items=(item,), slide_id=None):
         dialog = ReviewChangesDialog(window, list(items), slide_id)
@@ -106,7 +106,7 @@ def test_an_ai_update_of_an_author_question_keeps_its_origin_and_records_the_rou
     host.drain()
     saved = bank.get("q1")
     assert saved.origin == Origin() and saved.status == "draft" and saved.stem == "What is two plus three?"
-    assert (saved.ai_edit_route, saved.ai_edit_model) == ("upd-route", "upd-model")
+    assert saved.ai_edit == Origin("ai", "upd-route", "upd-model")
     assert not saved.source_changed and revision(bank, "q1", 2).status == "reviewed" and len(bank.load()[0]) == 1
     dialog.reject()
 
