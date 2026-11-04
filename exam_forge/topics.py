@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .bank import CorruptFileError, SchemaError, _atomic_write
+from .model import plural
 
 TOPICS_SCHEMA_VERSION = 1
 # key: (light, dark). Kept clear of the reserved violet and amber accents.
@@ -153,7 +154,7 @@ def migrate(items) -> tuple[tuple[Topic, ...], tuple[str, ...]]:
             parts = ", ".join(f"{n} ({count[n]})" for n in sorted(count))
             notes.append(f"Slide {slide} is used by questions with different topics: {parts}.")
     if unlinked:
-        notes.append(f"{unlinked} question{'s' if unlinked != 1 else ''} with a topic "
+        notes.append(f"{plural(unlinked, 'question')} with a topic "
                      "but no linked slide.")
     topics = tuple(Topic(uuid4().hex, n, PALETTE[i % len(PALETTE)], tuple(owned[n]))
                    for i, n in enumerate(names))

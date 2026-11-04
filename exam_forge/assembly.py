@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from .bank import Bank, ConflictError
 from .elp import ElpRules, check_elp
-from .model import Item
+from .model import Item, plural
 from .sources import BankCheck, ItemCheck, check_bank
 
 _DEFAULT_RULES = ElpRules()
@@ -167,7 +167,7 @@ def assemble(items: Sequence[Item], blueprint: Blueprint, *, seed: int,
             pool = [i for i in candidates if topic_of(i) == name and cell_of(i) == key]
             if n > len(pool):
                 have = len(pool)
-                problems.append(f"Topic {name!r} needs {n} {CELL_NAMES[key]} question{'s' * (n != 1)}; "
+                problems.append(f"Topic {name!r} needs {plural(n, CELL_NAMES[key] + ' question')}; "
                                 f"only {have} {'is' if have == 1 else 'are'} eligible.")
             if n:
                 cells.append((n, pool))

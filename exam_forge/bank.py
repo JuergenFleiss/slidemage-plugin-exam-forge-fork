@@ -39,21 +39,25 @@ class CorruptFileError(BankError):
     pass
 
 
-def _atomic_write(path: Path, data: dict) -> None:
-    """Replace only after the entire JSON document has been flushed to disk."""
+def _atomic_write_bytes(path: Path, data: bytes, prefix: str) -> None:
+    """Replace only after the entire file has been flushed to disk."""
     name = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         prefix="." + path.name + ".", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=prefix, delete=False) as stream:
             name = stream.name
-            json.dump(data, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+            stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(name, path)
     finally:
         if name is not None and os.path.exists(name):
             os.unlink(name)
+
+
+def _atomic_write(path: Path, data: dict) -> None:
+    """Replace only after the entire JSON document has been flushed to disk."""
+    encoded = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    _atomic_write_bytes(path, encoded, "." + path.name + ".")
 
 
 def _read(path: Path) -> dict:
@@ -300,17 +304,7 @@ class Bank:
         if path.exists():
             self.read_media(media)
             return media
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=folder, prefix=".media-", delete=False) as stream:
-                temporary = stream.name
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, path)
-        finally:
-            if temporary is not None and os.path.exists(temporary):
-                os.unlink(temporary)
+        _atomic_write_bytes(path, data, ".media-")
         return media
 
     def read_media(self, media: Media) -> bytes:

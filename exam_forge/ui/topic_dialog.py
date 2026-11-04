@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..topics import add_topic, assign_slide, delete_topic, rename_topic, topic_color
-from .editor import is_dark
+from .editor import is_dark, red_color
 from .sheet import Sheet
 from .work import SCROLL_STYLE, slide_title
 
@@ -89,7 +89,7 @@ class TopicDialog(Sheet):
         self.problem.setText(text)
         self.problem.setVisible(bool(text))
         if text:
-            self.problem.setStyleSheet(f"color: {topic_color('red', is_dark(self.shell))};")
+            self.problem.setStyleSheet(f"color: {red_color(self.shell)};")
 
     def finish(self):
         name = self.name.text().strip()

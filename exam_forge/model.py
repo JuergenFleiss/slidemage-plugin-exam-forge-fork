@@ -161,6 +161,11 @@ def number_word(n: int) -> str:
     return _WORDS[n] if 0 <= n < len(_WORDS) else str(n)
 
 
+def plural(n: int, word: str) -> str:
+    """'1 question' or '3 questions'."""
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def span(low: int, high: int) -> str:
     """'exactly five' or 'one to four'."""
     return f"exactly {number_word(low)}" if low == high else f"{number_word(low)} to {number_word(high)}"

@@ -25,8 +25,7 @@ from exam_forge.folder import open_chosen_folder
 from exam_forge.manifest import Manifest, read_corrections
 from exam_forge.sources import link_slide
 from exam_forge.topics import add_topic, assign_slide
-from exam_forge.ui.editor import accent_color
-from exam_forge.ui.exam_tab import red_color
+from exam_forge.ui.editor import accent_color, red_color
 from exam_forge.ui.corrections import _SHEETS
 
 

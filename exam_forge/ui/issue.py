@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from ..elp_document import export_elp_documents
 from ..manifest import ChangedSourcesError, Manifest, freeze
+from ..model import plural
 from .corrections import open_corrections
 from .editor import accent_color
 from .work import fresh_deck
@@ -33,7 +34,7 @@ def issued_at(path):
 def manifest_totals(data):
     """'N questions · P points · M min' from the frozen items and rules, as far as they say."""
     items = data["items"]
-    text = f"{len(items)} question{'s' * (len(items) != 1)}"
+    text = plural(len(items), "question")
     rules = data.get("scoring", {}).get("rules", {})
     try:
         rows = [rules[i["difficulty"]] for i in items]

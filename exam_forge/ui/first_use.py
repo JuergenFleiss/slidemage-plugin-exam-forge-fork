@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from ..bank import Bank
 from ..folder import _absolute, copy_bank, folder_warnings, open_chosen_folder, remembered_folder
+from ..model import plural
 
 
 def accept_risks(host, deck, selected, parent=None):
@@ -56,7 +57,7 @@ def change_bank(host, deck, current, parent=None, may_leave=lambda: True):
         count = len(Bank(target).load()[0])
         answer = QMessageBox.question(
             parent, "Question bank folder",
-            f"This folder already has a question bank with {count} question{'' if count == 1 else 's'}. "
+            f"This folder already has a question bank with {plural(count, 'question')}. "
             "Use that bank for this deck? Nothing is merged; the questions in the current folder stay there.")
         if answer != QMessageBox.StandardButton.Yes:
             return None

@@ -13,7 +13,7 @@ import base64
 from collections.abc import Callable, Iterable, Mapping
 
 from .elp_document import _page, _text, chips, heading, image_mime, marker
-from .model import KINDS, USES, Item, Media
+from .model import KINDS, USES, Item, Media, plural
 from .table_export import STATUS, deck_order
 from .topics import Topic, topic_of
 
@@ -63,9 +63,8 @@ def questions_html(items: Iterable[Item], topics: Iterable[Topic] = (),
     items, topics, slides = list(items), tuple(topics), dict(slides or {})
     items.sort(key=lambda item: deck_order(item, {slide: pos for slide, (pos, _) in slides.items()}))
     counts = {status: sum(item.status == status for item in items) for status in STATUS}
-    drafts = f'{counts["draft"]} draft{"" if counts["draft"] == 1 else "s"}'
-    body = [(f'<p class="lead">{len(items)} question{"" if len(items) == 1 else "s"}: {counts["reviewed"]} reviewed, '
-             f'{drafts}, {counts["retired"]} retired.</p>'),
+    body = [(f'<p class="lead">{plural(len(items), "question")}: {counts["reviewed"]} reviewed, '
+             f'{plural(counts["draft"], "draft")}, {counts["retired"]} retired.</p>'),
             '<p class="private"><strong>This page holds the answers.</strong> '
             'Keep it as private as the question folder.</p>']
     for number, item in enumerate(items, 1):

@@ -49,6 +49,10 @@ def accent_color(widget, amber=False):
             else ("#c4b5fd" if dark else "#7040ac"))
 
 
+def red_color(widget):
+    return "#fca5a5" if is_dark(widget) else "#a8231a"
+
+
 def accent(widget, amber=False):
     # Only label foregrounds are explicit; surfaces and fields inherit the theme.
     # A local stylesheet also reaches the QLabel inside a host Chip.
@@ -113,6 +117,16 @@ class Switch(QWidget):
     def pick(self, value):
         self.setCurrentData("" if self.clearable and value == self.value else value)
         self.sync()
+
+
+def clear(layout):
+    while layout.count():
+        child = layout.takeAt(0)
+        if child.widget():
+            child.widget().hide()       # deleted later: not shown in the meantime
+            child.widget().deleteLater()
+        elif child.layout():
+            clear(child.layout())
 
 
 class Box(QWidget):
@@ -568,7 +582,7 @@ class ItemEditor:
             text = "Retired · restore it as a draft to edit or review again"
         shown = bool(issues and (dirty or status == "draft") or off_rules)
         self.status_line.setText(text)
-        self.status_line.setStyleSheet(f"color: {topic_color('red', is_dark(self))};" if shown else "")
+        self.status_line.setStyleSheet(f"color: {red_color(self)};" if shown else "")
         reviewed_clean = status == "reviewed" and not dirty and not self.new_item
         self.retire_button.setVisible(reviewed_clean)
         self.retire_button.setEnabled(reviewed_clean)
@@ -747,10 +761,7 @@ class ItemEditor:
         return f"Slide {position} · {title}" if position else f"Slide {link.slide_id}"
 
     def draw_links(self):
-        while self.link_box.count():
-            widget = self.link_box.takeAt(0).widget()
-            widget.hide()
-            widget.deleteLater()
+        clear(self.link_box)
         for index, link in enumerate(self.links):
             row = Box()
             line = QHBoxLayout(row)
@@ -847,10 +858,7 @@ class ItemEditor:
     def close_link_grid(self):
         self.link_grid.hide()
         self.link_grid_buttons = []
-        while self.link_grid_layout.count():
-            widget = self.link_grid_layout.takeAt(0).widget()
-            widget.hide()
-            widget.deleteLater()
+        clear(self.link_grid_layout)
 
     def toggle_link_grid(self):
         if self.link_grid.isVisibleTo(self.editor):

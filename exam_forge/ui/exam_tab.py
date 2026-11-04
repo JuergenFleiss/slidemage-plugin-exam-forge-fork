@@ -6,7 +6,6 @@ from decimal import Decimal
 from secrets import randbits
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -29,8 +28,9 @@ from ..assembly import (
 )
 from ..elp import ElpRules
 from ..manifest import Manifest
+from ..model import plural
 from ..topics import topic_color, topic_name
-from .editor import accent_color
+from .editor import accent_color, clear, is_dark, red_color
 from .issue import IssueView
 from .work import SCROLL_STYLE, fresh_deck
 
@@ -44,27 +44,8 @@ def count_columns(kinds):
     return (("easy", "Easy"), ("hard", "Hard"))
 
 
-def red_color(widget):
-    dark = widget.palette().color(QPalette.ColorRole.Window).lightness() < 128
-    return "#fca5a5" if dark else "#a8231a"
-
-
-def clear(layout):
-    while layout.count():
-        child = layout.takeAt(0)
-        if child.widget():
-            child.widget().hide()       # deleted later: not shown in the meantime
-            child.widget().deleteLater()
-        elif child.layout():
-            clear(child.layout())
-
-
 def number(value):
     return f"{value:g}"
-
-
-def plural(n, word):
-    return f"{n} {word}{'s' * (n != 1)}"
 
 
 def read_history(bank):
@@ -216,7 +197,7 @@ class ExamTab(QWidget):
             grid.setColumnStretch(0, 1)
             for column, text in enumerate(("Topic", *(heading for _, heading in columns))):
                 grid.addWidget(self.muted(text), 0, column)
-            dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+            dark = is_dark(self)
             for row, topic in enumerate(topics, 1):
                 cell = self.cells[topic.name] = {}
                 info = QVBoxLayout()
@@ -466,7 +447,7 @@ class ExamTab(QWidget):
         order = [t.name for t in topics if t.name in by_topic] + [n for n in by_topic
                                                                   if n not in {t.name for t in topics}]
         colors = {t.name: t.color for t in topics}
-        dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        dark = is_dark(self)
         count = 0
         for name in order:
             head = QHBoxLayout()

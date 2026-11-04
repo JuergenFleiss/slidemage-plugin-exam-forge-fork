@@ -10,7 +10,7 @@ from test_ui import app, env, fill, source  # noqa: F401 - fixtures
 
 from exam_forge.model import Item, Option, Origin
 from exam_forge.topics import Topic, topic_color
-from exam_forge.ui.editor import accent_color, reviewed_issues
+from exam_forge.ui.editor import accent_color, red_color, reviewed_issues
 
 
 def ticks(window):
@@ -231,7 +231,7 @@ def test_topic_line_follows_first_link_and_leaves_item_topic(env):
 def test_dark_palette_recolours_text_only(env):
     _, _, bank, _, window = env
     window.new_question()
-    assert topic_color("red", False) in window.status_line.styleSheet()
+    assert red_color(window) == "#a8231a" and red_color(window) in window.status_line.styleSheet()
     bank.create(Item("ai", 1, "AI", (Option("a", "x", True), Option("b", "y")), origin=Origin("ai", "r", "m")))
     window.populate(bank.get("ai"))
     assert window.draft_tag.isVisible() and accent_color(window, True) in window.draft_tag.styleSheet()
@@ -241,7 +241,7 @@ def test_dark_palette_recolours_text_only(env):
     window.setPalette(palette)
     assert "#fbbf24" in window.draft_tag.styleSheet()
     assert "#c4b5fd" in window.source_banner.styleSheet()
-    assert topic_color("red", True) in window.status_line.styleSheet()
+    assert red_color(window) == "#fca5a5" and red_color(window) in window.status_line.styleSheet()
     for widget in (window.editor, window.stem, window.status_line):
         assert "background" not in widget.styleSheet()
 

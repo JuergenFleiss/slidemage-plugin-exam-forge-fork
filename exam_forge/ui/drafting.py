@@ -15,7 +15,7 @@ from slidemage.plugin_api import AiChatError
 
 from ..ai_support import NO_REPLY, ai_service
 from ..drafting import DraftReplyError, DraftSlide, build_request, parse_reply
-from ..model import DEFAULT_RULES, KINDS, SourceLink
+from ..model import DEFAULT_RULES, KINDS, SourceLink, plural
 from ..sources import fingerprint
 from .sheet import Sheet
 from .work import fresh_deck, slide_title
@@ -25,10 +25,6 @@ VIEWS = (("Instructor view", "instructor"), ("During course", "during-course"), 
 
 def key(ref):
     return ref.id, ref.version or ""
-
-
-def plural(n, word):
-    return f"{n} {word}{'' if n == 1 else 's'}"
 
 
 class DraftDialog(Sheet):

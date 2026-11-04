@@ -3,8 +3,6 @@
 """Questions tab: topics, slides and the questions of one slide in three columns; source checks, XML and table
 export.
 The middle column lists the slides, each with its number of questions, or the questions themselves."""
-import os
-import tempfile
 from dataclasses import replace
 from datetime import datetime
 from html import escape
@@ -24,18 +22,17 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
-    QWidget,
 )
 
-from ..bank import BankError
-from ..model import KINDS, USES, question_issues
+from ..bank import BankError, _atomic_write_bytes
+from ..model import KINDS, USES, plural, question_issues
 from ..moodle_xml import export_moodle_xml
 from ..sources import check_bank, link_slide
 from ..question_document import questions_html
 from ..table_export import questions_csv
 from ..topics import topic_color, topic_of
-from .drafting import DraftDialog, plural
-from .editor import accent_color, is_dark
+from .drafting import DraftDialog
+from .editor import Box, accent_color, is_dark
 from .review_changes import ReviewChangesDialog
 from .topic_dialog import TopicDialog
 from .work import fresh_deck, slide_title
@@ -66,10 +63,6 @@ def needs_attention(item, rules):
 
 def retired_last(items):
     return sorted(items, key=lambda item: item.status == "retired")
-
-
-class Box(QWidget):
-    """A container that shows what is behind it: the stylesheet paints the page colour on a plain QWidget only."""
 
 
 def passive(widget):
@@ -910,7 +903,7 @@ class QuestionsTab:
         def work():
             if any(self.bank.get(item.id) != item for item in items):
                 raise BankError("A question changed during export. Check slides and try again.")
-            write_atomically(Path(filename), export_moodle_xml(items, bank=self.bank, rule=rule), ".moodle-")
+            _atomic_write_bytes(Path(filename), export_moodle_xml(items, bank=self.bank, rule=rule), ".moodle-")
             return len(items)
 
         def done(count, error):
@@ -951,7 +944,7 @@ class QuestionsTab:
 
         def work():
             items, corrupt = self.bank.load()
-            write_atomically(Path(filename), render(items, topics, slides), ".questions-")
+            _atomic_write_bytes(Path(filename), render(items, topics, slides), ".questions-")
             return len(items), len(corrupt)
 
         def done(counts, error):
@@ -966,16 +959,3 @@ class QuestionsTab:
                            "It holds the answers: keep it private.")
         self.host.run_in_background(work, done)
 
-
-def write_atomically(path, data, prefix):
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=prefix, delete=False) as stream:
-            temporary = stream.name
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
