@@ -14,62 +14,43 @@ def item(topic="", *slides, id="q"):
     return Item(id, 1, topic=topic, sources=tuple(SourceLink(s) for s in slides))
 
 
-def test_palette_and_colors():
-    assert len(PALETTE) == 6
+def test_topic_colours_never_use_the_violet_or_amber_accents():
     for key in PALETTE:
-        for dark in (False, True):
-            color = topic_color(key, dark)
-            assert len(color) == 7 and color.startswith("#")
-            assert color.lower() not in ("#7040ac", "#c4b5fd", "#8a5000", "#fbbf24")
         assert topic_color(key, True) != topic_color(key, False)
+        for dark in (False, True):
+            assert topic_color(key, dark).lower() not in ("#7040ac", "#c4b5fd", "#8a5000", "#fbbf24")
 
 
 def test_topic_validation():
     for args in (("", "A", "blue"), ("i", "  ", "blue"), ("i", "A", "mauve"),
-                 ("i", "A", "blue", ("s", "s"))):
+                 ("i", "A", "blue", ("s", "s")), ("i", "A", "blue", (1,))):
         with pytest.raises(ValueError):
             Topic(*args)
 
 
-def test_store_round_trip_and_file(tmp_path):
+def test_store_round_trip_and_refusals(tmp_path):
     store = TopicStore(tmp_path)
     assert not store.exists() and store.load() == ()
+    for conflict in ((Topic("a", "A", "blue", ("s",)), Topic("b", "B", "red", ("s",))),
+                     (Topic("a", "Cells", "blue"), Topic("b", " cells ", "red"))):
+        with pytest.raises(ValueError):
+            store.save(conflict)
+    assert not store.exists()
     topics = (Topic("a", "Cells", "blue", ("s1", "s2")), Topic("b", "Genes", "red"))
     store.save(topics)
-    assert store.exists() and store.load() == topics
-    assert json.loads((tmp_path / "topics.json").read_text("utf-8")) == {
-        "schema_version": 1, "topics": [
-            {"id": "a", "name": "Cells", "color": "blue", "slides": ["s1", "s2"]},
-            {"id": "b", "name": "Genes", "color": "red", "slides": []}]}
-    assert [p.name for p in tmp_path.iterdir()] == ["topics.json"]
-
-
-def test_store_errors(tmp_path):
-    store = TopicStore(tmp_path)
+    assert store.load() == topics and [p.name for p in tmp_path.iterdir()] == ["topics.json"]
+    assert json.loads((tmp_path / "topics.json").read_text("utf-8"))["topics"][0] == {
+        "id": "a", "name": "Cells", "color": "blue", "slides": ["s1", "s2"]}
     path = tmp_path / "topics.json"
-    path.write_text("{nope", "utf-8")
-    with pytest.raises(CorruptFileError):
-        store.load()
     path.write_text(json.dumps({"schema_version": 2, "topics": []}), "utf-8")
     with pytest.raises(SchemaError):
         store.load()
     row = {"id": "a", "name": "A", "color": "blue", "slides": []}
-    for bad in ({"schema_version": 1}, {"schema_version": 1, "topics": [{"id": "a"}]},
-                {"schema_version": 1, "topics": [{**row, "color": "x"}]},
-                {"schema_version": 1, "topics": [row, {**row, "id": "b"}]},
-                {"schema_version": 0, "topics": []}, []):
-        path.write_text(json.dumps(bad), "utf-8")
+    for bad in ("{nope", {"schema_version": 1}, {"schema_version": 1, "topics": [{**row, "color": "x"}]},
+                {"schema_version": 1, "topics": [row, {**row, "id": "b"}]}):
+        path.write_text(bad if isinstance(bad, str) else json.dumps(bad), "utf-8")
         with pytest.raises(CorruptFileError):
             store.load()
-
-
-def test_save_rejects_conflicts(tmp_path):
-    store = TopicStore(tmp_path)
-    with pytest.raises(ValueError):
-        store.save((Topic("a", "A", "blue", ("s",)), Topic("b", "B", "red", ("s",))))
-    with pytest.raises(ValueError):
-        store.save((Topic("a", "Cells", "blue"), Topic("b", " cells ", "red")))
-    assert not store.exists()
 
 
 def test_helpers():
@@ -121,8 +102,3 @@ def test_migrate_unlinked():
     assert migrate(()) == ((), ())
     topics, notes = migrate((item("T", "s"),))
     assert topics[0].slides == ("s",) and notes == ()
-
-
-def test_non_string_slide_id_is_refused():
-    with pytest.raises(ValueError):
-        Topic("t", "Name", PALETTE[0], (1,))

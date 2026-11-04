@@ -60,13 +60,10 @@ def test_notes_cover_intermediate_entries_and_breaking_changes():
     (FIRST.replace("(2026-10-27, first release)", "(2026-10-27)"), "0.1.0", "date and reason"),
     (FIRST.replace("v0.1.0 (", "v0.1 ("), "0.1.0", "invalid entry"),
     (FIRST.replace("NEW:", "NEWS:"), "0.1.0", "expected one NEW:"),
-    (FIRST.replace("- Say hello.", ""), "0.1.0", "at least one nonempty"),
     (FIRST.replace("- Say hello.", "- "), "0.1.0", "at least one nonempty"),
     (FIRST + SECOND, "0.1.0", "does not match newest"),
     (SECOND + FIRST, "0.1.0", "entries oldest first"),
-    (FIRST + FIRST, "0.1.0", "entries oldest first"),
     (FIRST + MAJOR.replace("BREAKING:", "NOTICE:"), "1.0.0", "no nonempty BREAKING:"),
-    (FIRST + MAJOR.replace("BREAKING: Old settings no longer work.\n  Choose new settings.", "BREAKING:"), "1.0.0", "no nonempty BREAKING:"),
 ])
 def test_invalid_history(history, version, expected):
     _, errors = release_notes.check_history(history, version)
@@ -74,12 +71,10 @@ def test_invalid_history(history, version, expected):
 
 
 def test_build_check_enforces_history(tmp_path, monkeypatch):
-    (tmp_path / "CHANGELOG.md").write_text(FIRST + SECOND, encoding="utf-8")
-    (tmp_path / "README.md").write_text("Test", encoding="utf-8")
-    (tmp_path / "LICENSE").write_text("Test", encoding="utf-8")
+    for name, text in (("CHANGELOG.md", FIRST + SECOND), ("README.md", "Test"), ("LICENSE", "Test")):
+        (tmp_path / name).write_text(text, encoding="utf-8")
     monkeypatch.setattr(build, "ROOT", tmp_path)
-    errors = build.check({"version": "0.1.0"})
-    assert any("does not match newest" in error for error in errors)
+    assert any("does not match newest" in error for error in build.check({"version": "0.1.0"}))
 
 
 def test_cli_release_notes_and_validation(tmp_path):

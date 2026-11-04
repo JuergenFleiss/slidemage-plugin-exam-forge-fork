@@ -4,24 +4,16 @@
 from unittest.mock import Mock
 
 import pytest
-from fake_host import FakeHost
-from PySide6.QtWidgets import QApplication
+from fake_host import FakeHost, activate
 
-import exam_forge
 from exam_forge.ai_support import ai_service
-
-
-@pytest.fixture(scope="module")
-def app():
-    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture
 def host(app):
     fake = FakeHost()
     fake.ai_chat = Mock(return_value=Mock(available=Mock(return_value=False)))
-    exam_forge.activate(fake)
-    fake.finish_activation()
+    activate(fake)
     return fake
 
 

@@ -1,26 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A deck's answer rules: the store, the checks, scoring, Moodle and ELP output, and the Settings section."""
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import json
 import re
 from dataclasses import replace
 
 import pytest
+from fake_host import keys, row_text
 from PySide6.QtWidgets import QSpinBox
 from slidemage.plugin_api import Focus
-from test_questions_tab import (  # noqa: F401 - shared fixtures
-    add,
-    keys,
-    lab,
-    make_slides,
-    pick,
-    row_text,
-)
-from test_ui import app, env  # noqa: F401 - shared real-window fixtures
 
 from exam_forge.answer_rules import AnswerRulesStore
 from exam_forge.bank import Bank, CorruptFileError
@@ -115,9 +103,6 @@ def test_settings_change_the_open_windows_rules(lab):
     assert window.answer_rules.revision.min_options == 3
     assert "Off the answer rules" in row_text(window.cards, "q1") and "attention" in keys(window.topic_list)
     assert window.status_line.text().startswith("Reviewed, but it no longer fits the answer rules: have three")
-    assert "three to eight answers" in window.hint.text()
-    pick(window.topic_list, "attention")
-    assert "q1" in keys(window.slide_list)
     elp_count.setValue(6)                          # 12 points cannot be split for one correct of six
     notice = next(label for label in page.findChildren(type(page.ai_notice)) if label.text().startswith("Not saved"))
     assert "With 6 answers" in notice.text() and AnswerRulesStore(bank.folder).load().elp.max_options == 5

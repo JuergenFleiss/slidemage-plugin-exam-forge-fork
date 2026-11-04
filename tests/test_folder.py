@@ -1,10 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """First-use selection and the privacy warnings."""
-import os
 import subprocess
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from fake_host import FakeDeck, FakeHost
@@ -14,129 +11,71 @@ from exam_forge.folder import folder_warnings, remembered_folder
 from exam_forge.ui.first_use import choose_bank
 
 
-class Settings:
-    def __init__(self):
-        self.data = {}
-        self.saves = 0
-
-    def get(self, key, default=None):
-        return self.data.get(key, default)
-
-    def set(self, key, value):
-        self.data[key] = value
-
-    def save(self):
-        self.saves += 1
-
-
 @pytest.fixture
-def setup(tmp_path):
+def setup(app, tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     subprocess.run(["git", "init", "-q", str(project)], check=True)
     host = FakeHost(project)
-    settings = Settings()
-    host.settings = lambda: settings
-    deck = FakeDeck("deck", project / "deck.tex")
-    return host, settings, deck, project
+    return host, host.settings(), FakeDeck("deck", project / "deck.tex"), project
 
 
 def select(monkeypatch, path, answer=QMessageBox.StandardButton.Yes):
     monkeypatch.setattr("exam_forge.ui.first_use.QFileDialog.getExistingDirectory", lambda *a: str(path))
     calls = []
-    def warning(*args):
-        calls.append(args)
-        return answer
-    monkeypatch.setattr("exam_forge.ui.first_use.QMessageBox.warning", warning)
+    monkeypatch.setattr("exam_forge.ui.first_use.QMessageBox.warning", lambda *a: calls.append(a[2]) or answer)
     return calls
 
 
-def test_cancel_does_not_store_anything(setup, monkeypatch):
+def test_cancel_stores_nothing(setup, monkeypatch):
     host, settings, deck, project = setup
     select(monkeypatch, "")
-    assert choose_bank(host, deck) is None
-    assert settings.data == {} and settings.saves == 0
+    assert choose_bank(host, deck) is None and settings.data == {} and settings.saves == 0
     assert not (project / "bank.json").exists()
 
 
-def test_output_and_git_warnings_require_confirmation(setup, monkeypatch):
+def test_each_warning_needs_confirmation_and_no_creates_nothing(setup, monkeypatch, tmp_path):
     host, settings, deck, project = setup
-    folder = project / "pdf" / "bank"
-    folder.mkdir(parents=True)
-    warnings = folder_warnings(host, deck, folder)
-    assert len(warnings) == 2
-    calls = select(monkeypatch, folder, QMessageBox.StandardButton.No)
-    assert choose_bank(host, deck) is None
-    assert len(calls) == 1 and "output" in calls[0][2] and "Git" in calls[0][2]
-    assert settings.data == {} and not (folder / "bank.json").exists()
-    calls = select(monkeypatch, folder)
-    bank = choose_bank(host, deck)
-    assert bank.folder == folder and len(calls) == 1 and settings.saves == 1
+    output = tmp_path / "output"
+    output.mkdir()
+    host.output_folders[(deck.path, "after-course")] = output
+    # project/pdf is the deck's default output folder.
+    for folder, says in ((project / "unignored", {"Git"}), (output, {"output"}), (project / "pdf" / "bank", {"Git", "output"})):
+        folder.mkdir(parents=True, exist_ok=True)
+        calls = select(monkeypatch, folder, QMessageBox.StandardButton.No)
+        assert choose_bank(host, deck) is None and len(calls) == 1
+        assert {word for word in ("Git", "output") if word in calls[0]} == says
+        assert not (folder / "bank.json").exists()
+    assert settings.data == {}
+    select(monkeypatch, project / "pdf" / "bank")
+    assert choose_bank(host, deck).folder == project / "pdf" / "bank" and settings.saves == 1
 
 
-def test_git_ignore_and_all_output_views(setup):
+def test_git_ignored_folders_and_symlinks_to_output(setup, tmp_path):
     host, _, deck, project = setup
     (project / ".gitignore").write_text("private/\n")
     folder = project / "private" / "bank"
     folder.mkdir(parents=True)
     assert folder_warnings(host, deck, folder) == []
-    host.output_folders[(deck.path, "after-course")] = folder
-    warnings = folder_warnings(host, deck, folder)
-    assert len(warnings) == 1 and "output" in warnings[0]
-    assert "Git" in folder_warnings(host, deck, project)[0]
+    (project / "pdf").mkdir()
+    (tmp_path / "alias").symlink_to(project / "pdf", target_is_directory=True)
+    assert any("output" in warning for warning in folder_warnings(host, deck, tmp_path / "alias"))
 
 
-def test_moved_deck_and_missing_folder_ask_again(setup, monkeypatch, tmp_path):
+def test_a_moved_deck_a_missing_folder_or_a_risky_one_asks_again(setup, monkeypatch, tmp_path):
     host, settings, deck, project = setup
     folder = tmp_path / "private"
     folder.mkdir()
     select(monkeypatch, folder)
     bank = choose_bank(host, deck)
     select(monkeypatch, "")
-    moved = FakeDeck("deck", project / "moved.tex")
-    assert remembered_folder(host, moved) is None
-    assert choose_bank(host, moved) is None
+    assert remembered_folder(host, FakeDeck("deck", project / "moved.tex")) is None
     assert choose_bank(host, deck).id == bank.id
     (folder / "bank.json").unlink()
-    assert choose_bank(host, deck) is None
-    folder.rmdir()
-    assert choose_bank(host, deck) is None
-    assert settings.saves == 1
-    assert not (project / "bank.json").exists()
-
-
-def test_each_warning_can_independently_block_selection(setup, monkeypatch, tmp_path):
-    host, settings, deck, project = setup
-    unignored = project / "unignored"
-    unignored.mkdir()
-    calls = select(monkeypatch, unignored, QMessageBox.StandardButton.No)
-    assert choose_bank(host, deck) is None
-    assert len(calls) == 1 and "Git" in calls[0][2] and "output" not in calls[0][2]
-    output = tmp_path / "output"
-    output.mkdir()
-    host.output_folders[(deck.path, "instructor")] = output
-    calls = select(monkeypatch, output, QMessageBox.StandardButton.No)
-    assert choose_bank(host, deck) is None
-    assert len(calls) == 1 and "output" in calls[0][2] and "Git" not in calls[0][2]
-    assert settings.data == {} and not (unignored / "bank.json").exists()
-    assert not (output / "bank.json").exists()
-
-
-def test_symlink_to_output_is_detected(setup, tmp_path):
-    host, _, deck, project = setup
-    output = project / "pdf"
-    output.mkdir()
-    alias = tmp_path / "alias"
-    alias.symlink_to(output, target_is_directory=True)
-    assert any("output" in warning for warning in folder_warnings(host, deck, alias))
-
-
-def test_remembered_risky_folder_requires_confirmation_again(setup, monkeypatch):
-    host, _, deck, project = setup
-    folder = project / "bank"
-    folder.mkdir()
-    select(monkeypatch, folder)
+    assert choose_bank(host, deck) is None and settings.saves == 1
+    risky = project / "bank"
+    risky.mkdir()
+    select(monkeypatch, risky)
     assert choose_bank(host, deck)
     calls = select(monkeypatch, "", QMessageBox.StandardButton.No)
-    assert choose_bank(host, deck) is None
-    assert len(calls) == 1
+    assert choose_bank(host, deck) is None and len(calls) == 1  # The remembered risky folder warns again.

@@ -1,15 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Drive every view with SlideMage's own widgets: the fake host cannot catch a mismatch with their API."""
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 from dataclasses import replace
 
 import pytest
-from fake_host import FakeHost
-from test_ui import app, env, source  # noqa: F401 - shared real-window fixtures
+from fake_host import FakeHost, source
 
 from exam_forge.model import Item, Option, Origin
 from exam_forge.sources import link_slide

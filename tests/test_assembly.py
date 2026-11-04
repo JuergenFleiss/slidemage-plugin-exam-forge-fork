@@ -1,6 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-import json
 from collections import Counter
 from dataclasses import replace
 from itertools import product
@@ -20,7 +19,7 @@ from exam_forge.assembly import (
 )
 from exam_forge.bank import Bank, ConflictError
 from exam_forge.elp import DifficultyRules, ElpRules
-from exam_forge.model import Item, Option, SourceLink
+from exam_forge.model import Item, Option
 from exam_forge.sources import link_slide
 
 
@@ -73,11 +72,7 @@ def test_infeasible_blueprint_never_relaxes_or_returns_partial_selection(bluepri
     assert any(reason in p for p in result.problems)
     with pytest.raises(ValueError, match="infeasible"):
         swap(result, "a", "b")
-
-
-def test_every_short_cell_is_reported():
-    result = assemble([item("e")], bp(a=(2, 1), b=(1, 0)), seed=1, topic_of=topic)
-    assert len(result.problems) == 3
+    assert len(assemble([item("e")], bp(a=(2, 1), b=(1, 0)), seed=1, topic_of=topic).problems) == 3  # Every cell.
 
 
 def test_cells_against_small_exhaustive_oracle():
@@ -136,11 +131,8 @@ def test_swap_only_within_same_topic_and_difficulty():
         with pytest.raises(ValueError):
             swap(result, out, replacement)
     assert result.alternatives("missing") == ()
-
-
-def test_alternatives_empty_when_cell_has_no_spare():
-    result = assemble([item("only"), item("hard", difficulty="hard")], bp(a=(1, 0)), seed=1, topic_of=topic)
-    assert result.alternatives("only") == ()
+    spare = assemble([item("only"), item("hard", difficulty="hard")], bp(a=(1, 0)), seed=1, topic_of=topic)
+    assert spare.alternatives("only") == ()
 
 
 def test_available_and_waiting_drafts_share_eligibility():
@@ -154,20 +146,14 @@ def test_available_and_waiting_drafts_share_eligibility():
     assert waiting_elp_drafts([item("n", topic="")], topic) == {}
 
 
-def test_blueprint_normalizes_and_serializes():
-    blueprint = Blueprint({"a": {"easy": 2}, "b": {}}, avoid_last=3)
-    assert blueprint.as_dict() == {"counts": {"a": {"easy": 2, "hard": 0}, "b": {"easy": 0, "hard": 0}},
-                                   "avoid_last": 3}
-    assert json.loads(json.dumps(blueprint.as_dict())) == blueprint.as_dict()
-
-
 @pytest.mark.parametrize("kwargs", [{"counts": {"a": {"easy": -1}}}, {"counts": {"a": {"medium": 1}}},
                                     {"counts": {"": {"easy": 1}}}, {"counts": {"a": {"easy": True}}},
                                     {"counts": {"a": {"easy": 1.5}}}, {"avoid_last": -1}])
 def test_invalid_blueprint_configuration(kwargs):
-    params = {"counts": {"a": {"easy": 1}}}
     with pytest.raises(ValueError):
-        Blueprint(**(params | kwargs))
+        Blueprint(**({"counts": {"a": {"easy": 1}}} | kwargs))
+    assert Blueprint({"a": {"easy": 2}, "b": {}}, avoid_last=3).as_dict() == {
+        "counts": {"a": {"easy": 2, "hard": 0}, "b": {"easy": 0, "hard": 0}}, "avoid_last": 3}
 
 
 def test_approval_always_rechecks_fingerprints_and_requires_acknowledgement(tmp_path):

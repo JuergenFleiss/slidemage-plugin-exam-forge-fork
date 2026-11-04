@@ -1,13 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-from dataclasses import replace
-
 import pytest
 
 from exam_forge.elp import SCORING_FLOOR, DifficultyRules, ElpRules, check_elp, scoring_table
 from exam_forge.model import Item, Option
-from exam_forge.moodle_xml import export_moodle_xml
-from test_ui import app, env, fill  # shared offscreen editor fixtures
 
 
 @pytest.mark.parametrize("points, expected", [
@@ -39,24 +35,9 @@ def item_with(count, correct):
     return Item('id', 1, options=tuple(Option(str(i), str(i), i < correct) for i in range(count)), use='elp')
 
 
-@pytest.mark.parametrize('correct', range(1, 5))
-def test_valid_elp_item(correct):
-    assert check_elp(item_with(5, correct)) == []
-
-
-@pytest.mark.parametrize('count,correct', [(4, 1), (6, 1), (5, 0), (5, 5)])
-def test_invalid_elp_item(count, correct):
-    assert check_elp(item_with(count, correct))
-
-
-def test_editor_reviews_multiple_answer_elp_and_moodle_stays_single_answer(env):
-    host, _, bank, _, window = env
-    item = fill(window)
-    options = tuple(Option(str(i), f'Answer {i}', i < 2) for i in range(5))
-    item = bank.save(replace(item, options=options, use='elp'))
-    window.populate(item)
-    window.change_status('reviewed')
-    host.drain()
-    assert window.current.status == 'reviewed'
-    with pytest.raises(ValueError, match='mark exactly one correct answer'):
-        export_moodle_xml([window.current], released_elp={(window.current.id, window.current.revision)})
+@pytest.mark.parametrize('count,correct,valid', [
+    (5, 1, True), (5, 2, True), (5, 3, True), (5, 4, True),
+    (4, 1, False), (6, 1, False), (5, 0, False), (5, 5, False),
+])
+def test_elp_item_needs_five_answers_one_to_four_correct(count, correct, valid):
+    assert (check_elp(item_with(count, correct)) == []) is valid

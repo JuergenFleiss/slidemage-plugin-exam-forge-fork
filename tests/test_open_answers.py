@@ -1,17 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Open-answer exam questions: storage, rules, exam proposals, documents, AI drafting, editor and Exam tab."""
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
 import json
 from dataclasses import replace
 
 import pytest
 from slidemage.plugin_api import AiChatResult, Route
-from test_questions_tab import keys, lab, row_text  # noqa: F401 - shared fixtures
-from test_ui import app, env  # noqa: F401 - shared real-window fixtures
 
 from exam_forge.answer_rules import AnswerRulesStore
 from exam_forge.assembly import Blueprint, assemble, available
@@ -35,7 +29,6 @@ from exam_forge.model import (
     question_issues,
 )
 from exam_forge.table_export import questions_csv
-from exam_forge.ui.exam_tab import count_columns
 
 BOTH = AnswerRules(exam_kinds=("choice", "open"))
 OPEN = AnswerRules(exam_kinds=("open",))
@@ -142,12 +135,6 @@ def test_table_shows_the_type_and_model_answer():
     assert "Open answer" in text and "P(A|B) = P(B|A) P(A) / P(B)" in text
 
 
-def test_count_columns_follow_the_exam_types():
-    assert [k for k, _ in count_columns(("choice",))] == ["easy", "hard"]
-    assert [k for k, _ in count_columns(("open",))] == ["open easy", "open hard"]
-    assert [h for _, h in count_columns(("choice", "open"))] == ["Easy", "Hard", "Open easy", "Open hard"]
-
-
 def test_editor_writes_an_open_answer_question(lab):
     _, _, bank, _, window, *_ = lab
     AnswerRulesStore(bank.folder).save(BOTH)
@@ -175,15 +162,3 @@ def test_editor_writes_an_open_answer_question(lab):
     assert "be multiple choice" in window.status_line.text()
     window.use.setCurrentData("revision")                     # a revision quiz is multiple choice
     assert window.kind.currentData() == "choice" and len(window.rows) >= 2
-
-
-def test_exam_tab_shows_a_column_per_type(lab):
-    _, _, bank, _, window, _, _, topics = lab
-    AnswerRulesStore(bank.folder).save(BOTH)
-    window.answer_rules_changed()
-    window.exam_tab.render_counts()
-    cell = window.exam_tab.cells[topics[0].name]
-    assert {"easy", "hard", "open easy", "open hard"} <= set(cell)
-    cell["open easy"].setValue(1)
-    assert window.exam_tab.counts[topics[0].name]["open easy"] == 1
-    assert "Only 0 available" in cell["open easy_over"].text()

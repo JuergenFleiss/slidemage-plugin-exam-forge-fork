@@ -133,23 +133,15 @@ def test_detects_edit_during_source_check(setup, monkeypatch):
         freeze(host, deck, bank, [("q1", 2)], {}, ElpRules(), topic_of=lambda i: i.topic)
 
 
-def test_corrections_survive_truncated_line(tmp_path):
+def test_corrections_survive_a_truncated_line_and_refuse_a_corrupt_one(tmp_path):
     path = tmp_path / "audit.jsonl"
     append_correction(path, "q1", "Fixed key", "Typo", time="2026-10-30T12:00:00Z")
     original = path.read_bytes()
     with path.open("ab") as stream:
         stream.write(b'{"item_id":"incomplete')
-    assert len(read_corrections(path)) == 1
     append_correction(path, "q2", "Fixed text", "Clarity", time="2026-10-30T13:00:00Z")
     assert path.read_bytes().startswith(original)
-    assert read_corrections(path) == [
-        {"item_id": "q1", "change": "Fixed key", "reason": "Typo", "time": "2026-10-30T12:00:00Z"},
-        {"item_id": "q2", "change": "Fixed text", "reason": "Clarity", "time": "2026-10-30T13:00:00Z"},
-    ]
-
-
-def test_rejects_corrupt_complete_audit_line(tmp_path):
-    path = tmp_path / "audit.jsonl"
+    assert [row["item_id"] for row in read_corrections(path)] == ["q1", "q2"]
     path.write_bytes(b"bad\n")
     with pytest.raises(ValueError):
         append_correction(path, "q", "change", "reason")

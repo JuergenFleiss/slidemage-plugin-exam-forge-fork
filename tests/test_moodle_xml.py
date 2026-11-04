@@ -48,26 +48,15 @@ def test_sample_matches_fixed_structure_and_fixture():
     item, image = sample()
     xml = export_moodle_xml([item], images={(item.id, item.revision): [image]})
     assert xml == (Path(__file__).parent / 'fixtures/sample_moodle.xml').read_bytes()
-    root = ET.fromstring(xml)
-    q = root.find('question')
-    assert root.tag == 'quiz' and len(root) == 1 and q.attrib == {'type': 'multichoice'}
-    assert q.findtext('name/text') == 'sample-math-image r1'
-    assert q.findtext('defaultgrade') == '1.0000000'
-    assert q.findtext('single') == 'true' and q.findtext('shuffleanswers') == '1'
-    assert q.findtext('answernumbering') == 'abc'
-    qt = q.find('questiontext')
-    assert qt.attrib == {'format': 'html'}
+    # The fixture is what Moodle imports; these say why it is right.
+    q = ET.fromstring(xml).find('question')
+    assert q.findtext('name/text') == 'sample-math-image r1' and q.findtext('single') == 'true'
     html = ExtractHTML()
-    html.feed(qt.findtext('text'))
-    assert html.data == r'In the image, what is \( 2^3 \)?'
+    html.feed(q.findtext('questiontext/text'))
     assert html.images == [{'src': '@@PLUGINFILE@@/sample.png', 'alt': image.alt}]
-    file = qt.find('file')
-    assert file.attrib == {'name': 'sample.png', 'path': '/', 'encoding': 'base64'}
-    assert base64.b64decode(file.text, validate=True) == image.data
-    answers = q.findall('answer')
-    assert [a.attrib['fraction'] for a in answers] == ['100', '0', '0']
-    assert [a.findtext('text') for a in answers] == ['8', '6', '9']
-    assert [a.findtext('feedback/text') for a in answers] == [o.rationale for o in item.options]
+    assert base64.b64decode(q.find('questiontext/file').text, validate=True) == image.data
+    assert [a.attrib['fraction'] for a in q.findall('answer')] == ['100', '0', '0']
+    assert [a.findtext('feedback/text') for a in q.findall('answer')] == [o.rationale for o in item.options]
 
 
 def test_escaping_html_xml_and_math():
