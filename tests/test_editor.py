@@ -4,13 +4,14 @@
 from dataclasses import replace
 
 from fake_host import fill, revision, source
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QLabel, QMessageBox
 from slidemage.plugin_api import SlideSource
 
 from exam_forge.model import Item, Option, Origin
 from exam_forge.ui.editor import reviewed_issues
-from exam_forge.ui.kit import TONES
+from exam_forge.ui.kit import TONES, window_sheet
 
 
 def ticks(window):
@@ -152,7 +153,7 @@ def text_color(widget):
     return widget.palette().color(QPalette.ColorRole.WindowText).name()
 
 
-def test_ai_chips_and_the_dark_theme_recolour_text_only(env):
+def test_ai_chips_and_the_dark_theme_take_the_hosts_colours(env):
     host, _, bank, _, window = env
     ai = bank.create(Item("ai", 1, "AI", (Option("a", "x", True), Option("b", "y")), origin=Origin("ai", "r", "m")))
     window.questions.open_card(ai.id)
@@ -162,7 +163,11 @@ def test_ai_chips_and_the_dark_theme_recolour_text_only(env):
     host.set_dark(True)
     assert text_color(chip_text) == TONES["amber"][1] and text_color(window.editor.status_line) == TONES["error"][1]
     assert text_color(window.editor.source_banner) == TONES["violet"][1]
-    assert "background" not in window.styleSheet() and window.editor.draft_tag.styleSheet() == ""
+    # Surfaces come from the host's theme tokens: the sheet is rebuilt from the dark ones, with no light surface left.
+    assert window.styleSheet() == window_sheet(host.theme()) and window_sheet(host.theme()) != window_sheet(
+        replace(host.theme(), dark=False))
+    assert host.theme().surface in window.styleSheet() and "#ffffff" not in window.styleSheet()
+    assert window.editor.draft_tag.styleSheet() == ""
     window.editor.populate(bank.set_status("ai", 1, "reviewed"))
     assert window.editor.ai_tag.isVisible() and not window.editor.draft_tag.isVisible() and window.editor.ai_tag.toolTip() == "r · m"
     edited = bank.create(Item("edit", 1, "E", ai.options, ai_edit=Origin("ai", "route", "mod")))
@@ -170,3 +175,34 @@ def test_ai_chips_and_the_dark_theme_recolour_text_only(env):
     assert window.editor.draft_tag.isVisible() and not window.editor.ai_tag.isVisible() and window.editor.draft_tag.toolTip() == "route · mod"
     window.editor.populate(bank.set_status("edit", 1, "reviewed"))
     assert window.editor.ai_tag.isVisible() and window.editor.ai_tag.toolTip() == "route · mod"
+
+
+def test_answer_cards_tint_with_their_tick_and_name_their_parts(env):
+    _, _, _, _, window = env
+    window.questions.new_question()
+    first, second = window.editor.rows
+    first.tick.click()
+    assert first.tick.isChecked() and first.property("correct") and not second.property("correct")
+    second.tick.click()  # A revision quiz has one correct answer: the tick moves, and the tint with it.
+    assert not first.property("correct") and second.property("correct") and second.correct()
+    assert first.tick.accessibleName() == "Option 1 is correct" and second.remove.accessibleName() == "Remove answer 2"
+    assert second.text.accessibleName() == "Answer 2" and second.why.accessibleName() == "Rationale for answer 2"
+    window.editor.use.set_value("exam")
+    assert len(window.editor.rows) == 5 and window.editor.add_button.isHidden()
+    window.editor.setEnabled(False)
+    assert not any(part.isEnabled() for part in (first.tick, first.text, first.why, first.remove))
+
+
+def test_text_fields_grow_with_their_text(env):
+    _, _, _, _, window = env
+    window.questions.new_question()
+    stem, answer = window.editor.stem, window.editor.rows[0].text
+    short, line = stem.height(), answer.height()
+    stem.setPlainText("\n".join("line" for _ in range(6)))
+    answer.setPlainText("first\nsecond")
+    assert stem.height() > short and answer.height() > line
+    stem.setPlainText("\n".join("line" for _ in range(10)))
+    tallest = stem.height()
+    assert stem.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    stem.setPlainText("\n".join("line" for _ in range(30)))  # Beyond its ten lines it scrolls instead.
+    assert stem.height() == tallest and stem.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from ..drafting import AiRequest, build_request, parse_reply
 from ..model import KINDS, SourceLink, plural
 from ..sources import VIEWS, fingerprint, fresh_deck
-from .kit import Sheet, deck_language, slide_title
+from .kit import Sheet, deck_language, field, slide_title
 
 VIEW_NAMES = ("Instructor view", "During course", "After course")
 
@@ -53,7 +53,7 @@ class DraftDialog(Sheet):
         self.controls.body.addLayout(head)
         self.choices = QListWidget()
         self.controls.body.addWidget(self.choices)
-        self.preview = QPlainTextEdit()
+        self.preview = field(QPlainTextEdit())
         self.preview.setReadOnly(True)
         self.preview.setPlaceholderText("Select a row to inspect its source text before ticking it.")
         self.preview.setMaximumHeight(140)
@@ -75,9 +75,9 @@ class DraftDialog(Sheet):
         codes += [] if own in codes else [own]           # the deck's own, should it be another
         self.language.addItems(codes)
         self.language.setCurrentText(own)
-        for label, field in (("How many", self.count), ("For", self.use),
-                             ("Read slides as", self.view), ("Language", self.language)):
-            row.addWidget(host.Field(label, field))
+        for label, control in (("How many", self.count), ("For", self.use),
+                               ("Read slides as", self.view), ("Language", self.language)):
+            row.addWidget(host.Field(label, control))
         self.controls.body.addLayout(row)
         self.note = host.caption("")
         self.note.setWordWrap(True)

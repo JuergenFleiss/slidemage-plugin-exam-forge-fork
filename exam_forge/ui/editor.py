@@ -6,17 +6,17 @@ from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QBuffer, QIODevice, Qt, Signal
-from PySide6.QtGui import QGuiApplication, QPixmap
+from PySide6.QtCore import QBuffer, QIODevice, QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -37,7 +37,24 @@ from ..model import (
 )
 from ..rules import describe, question_issues
 from ..sources import SlideIndex, Unresolved, fresh_deck, link_slide, rebaseline_links
-from .kit import Box, Fold, Switch, clear, confirm, dot, scroll_area, slide_title, source_details, tone
+from .kit import (
+    Box,
+    Fold,
+    GrowingEdit,
+    Switch,
+    clear,
+    confirm,
+    dot,
+    field,
+    glyph_icon,
+    mix,
+    named,
+    restyle,
+    scroll_area,
+    slide_title,
+    source_details,
+    tone,
+)
 
 PRIVATE = "Only in the private key."
 IMAGE_FILTER = f"Images ({' '.join('*' + suffix for suffix in IMAGE_SUFFIXES)})"
@@ -74,7 +91,7 @@ def png_bytes(image):
     return bytes(buffer.data())
 
 
-class StemEdit(QPlainTextEdit):
+class StemEdit(GrowingEdit):
     """Question text that also takes images. Copied text often carries a picture of itself, so text wins."""
     image_pasted = Signal(bytes)
     file_dropped = Signal(str)
@@ -117,56 +134,92 @@ class ImageRow(QWidget):
             self.thumb.setPixmap(pixmap)
         else:
             self.thumb.setText("Image missing" if data is None else "No preview")
-        self.alt = QLineEdit(media.alt)
+        self.alt = field(QLineEdit(media.alt))
         self.alt.setPlaceholderText("Describe the image")
         self.alt.setToolTip("Shown under the image in exams, so do not put the answer in it.")
         self.alt.setAccessibleName("Image description")
         self.alt.textChanged.connect(lambda: self.changed.emit(self))
-        self.remove = host.Button("✕", compact=True)
-        self.remove.setToolTip("Remove image")
+        self.remove = host.IconButton("close", "Remove image")
         self.remove.clicked.connect(lambda: self.removed.emit(self))
         line.addWidget(self.thumb)
         line.addWidget(self.alt, 1)
         line.addWidget(self.remove)
 
 
-class AnswerRow(QWidget):
+class Tick(QAbstractButton):
+    """The round button that marks an answer correct: filled with the theme's ok colour and a ✓ when it is, an empty
+    ring when not, with a faint ✓ while the pointer is over an empty one. The ✓, not the colour, carries the meaning."""
+
+    CHECK = ((5, 12.5), (9.5, 17), (19, 7.5))   # a ✓ in a 24 px box
+
+    def __init__(self, host):
+        super().__init__()
+        self.host = host
+        self.setCheckable(True)
+        self.setFixedSize(36, 34)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)    # a click does not draw the focus ring
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)  # repainted as the pointer comes and goes, for the faint ✓
+
+    def paintEvent(self, event):
+        t = self.host.theme()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        circle = QRectF(3, 2, 30, 30)
+        if self.hasFocus():
+            painter.setPen(QPen(QColor(t.focus), 2))
+            painter.drawEllipse(circle.adjusted(-1.5, -1.5, 1.5, 1.5))
+        if self.isChecked():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(t.ok))
+            painter.drawEllipse(circle)
+            glyph = t.surface if t.dark else t.on_solid
+        else:
+            painter.setPen(QPen(QColor(t.text_4), 1.5))
+            painter.setBrush(QColor(t.surface))
+            painter.drawEllipse(circle.adjusted(0.75, 0.75, -0.75, -0.75))
+            if not (self.underMouse() and self.isEnabled()):
+                return
+            glyph = mix(t.ok, t.surface, 0.45)
+        scale, left, top = 15 / 24, circle.center().x() - 7.5, circle.center().y() - 7.5
+        pen = QPen(QColor(glyph), 2.2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawPolyline([QPointF(left + x * scale, top + y * scale) for x, y in self.CHECK])
+
+
+class AnswerRow(QFrame):
+    """One answer as a card: tick | answer | remove, and the rationale under the answer. A correct answer's card is
+    tinted green (window_sheet)."""
     changed = Signal()
     ticked = Signal(object)
     removed = Signal(object)
 
     def __init__(self, host, option):
         super().__init__()
+        self.setObjectName("efAnswer")
         self.option_id = option.id
-        column = QVBoxLayout(self)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(2)
-        top = QHBoxLayout()
-        self.tick = QPushButton()
-        self.tick.setFlat(True)
-        self.tick.setFixedSize(30, 30)
-        self.tick.setStyleSheet("padding: 0; min-width: 30px; max-width: 30px;")  # The glyph needs the whole button.
+        grid = QGridLayout(self)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(2)
+        grid.setColumnStretch(1, 1)
+        # Made in the order Tab visits them: tick, answer, rationale, remove.
+        self.tick = Tick(host)
         self.tick.clicked.connect(lambda: self.ticked.emit(self))
-        self.set_correct(option.correct)
-        self.text = QPlainTextEdit(option.text)
-        self.text.setTabChangesFocus(True)
-        self.text.setFixedHeight(self.text.fontMetrics().lineSpacing() * 2 + 22)
+        self.text = GrowingEdit(option.text)
         self.text.setPlaceholderText("Answer")
-        self.remove = host.Button("✕", compact=True)
-        self.remove.setToolTip("Remove answer")
-        self.remove.clicked.connect(lambda: self.removed.emit(self))
-        for widget, stretch in ((self.tick, 0), (self.text, 1), (self.remove, 0)):
-            top.addWidget(widget, stretch)
-        column.addLayout(top)
-        self.why = QPlainTextEdit(option.rationale)
-        self.why.setTabChangesFocus(True)
-        self.why.setFixedHeight(self.why.fontMetrics().lineSpacing() + 24)
-        self.why.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.why = GrowingEdit(option.rationale)
+        self.why.setObjectName("efWhy")
         self.why.setPlaceholderText("Why it is right or wrong · only in the private key")
-        low = QHBoxLayout()
-        low.setContentsMargins(36, 0, 0, 0)
-        low.addWidget(self.why)
-        column.addLayout(low)
+        self.remove = host.IconButton("close", "Remove answer")
+        self.remove.clicked.connect(lambda: self.removed.emit(self))
+        grid.addWidget(self.tick, 0, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.text, 0, 1, Qt.AlignmentFlag.AlignVCenter)
+        grid.addWidget(self.remove, 0, 2, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self.why, 1, 1)
+        self.set_correct(option.correct)
         self.text.textChanged.connect(self.changed)
         self.why.textChanged.connect(self.changed)
 
@@ -174,9 +227,16 @@ class AnswerRow(QWidget):
         return self.tick.isChecked()
 
     def set_correct(self, on):
-        self.tick.setCheckable(True)
+        """The tick and the card's tint together."""
         self.tick.setChecked(on)
-        self.tick.setText("●" if on else "○")
+        restyle(self, "correct", on)
+
+    def number(self, number):
+        """Names for screen readers, by the answer's place in the list."""
+        self.tick.setAccessibleName(f"Option {number} is correct")
+        self.text.setAccessibleName(f"Answer {number}")
+        self.why.setAccessibleName(f"Rationale for answer {number}")
+        self.remove.setToolTip(f"Remove answer {number}")
 
     def option(self):
         return Option(self.option_id, self.text.toPlainText(), self.correct(), self.why.toPlainText())
@@ -213,20 +273,23 @@ class ItemEditor(QWidget):
         content = host.Page()
         outer.addWidget(scroll_area(content), 1)
         body = content.body
-        body.setContentsMargins(14, 10, 14, 10)
-        self.back_button = host.Button("", compact=True)
-        self.back_button.setFlat(True)
+        body.setContentsMargins(20, 12, 20, 16)
+        body.setSpacing(20)
+        # One row: the back link on the left, the question's chips on the right.
+        self.back_button = host.Button("", "ghost", compact=True)
         self.back_button.clicked.connect(self.back)
         self.back_button.hide()
-        body.addWidget(self.back_button, 0, Qt.AlignmentFlag.AlignLeft)
         tags = QHBoxLayout()
+        tags.setSpacing(6)
+        tags.addWidget(self.back_button)
+        tags.addStretch()
         self.status_chip = host.Chip("Draft")
         self.rev_chip = host.Chip("rev 1", "muted")
+        self.rev_chip.setProperty("mono", True)
         self.ai_tag = host.Chip("AI-assisted", "muted")
-        self.draft_tag = tone(host.Chip("AI draft"), "amber")
+        self.draft_tag = tone(host.Chip("AI draft", icon="auto_awesome"), "amber")
         for chip in (self.draft_tag, self.ai_tag, self.status_chip, self.rev_chip):
             tags.addWidget(chip)
-        tags.addStretch()
         body.addLayout(tags)
         self.source_banner = tone(host.Label("A linked slide changed after this question was written."), "violet")
         self.source_banner.setWordWrap(True)
@@ -241,14 +304,16 @@ class ItemEditor(QWidget):
         bar.addWidget(self.compare_button)
         bar.addWidget(self.still_button)
         body.addWidget(self.source_bar)
-        self.stem = StemEdit()
+        self.stem = field(StemEdit(lines=3, most=10))
         self.stem.image_pasted.connect(self.add_image)
         self.stem.file_dropped.connect(self.add_image_file)
         self.stem.setPlaceholderText(r"\( … \)")
-        self.stem.setMaximumHeight(135)
-        body.addWidget(host.Field("Question", self.stem))
+        question = QVBoxLayout()
+        question.setSpacing(10)
+        body.addLayout(question)
+        question.addWidget(host.Field("Question", self.stem))
         self.media_box = QVBoxLayout()
-        body.addLayout(self.media_box)
+        question.addLayout(self.media_box)
         self.image_rows = []
         row = QHBoxLayout()
         self.image_button = host.Button("+ Add image…", compact=True)
@@ -257,34 +322,37 @@ class ItemEditor(QWidget):
         self.paste_button.clicked.connect(self.paste_image)
         row.addWidget(self.image_button)
         row.addWidget(self.paste_button)
-        row.addWidget(host.caption("or paste or drop one into the question"))
-        row.addStretch()
-        body.addLayout(row)
+        caption = host.caption("or paste or drop one into the question")
+        caption.setWordWrap(True)
+        row.addWidget(caption, 1)   # it takes the rest of the line, so it wraps only in a narrow window
+        question.addLayout(row)
         # Multiple choice: the answers. Open answer: a model answer and grading notes instead.
         self.choice_box = Box()
         choice = QVBoxLayout(self.choice_box)
         choice.setContentsMargins(0, 0, 0, 0)
+        choice.setSpacing(8)
         head = QHBoxLayout()
-        head.addWidget(host.Label("Answers", "heading"))
+        head.addWidget(named(QLabel("Answers"), "efLabel"), 0, Qt.AlignmentFlag.AlignBottom)
         self.hint = host.caption("")
-        head.addStretch()
-        head.addWidget(self.hint)
+        self.hint.setWordWrap(True)
+        self.hint.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        head.addWidget(self.hint, 1)
         choice.addLayout(head)
         self.answers = QVBoxLayout()
+        self.answers.setSpacing(8)
         choice.addLayout(self.answers)
-        self.add_button = host.Button("+ Add answer", compact=True)
+        self.add_button = host.Button("Add answer", "ghost", compact=True)
         self.add_button.clicked.connect(lambda: self.add_option())
         choice.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
         body.addWidget(self.choice_box)
         self.open_box = Box()
         open_answer = QVBoxLayout(self.open_box)
         open_answer.setContentsMargins(0, 0, 0, 0)
-        self.model_answer = QPlainTextEdit()
+        open_answer.setSpacing(14)
+        self.model_answer = field(GrowingEdit(lines=4, most=10))
         self.model_answer.setPlaceholderText("What a full answer contains · " + PRIVATE.lower().rstrip("."))
-        self.model_answer.setMaximumHeight(120)
-        self.grading_notes = QPlainTextEdit()
+        self.grading_notes = field(GrowingEdit(lines=3, most=8))
         self.grading_notes.setPlaceholderText("How to award the points · " + PRIVATE.lower().rstrip("."))
-        self.grading_notes.setMaximumHeight(85)
         open_answer.addWidget(host.Field("Model answer", self.model_answer))
         open_answer.addWidget(host.Field("Grading notes", self.grading_notes))
         body.addWidget(self.open_box)
@@ -292,15 +360,17 @@ class ItemEditor(QWidget):
         self.kind = Switch(host, tuple((name, kind) for kind, name in KINDS.items()))
         self.difficulty = Switch(host, (("Easy", "easy"), ("Hard", "hard")), clearable=True)
         row = QHBoxLayout()
+        row.setSpacing(24)
         row.addWidget(host.Field("Used for", self.use))
         self.kind_field = host.Field("Type", self.kind)
         row.addWidget(self.kind_field)
         row.addWidget(host.Field("Difficulty", self.difficulty))
         body.addLayout(row)
-        self.objective = QLineEdit()
+        self.objective = field(QLineEdit())
         body.addWidget(host.Field("Learning objective", self.objective))
         head = QHBoxLayout()
-        head.addWidget(host.Label("Linked slides", "heading"))
+        head.setSpacing(4)
+        head.addWidget(named(QLabel("Linked slides"), "efLabel"))
         head.addStretch()
         self.topic_label, self.topic_dot, self.topic_name = host.caption(""), dot(), host.caption("")
         for part in (self.topic_label, self.topic_dot, self.topic_name):
@@ -317,8 +387,7 @@ class ItemEditor(QWidget):
         self.link_grid.hide()
         body.addWidget(self.link_grid)
         self.note_fold = Fold("Note for teaching assistants")
-        self.assistant_note = QPlainTextEdit()
-        self.assistant_note.setMaximumHeight(85)
+        self.assistant_note = field(GrowingEdit(lines=2, most=6))
         self.assistant_note.setPlaceholderText(TA_WARNING)
         warning = host.caption(TA_WARNING)
         warning.setWordWrap(True)
@@ -326,12 +395,13 @@ class ItemEditor(QWidget):
         self.note_fold.box.addWidget(self.assistant_note)
         body.addWidget(self.note_fold)
         body.addStretch()
-        footer = QHBoxLayout()
-        footer.setContentsMargins(14, 8, 14, 8)
+        bar = named(QFrame(), "efFooter")   # a hairline above it
+        footer = QHBoxLayout(bar)
+        footer.setContentsMargins(20, 10, 20, 12)
         self.status_line = host.Label("", "secondary")
         self.status_line.setWordWrap(True)
         footer.addWidget(self.status_line, 1)
-        self.retire_button = host.Button("Retire")
+        self.retire_button = host.Button("Retire", "ghost")
         self.retire_button.clicked.connect(lambda: self.change_status("retired"))
         self.restore_button = host.Button("Restore as draft")
         self.restore_button.clicked.connect(lambda: self.change_status("draft"))
@@ -341,7 +411,7 @@ class ItemEditor(QWidget):
         self.approve_button.clicked.connect(lambda: self.change_status("reviewed"))
         for button in (self.retire_button, self.restore_button, self.save_button, self.approve_button):
             footer.addWidget(button)
-        outer.addLayout(footer)
+        outer.addWidget(bar)
         for signal in (self.stem.textChanged, self.objective.textChanged, self.assistant_note.textChanged,
                        self.difficulty.changed, self.model_answer.textChanged, self.grading_notes.textChanged):
             signal.connect(self.touch)
@@ -350,6 +420,14 @@ class ItemEditor(QWidget):
         for chip in (self.ai_tag, self.draft_tag, self.source_bar):
             chip.hide()
         self.setEnabled(False)
+
+    def retheme(self, t):
+        """Draw the icons in the theme's colours, and the ticks again."""
+        self.back_button.setIcon(glyph_icon("chevron_left", t.text, 18))
+        self.add_button.setIcon(glyph_icon("add", t.text_2))
+        self.approve_button.setIcon(glyph_icon("check", t.on_inverse))
+        for row in self.rows:
+            row.tick.update()
 
     # -- state ---------------------------------------------------------------------------------------------
 
@@ -562,8 +640,9 @@ class ItemEditor(QWidget):
         # The switch shows for an exam question, and for any question whose type its use does not allow.
         self.kind_field.setVisible(use == "exam" or kind not in self.window.answer_rules.kinds(use))
         self.add_button.setEnabled(len(self.rows) < self.cap())
+        self.add_button.setVisible(len(self.rows) < self.cap())
         for number, row in enumerate(self.rows, 1):
-            row.tick.setAccessibleName(f"Option {number} is correct")
+            row.number(number)
 
     def new_question(self, *_):
         if not self.may_leave():

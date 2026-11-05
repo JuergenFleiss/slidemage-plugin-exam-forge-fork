@@ -5,15 +5,15 @@ the footer."""
 from datetime import datetime
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 
 from ..bank import AnswerRulesStore, BankError, TopicStore
-from ..model import plural, slide_label
+from ..model import slide_label
 from ..rules import AnswerRules
 from ..sources import check_bank, fresh_deck
 from .exam_tab import ExamTab
 from .export_menu import ExportMenu
-from .kit import deck_language, slide_title, tone_sheet
+from .kit import Logo, deck_language, glyph_icon, named, slide_title, window_sheet
 from .questions_tab import QuestionsTab, changed_on
 
 
@@ -49,44 +49,42 @@ class BankWindow(QWidget):
         self.checked_at = None
         self.busy = False
         self.idle_callbacks = []
+        self.check_failed = False
         self.shell = host.Window(f"Exam Forge · {deck.name}")
         self.shell.resize(1180, 800)
         self.shell.body.setContentsMargins(0, 0, 0, 0)
         self.shell.body.addWidget(self)
         self.shell.installEventFilter(self)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 8)
-        layout.setSpacing(8)
-        self.notice = host.caption("")  # The source check's status.
-        self.notice.setWordWrap(True)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self.check_button = host.Button("Check slides")
         self.check_button.clicked.connect(self.check_sources)
-        self.export_button = host.Button("Export")
+        self.export_button = host.Button("Export ▾")
         self.export_menu = ExportMenu(self)
         self.export_button.clicked.connect(self.show_export_menu)
         self.questions = QuestionsTab(self)
         self.editor = self.questions.editor
         self.exam_tab = ExamTab(self)
         self.tabs = Tabs(host, (("Questions", self.questions), ("Exam", self.exam_tab)))
-        top = QHBoxLayout()
-        top.addWidget(self.tabs.switch)
-        top.addStretch()
-        top.addWidget(self.check_button)
-        top.addWidget(self.export_button)
-        layout.addLayout(top)
-        layout.addWidget(self.notice)
-        layout.addWidget(self.tabs, 1)
-        foot = QHBoxLayout()
+        layout.addWidget(self.header(deck))
+        body = QVBoxLayout()
+        body.setContentsMargins(14, 12, 14, 10)
+        body.addWidget(self.tabs)
+        layout.addLayout(body, 1)
+        footer = named(QFrame(), "efFooter")
+        foot = QHBoxLayout(footer)
+        foot.setContentsMargins(16, 6, 16, 6)
         self.folder_label = host.caption(str(bank.folder))
         self.folder_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.folder_label.setWordWrap(False)
-        self.checked_label = host.caption("")
-        self.checked_label.setWordWrap(False)
+        self.notice = host.caption("")  # The source check's status.
+        self.notice.setWordWrap(False)
         foot.addWidget(host.IconLabel("lock", 14))
         foot.addWidget(self.folder_label, 1)
-        foot.addWidget(self.checked_label)
-        layout.addLayout(foot)
+        foot.addWidget(self.notice)
+        layout.addWidget(footer)
         self.retheme()
         self.load_topics()
         self.load_answer_rules()
@@ -111,9 +109,33 @@ class BankWindow(QWidget):
     def may_leave(self):
         return self.editor.may_leave()
 
+    def header(self, deck):
+        """The top bar: the mark, the name and deck, the tabs' switch, Check slides and Export."""
+        bar = named(QFrame(), "efHeader")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(16, 10, 16, 10)
+        row.setSpacing(10)
+        names = QVBoxLayout()
+        names.setSpacing(0)
+        for text, name in (("Exam Forge", "efName"), (deck.name, "efDeck")):
+            names.addWidget(named(QLabel(text), name))
+        row.addWidget(Logo(self.host))
+        row.addLayout(names)
+        row.addSpacing(14)
+        row.addWidget(self.tabs.switch)
+        row.addStretch()
+        row.addWidget(self.check_button)
+        row.addWidget(self.export_button)
+        return bar
+
     def retheme(self):
-        """Every tone's colour in the host's theme, in one stylesheet that the tagged widgets and the dialogs share."""
-        self.setStyleSheet(tone_sheet(self.host.theme().dark))
+        """Every colour in the host's theme, in one stylesheet that the tagged widgets and the dialogs share, and the
+        icons drawn in the theme's text colour."""
+        t = self.host.theme()
+        self.setStyleSheet(window_sheet(t))
+        for button, icon in ((self.check_button, "refresh"), (self.export_button, "download")):
+            button.setIcon(glyph_icon(icon, t.text))
+        self.questions.retheme(t)
 
     def show_export_menu(self):
         self.export_menu.popup(self.export_button.mapToGlobal(QPoint(0, self.export_button.height())))
@@ -214,20 +236,19 @@ class BankWindow(QWidget):
         if self.busy:
             return
         self.set_busy(True)
-        self.notice.setText("Checking sources…")
+        self.notice.setText("Checking slides…")
         host, deck, bank = self.host, self.deck, self.bank
 
         def checked(report, error):
             self.set_busy(False)
+            self.check_failed = error is not None
             if error is None:
                 self.checked_at = datetime.now()
             self.reload()      # A failed check may have recorded some questions before it stopped.
             self.load_slides()
             if error is not None:
-                self.notice.setText("The source check did not finish.")
                 self.error(error)
                 return
-            self.notice.setText(f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}.")
             if report.errors:
                 self.error("\n".join(map(str, report.errors)))
                 return
@@ -253,8 +274,12 @@ class BankWindow(QWidget):
         return next((t for t in self.topics if slide_id in t.slides), None)
 
     def update_footer(self):
-        self.checked_label.setText("Slides not checked yet" if self.checked_at is None else
-                                   f"Slides checked {self.checked_at:%H:%M} · {len(self.changed_slides())} changed")
+        """The footer's right end: the last slide check, or that it is running or failed."""
+        if self.busy and self.notice.text() == "Checking slides…":
+            return
+        self.notice.setText("The source check did not finish." if self.check_failed else
+                            "Slides not checked yet" if self.checked_at is None else
+                            f"Slides checked {self.checked_at:%H:%M} · {len(self.changed_slides())} changed")
 
     # -- services --------------------------------------------------------------------------------------------------
 

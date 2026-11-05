@@ -2,12 +2,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exam Forge's additions to the host's kit: accent tones, topic dots, small widgets, a dialog in the host's look, and
 the shared wording of confirmations and check results."""
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
+from math import ceil
+
+from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QMessageBox,
+    QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
     QToolButton,
@@ -34,13 +39,82 @@ def tone_sheet(dark):
                      for name, colors in TONES.items())
 
 
-def tone(widget, name=""):
-    """Tag a widget with a tone (see TONES), or clear it with ""; a topic colour is a tone too."""
-    widget.setProperty("accent", name)
+def mix(first, second, share):
+    """`share` of colour `first` over `second`, as #rrggbb."""
+    a, b = QColor(first), QColor(second)
+    return QColor(*(round(x * share + y * (1 - share)) for x, y in zip(a.getRgb()[:3], b.getRgb()[:3]))).name()
+
+
+def window_sheet(t):
+    """The window's stylesheet from the host's theme tokens `t`: the tones, then the window's own surfaces. Only text
+    and line colours are picked here; every surface is the theme's."""
+    selected = "rgba(255,255,255,0.10)" if t.dark else "rgba(0,0,0,0.07)"
+    tint, border = mix(t.ok_bg, t.surface, 0.4), mix(t.ok, t.surface, 0.45)  # a correct answer, lighter than ok_bg
+    return tone_sheet(t.dark) + f"""
+QFrame#efHeader {{ background: {t.surface}; border: none; border-bottom: 1px solid {t.line}; }}
+QFrame#efFooter {{ border: none; border-top: 1px solid {t.line}; }}
+QLabel#efName {{ font-size: 14px; font-weight: 600; color: {t.text}; }}
+QLabel#efDeck {{ font-size: 12px; color: {t.text_3}; }}
+QLabel#efSection {{ font-size: 11px; font-weight: 600; letter-spacing: 1px; color: {t.text_3}; padding: 4px 10px; }}
+QLabel#kitFieldLabel, QLabel#efLabel {{ font-size: 13px; font-weight: 600; color: {t.text}; }}
+QLabel#efListTitle {{ font-size: 15px; font-weight: 600; color: {t.text}; }}
+QPlainTextEdit#efField, QLineEdit#efField {{
+    font-size: 14px; background: {t.surface}; color: {t.text}; border: 1px solid {t.line}; border-radius: 9px;
+    padding: 6px 8px; }}
+QPlainTextEdit#efField:focus, QLineEdit#efField:focus {{ border-color: {t.focus}; }}
+QPlainTextEdit#efField:disabled, QLineEdit#efField:disabled {{ background: {t.bg}; color: {t.text_3}; }}
+QFrame#efAnswer {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: {t.radius_md}px; }}
+QFrame#efAnswer[correct="true"] {{ background: {tint}; border-color: {border}; }}
+QFrame#efAnswer QPlainTextEdit {{
+    font-size: 14px; background: transparent; color: {t.text}; border: 1px solid transparent; border-radius: 7px;
+    padding: 1px 4px; }}
+QFrame#efAnswer QPlainTextEdit#efWhy {{ font-size: 13px; color: {t.text_2}; }}
+QFrame#efAnswer QPlainTextEdit:hover {{ border-color: {t.line}; }}
+QFrame#efAnswer QPlainTextEdit:focus {{ background: {t.surface}; border-color: {t.focus}; }}
+QFrame#efAnswer QPlainTextEdit:disabled {{ border-color: transparent; }}
+QFrame#kitChip QLabel {{ font-size: 12px; }}
+QFrame#kitChip QLabel#kitIcon {{ font-size: 13px; }}
+QFrame#kitChip[mono="true"] QLabel {{ font-family: "{t.font_mono}"; font-size: 11px; }}
+QListWidget[column="topics"] QFrame#kitRowButton[selected="true"] {{ background: {selected}; }}
+QFrame#kitCard[column="middle"] {{ background: {mix(t.surface, t.bg, 0.55)}; }}
+QListWidget[column="middle"] QFrame#kitRowButton {{ border: 1px solid transparent; }}
+QListWidget[column="middle"] QFrame#kitRowButton[selected="true"] {{ background: {t.surface}; border-color: {t.line}; }}
+QFrame#efCard {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: 10px; }}
+QFrame#efCard[selected="true"] {{ border-color: {t.text_3}; }}
+QFrame#efThumb {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: 6px; }}
+QLabel#efThumbNumber {{ font-family: "{t.font_mono}"; font-size: 11px; color: {t.text_2}; }}
+QToolButton#kitIconButton[faint="true"] {{ color: {mix(t.text_4, t.surface, 0.55)}; }}
+"""
+
+
+def glyph_icon(name, color, px=16):
+    """A Material icon from the host's icon font as a QIcon, for a text button."""
+    scale = 2
+    pixmap = QPixmap(px * scale, px * scale)
+    pixmap.setDevicePixelRatio(scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    font = QFont("Material Icons")
+    font.setPixelSize(px)
+    painter.setFont(font)
+    painter.setPen(QColor(color))
+    painter.drawText(QRect(0, 0, px, px), Qt.AlignmentFlag.AlignCenter, name)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def restyle(widget, name, value):
+    """Set a property the stylesheet reads, and apply the stylesheet again to the widget and the labels in it."""
+    widget.setProperty(name, value)
     for part in (widget, *widget.findChildren(QLabel)):
         part.style().unpolish(part)
         part.style().polish(part)
     return widget
+
+
+def tone(widget, name=""):
+    """Tag a widget with a tone (see TONES), or clear it with ""; a topic colour is a tone too."""
+    return restyle(widget, "accent", name)
 
 
 def passive(widget):
@@ -48,12 +122,128 @@ def passive(widget):
     return widget
 
 
-def dot(topic=None, widget=None):
-    """A topic's coloured dot, or none without a topic; pass `widget` to change an existing dot."""
-    widget = widget or passive(QLabel())
-    widget.setFixedWidth(14)
-    widget.setText("●" if topic else "")
-    return tone(widget, topic.color if topic else "")
+class Mark(QLabel):
+    """A small painted mark in its tone's colour: a topic's "dot", the "square" of All slides, or the dashed "ring" of
+    No topic; "" draws nothing."""
+
+    def __init__(self):
+        super().__init__()
+        self.shape = ""
+        self.setFixedSize(14, 14)
+
+    def paintEvent(self, event):
+        if not self.shape:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        colour = self.palette().color(QPalette.ColorRole.WindowText)
+        box = QRectF(3, 3, 8, 8)
+        if self.shape == "dot":
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(colour)
+            painter.drawEllipse(box)
+            return
+        pen = QPen(colour, 1.5)
+        if self.shape == "ring":
+            pen.setStyle(Qt.PenStyle.DotLine)
+        painter.setPen(pen)
+        box = box.adjusted(0.75, 0.75, -0.75, -0.75)
+        painter.drawRoundedRect(box, 2, 2) if self.shape == "square" else painter.drawEllipse(box)
+
+
+def dot(topic=None, widget=None, shape=""):
+    """A topic's coloured dot, or none without a topic; `shape` "square" or "ring" marks All slides or No topic. Pass
+    `widget` to change an existing dot."""
+    widget = widget or passive(Mark())
+    widget.shape = "dot" if topic else shape
+    widget.update()
+    return tone(widget, topic.color if topic else "slate" if shape else "")
+
+
+class Logo(QWidget):
+    """Exam Forge's mark: a rounded square in the theme's inverse colour with three lines of text."""
+
+    def __init__(self, host):
+        super().__init__()
+        self.host = host
+        self.setFixedSize(30, 30)
+
+    def paintEvent(self, event):
+        t = self.host.theme()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(t.inverse))
+        painter.drawRoundedRect(QRectF(0, 0, 30, 30), 8, 8)
+        pen = QPen(QColor(t.on_inverse), 2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        for y, end in ((11, 21), (15, 17), (19, 19)):
+            painter.drawLine(9, y, end, y)
+
+
+class GrowingEdit(QPlainTextEdit):
+    """A text field as high as its text, from `lines` up to `most` lines; beyond that it scrolls."""
+
+    def __init__(self, text="", lines=1, most=12):
+        super().__init__(text)
+        self.lines, self.most = lines, most
+        self.setTabChangesFocus(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.document().documentLayout().documentSizeChanged.connect(self.fit)
+        self.fit()
+
+    def fit(self, *_):
+        needed = self.document().documentLayout().documentSize().height()
+        shown = min(max(needed, self.lines), self.most)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded if needed > self.most
+                                        else Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        margins = self.contentsMargins()    # the stylesheet's border and padding, once polished
+        self.setFixedHeight(ceil(shown * self.fontMetrics().lineSpacing() + 2 * self.document().documentMargin()
+                                 + margins.top() + margins.bottom()))
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self.fit()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.fit()
+
+
+def named(widget, name):
+    """`widget` under the object name window_sheet styles it by."""
+    widget.setObjectName(name)
+    return widget
+
+
+def field(widget):
+    """A text field in the design's frame."""
+    return named(widget, "efField")
+
+
+def section(text):
+    """A small uppercase label over a group of rows ("TOPICS", "REVIEW")."""
+    return passive(named(QLabel(text.upper()), "efSection"))
+
+
+class Faint(QObject):
+    """Keeps `button` faint until the pointer is over `row` or the button has the keyboard focus."""
+
+    def __init__(self, row, button):
+        super().__init__(row)
+        self.row, self.button = row, button
+        for widget in (row, button):
+            widget.installEventFilter(self)
+        restyle(button, "faint", True)
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Type.Enter, QEvent.Type.FocusIn):
+            restyle(self.button, "faint", False)
+        elif event.type() in (QEvent.Type.Leave, QEvent.Type.FocusOut):
+            restyle(self.button, "faint", not (self.row.underMouse() or self.button.hasFocus()))
+        return False
 
 
 def slide_title(ref):
@@ -76,6 +266,73 @@ def line(*parts):
     for part in parts:
         box.addWidget(part)
     box.addStretch()
+    return box
+
+
+class Flow(QLayout):
+    """Widgets in a line that wraps when it runs out of width, each at its full size: chips are never squeezed."""
+
+    def __init__(self, spacing=6):
+        super().__init__()
+        self.items = []
+        self.setSpacing(spacing)
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self.items.append(item)
+
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, index):
+        return self.items[index] if 0 <= index < len(self.items) else None
+
+    def takeAt(self, index):
+        return self.items.pop(index) if 0 <= index < len(self.items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self.arrange(QRect(0, 0, width, 0), move=False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self.arrange(rect, move=True)
+
+    def sizeHint(self):
+        """All on one line; heightForWidth says how high it is when it wraps."""
+        hints = [item.sizeHint() for item in self.items]
+        return QSize(sum(h.width() for h in hints) + self.spacing() * max(len(hints) - 1, 0),
+                     max((h.height() for h in hints), default=0))
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self.items:
+            size = size.expandedTo(item.minimumSize())
+        return size
+
+    def arrange(self, rect, move):
+        """Place the items, or only measure them; returns the height they need."""
+        x, y, line = rect.x(), rect.y(), 0
+        for item in self.items:
+            hint = item.sizeHint()
+            if x > rect.x() and x + hint.width() > rect.right() + 1:
+                x, y, line = rect.x(), y + line + self.spacing(), 0
+            if move:
+                item.setGeometry(QRect(x, y, hint.width(), hint.height()))
+            x += hint.width() + self.spacing()
+            line = max(line, hint.height())
+        return y + line - rect.y()
+
+
+def flow(*parts):
+    box = Flow()
+    for part in parts:
+        box.addWidget(part)
     return box
 
 

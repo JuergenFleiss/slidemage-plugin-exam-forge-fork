@@ -1,6 +1,6 @@
 id = "exam-forge"
 name = "Exam Forge"
-version = "0.11.0"
+version = "0.12.0"
 api_version = 1
 requires_slidemage = ">=0.13.31"
 summary = "Exam questions linked to the material you taught, with clearly documented AI use. Review, export, assemble exams."
