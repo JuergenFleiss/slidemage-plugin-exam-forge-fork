@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QSizePolicy,
@@ -23,7 +24,23 @@ from ..rules import question_issues
 from ..sources import link_slide
 from .drafting import DraftDialog
 from .editor import ItemEditor
-from .kit import Box, Fit, dot, label, line, passive, row, slide_title, tone
+from .kit import (
+    TONES,
+    Box,
+    Faint,
+    Fit,
+    dot,
+    flow,
+    glyph_icon,
+    label,
+    named,
+    passive,
+    restyle,
+    row,
+    section,
+    slide_title,
+    tone,
+)
 from .review_changes import ReviewChangesDialog
 from .topic_dialog import TopicDialog
 
@@ -46,6 +63,30 @@ def changed_on(item):
     return [] if item.status == "retired" else list(item.changed_slides)
 
 
+class Card(QFrame):
+    """A framed question in a list; the row of the open question is selected."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("efCard")
+
+    def set_selected(self, on):
+        restyle(self, "selected", on)
+
+
+def thumb(number, topic):
+    """A slide's small box: its number at the bottom left, its topic's dot at the top right."""
+    box = named(QFrame(), "efThumb")
+    box.setFixedSize(48, 34)
+    column = QVBoxLayout(box)
+    column.setContentsMargins(5, 1, 1, 3)
+    column.setSpacing(0)
+    column.addWidget(dot(topic), 0, Qt.AlignmentFlag.AlignRight)
+    column.addStretch()
+    column.addWidget(named(QLabel(str(number)), "efThumbNumber"), 0, Qt.AlignmentFlag.AlignLeft)
+    return passive(box)
+
+
 class QuestionsTab(QWidget):
     """The tab owns what it shows, the view, the selected slide and the focus; the window owns the data."""
 
@@ -53,6 +94,7 @@ class QuestionsTab(QWidget):
         super().__init__()
         self.window, self.host = window, window.host
         host = self.host
+        self.theme = host.theme()
         self.reset()
         self.syncing = False
         self.topic_dialog = self.review_dialog = None
@@ -69,16 +111,27 @@ class QuestionsTab(QWidget):
             listw.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             listw.fit = Fit(listw)
         self.cards.setSpacing(4)
+        self.slide_list.setSpacing(1)
         split.setChildrenCollapsible(False)
         split.setHandleWidth(8)
         self.focus_switch = host.SegmentedControl(list(FOCUS))
         self.focus_switch.set_current(self.focus)
         self.focus_switch.changed.connect(self.focus_changed)
-        for listw in (self.topic_list, self.slide_list):
+        self.list_title = named(QLabel(), "efListTitle")
+        self.list_sub = host.caption("")
+        for listw, name in ((self.topic_list, "topics"), (self.slide_list, "middle")):
+            listw.setProperty("column", name)
             column = host.Card()
-            column.layout().setContentsMargins(4, 6, 4, 6)
+            column.setProperty("column", name)
+            column.layout().setContentsMargins(6, 12 if listw is self.slide_list else 10, 6, 6)
             if listw is self.slide_list:
+                column.layout().setSpacing(2)
                 column.layout().addWidget(self.focus_switch, 0, Qt.AlignmentFlag.AlignLeft)
+                column.layout().addSpacing(6)
+                for part in (self.list_title, self.list_sub):
+                    part.setContentsMargins(8, 0, 8, 0)
+                    column.layout().addWidget(part)
+                column.layout().addSpacing(4)
             column.layout().addWidget(listw)
             split.addWidget(column)
         split.addWidget(self.stack)
@@ -96,7 +149,7 @@ class QuestionsTab(QWidget):
         titles.addLayout(crumb)
         titles.addWidget(self.slide_title)
         head.addLayout(titles, 1)
-        self.open_button = host.Button("Open slide", compact=True)
+        self.open_button = host.Button("Open slide", "ghost", compact=True)
         self.open_button.clicked.connect(self.open_selected_slide)
         head.addWidget(self.open_button, 0, Qt.AlignmentFlag.AlignTop)
         body.addLayout(head)
@@ -112,7 +165,7 @@ class QuestionsTab(QWidget):
         body.addWidget(self.changed_bar)
         self.empty_label = host.Label("No questions on this slide yet.", "secondary")
         body.addWidget(self.empty_label)
-        self.draft_button = tone(host.Button("✦ Draft with AI"), "amber")
+        self.draft_button = host.Button("Draft with AI")
         self.draft_button.clicked.connect(self.draft_with_ai)
         self.write_button = host.Button("Write question", "primary")
         self.write_button.clicked.connect(self.write_question)
@@ -154,6 +207,15 @@ class QuestionsTab(QWidget):
 
     def refresh_ai_support(self):
         self.draft_button.setVisible(ai_enabled(self.host))
+
+    def retheme(self, t):
+        """Draw the buttons' icons in the theme's colours; the sparkle is amber, like an AI draft's chip."""
+        self.theme = t
+        self.draft_button.setIcon(glyph_icon("auto_awesome", TONES["amber"][t.dark]))
+        self.write_button.setIcon(glyph_icon("add", t.on_inverse))
+        self.open_button.setIcon(glyph_icon("open_in_new", t.text))
+        self.editor.retheme(t)
+        self.render()
 
     # -- model ---------------------------------------------------------------------------------------------
 
@@ -254,8 +316,8 @@ class QuestionsTab(QWidget):
             if hasattr(widget, "set_selected"):
                 widget.set_selected(True)
 
-    def chip(self, text, chip_tone="neutral", accent=""):
-        chip = self.host.Chip(text, chip_tone)
+    def chip(self, text, chip_tone="neutral", accent="", icon=None):
+        chip = self.host.Chip(text, chip_tone, icon=icon)
         chip.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         return passive(tone(chip, accent))
 
@@ -267,25 +329,25 @@ class QuestionsTab(QWidget):
         bare = [r for r in self.window.slides or () if r.id not in owned]
         topic_ids = {item.id: topic_of(item, self.window.topics) for item in items}
 
-        def entry(title, subtitle, topic=None, badge=0, edit=None):
+        def entry(title, subtitle, topic=None, badge=0, edit=None, shape="", icon="", accent=""):
             widget = host.RowButton(title, subtitle)
-            widget.layout().setContentsMargins(8, 7, 8, 7)
-            widget.layout().setSpacing(8)
-            widget.layout().insertWidget(0, dot(topic))
+            widget.layout().setContentsMargins(8, 7, 4, 7)
+            widget.layout().setSpacing(10)
+            mark = tone(passive(host.IconLabel(icon, 16)), accent) if icon else dot(topic, shape=shape)
+            widget.layout().insertWidget(0, mark)
             if badge:
                 widget.layout().addWidget(passive(host.Badge(str(badge))))
             if edit:
-                pencil = host.Button("✎", compact=True)
-                pencil.setFixedWidth(pencil.fontMetrics().horizontalAdvance("✎") + 20)
-                pencil.setToolTip("Edit topic")
-                pencil.setAccessibleName(f"Edit topic {title}")
+                pencil = host.IconButton("edit", f"Edit topic {title}")
                 pencil.clicked.connect(lambda _=False, i=edit: self.edit_topic(i))
                 widget.layout().addWidget(pencil)
+                Faint(widget, pencil)
             return widget
 
         def build(add):
             slides = f"{plural(len(self.window.slides), 'slide')} · " if self.window.slides is not None else ""
-            add("all", entry("All slides", f"{slides}{plural(len(items), 'question')}"))
+            add(None, row([], [section("Topics")]), False)
+            add("all", entry("All slides", f"{slides}{plural(len(items), 'question')}", shape="square"))
             for topic in self.window.topics:
                 mine = [i for i in items if topic_ids[i.id] is not None and topic_ids[i.id].id == topic.id]
                 add(topic.id, entry(topic.name, f"{plural(len(topic.slides), 'slide')} · {plural(len(mine), 'question')}",
@@ -293,21 +355,25 @@ class QuestionsTab(QWidget):
             if bare:
                 loose = [i for i in items if i.sources and topic_ids[i.id] is None]
                 add("none", entry("No topic", f"{plural(len(bare), 'slide')} · {plural(len(loose), 'question')}",
-                                  None, sum(needs_attention(i, rules) for i in loose)))
-            new = host.Button("+ New topic", compact=True)
-            new.setMinimumWidth(new.fontMetrics().boundingRect("+ New topic").width() + 28)
+                                  None, sum(needs_attention(i, rules) for i in loose), shape="ring"))
+            new = host.Button("New topic", "ghost", compact=True)
+            new.setIcon(glyph_icon("add", self.theme.text_2))
             new.clicked.connect(lambda: self.edit_topic())
             add(None, row([new], []), False)
-            add(None, row([], [passive(label(host, "Review", role="caption"))]), False)
+            gap = row([], [section("Review")])
+            gap.layout().setContentsMargins(6, 14, 6, 2)
+            add(None, gap, False)
             changed, drafts = len(self.window.changed_slides()), sum(ai_draft(i) for i in items)
             broken = sum(off_rules(i, rules) for i in items)
             subtitle = f"{plural(changed, 'changed slide')} · {plural(drafts, 'AI draft')}"
             if broken:
                 subtitle += f" · {broken} off the answer rules"
-            add("attention", entry("Needs attention", subtitle,
-                                   None, len(attention)))
+            add("attention", entry("Needs attention", subtitle, None, len(attention), icon="error_outline",
+                                   accent="violet"))
             if self.unlinked():
-                add("unlinked", entry("Unlinked questions", plural(len(self.unlinked()), "question")))
+                unlinked = len(self.unlinked())
+                add("unlinked", entry("Unlinked questions", plural(unlinked, "question"), None, unlinked,
+                                      icon="link_off", accent="slate"))
 
         self.fill(self.topic_list, build, self.view)
 
@@ -318,6 +384,11 @@ class QuestionsTab(QWidget):
                 by_slide.setdefault(slide, []).append(item)
 
         self.focus_switch.setVisible(self.view not in REVIEW)
+        self.list_title.setText(self.view_name())
+        self.list_sub.setText({"attention": "Questions with a changed slide, an AI draft or off the answer rules",
+                               "unlinked": "Questions without a linked slide in this deck"}.get(
+            self.view, "In the order of their slides, retired last" if self.listing() else
+            f"{plural(len(self.view_slides()), 'slide')} in deck order"))
 
         def build(add):
             if self.listing():
@@ -335,9 +406,8 @@ class QuestionsTab(QWidget):
                 text = plural(len(mine), "question") if mine else "No questions yet"
                 widget = self.host.RowButton(slide_title(ref), text)
                 widget.layout().setContentsMargins(8, 7, 8, 7)
-                widget.layout().setSpacing(8)
-                widget.layout().insertWidget(0, dot(self.window.owner(ref.id)))
-                widget.layout().insertWidget(0, self.chip(str(ref.position or "·"), "muted"))
+                widget.layout().setSpacing(12)
+                widget.layout().insertWidget(0, thumb(ref.position or "·", self.window.owner(ref.id)))
                 for chip in chips:
                     widget.layout().addWidget(chip)
                 add(ref.id, widget)
@@ -365,7 +435,7 @@ class QuestionsTab(QWidget):
         if item.media:
             chips.append(self.chip(plural(len(item.media), "image"), "muted"))
         if ai_draft(item):
-            chips.append(self.chip("AI draft", accent="amber"))
+            chips.append(self.chip("AI draft", accent="amber", icon="auto_awesome"))
         if off_rules(item, self.window.answer_rules):
             chips.append(self.chip("Off the answer rules", "warning"))
         if item.source_changed and item.status != "retired":
@@ -383,13 +453,20 @@ class QuestionsTab(QWidget):
         elif item.use == "exam":
             summary += f" · {sum(o.correct for o in item.options)} correct"
         if compact:
-            return passive(row([], [text, line(*chips)]))
-        card = host.Card()
+            card = Card()
+            column = QVBoxLayout(card)
+            column.setContentsMargins(12, 10, 12, 10)
+            column.setSpacing(8)
+            column.addWidget(text)
+            column.addLayout(flow(*chips))
+            return passive(card)
+        card = Card()
+        QVBoxLayout(card).setContentsMargins(16, 13, 16, 13)
         top = QHBoxLayout()
         column = QVBoxLayout()
         column.setSpacing(6)
         column.addWidget(text)
-        column.addLayout(line(*chips))
+        column.addLayout(flow(*chips))
         top.addLayout(column, 1)
         top.addWidget(passive(label(host, summary, role="caption")), 0, Qt.AlignmentFlag.AlignTop)
         card.layout().addLayout(top)
@@ -436,8 +513,13 @@ class QuestionsTab(QWidget):
         try:
             for listw, key in ((self.topic_list, self.view),
                                (self.slide_list, self.listed_key())):
-                listw.setCurrentItem(next((listw.item(i) for i in range(listw.count())
-                                           if key is not None and listw.item(i).data(KEY) == key), None))
+                entries = [listw.item(i) for i in range(listw.count())]
+                chosen = next((e for e in entries if key is not None and e.data(KEY) == key), None)
+                listw.setCurrentItem(chosen)
+                for entry in entries:
+                    widget = listw.itemWidget(entry)
+                    if hasattr(widget, "set_selected"):
+                        widget.set_selected(entry is chosen)
         finally:
             self.syncing = False
 
@@ -512,8 +594,7 @@ class QuestionsTab(QWidget):
     def show_editor(self):
         self.stack.setCurrentWidget(self.editor)
         slide = self.sel_slide
-        self.editor.set_back_label(f"‹ {self.window.slide_name(slide)}" if slide and not self.listing()
-                            else f"‹ {self.view_name()}")
+        self.editor.set_back_label(self.window.slide_name(slide) if slide and not self.listing() else self.view_name())
         if self.listing():
             self.sync_selection()
 

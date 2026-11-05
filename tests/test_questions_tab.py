@@ -4,9 +4,9 @@
 from dataclasses import replace
 from uuid import uuid4
 
-from fake_host import add, current_key, keys, pick, row_text, texts
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QDialog, QMessageBox
+from fake_host import KEY, add, current_key, keys, pick, row_text, texts
+from PySide6.QtCore import QEvent, Signal
+from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QToolButton
 from slidemage.plugin_api import Focus
 
 from exam_forge.bank import TopicStore
@@ -89,7 +89,7 @@ def test_needs_attention_lists_changed_and_ai_drafts(lab):
     pick(window.questions.topic_list, "attention")
     assert keys(window.questions.slide_list) == ["q2", "q3", "q4"]
     window.questions.review_row_opened(window.questions.slide_list.item(1))
-    assert window.editor.current.id == "q3" and window.editor.back_button.text() == "‹ Needs attention"
+    assert window.editor.current.id == "q3" and window.editor.back_button.text() == "Needs attention"
     window.editor.back_button.click()
     assert window.questions.view == "attention" and window.questions.stack.currentWidget() is window.questions.placeholder
 
@@ -259,3 +259,32 @@ def test_the_window_guards_unsaved_work(lab, monkeypatch):
     assert not window.shell.close() and window.shell.isVisible()
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Discard)
     assert window.shell.close() and not window.shell.isVisible()
+
+
+def test_header_footer_and_columns_follow_the_design(lab):
+    _, _, _, _, window, _, _, topics = lab
+    header = window.findChild(QFrame, "efHeader")
+    assert {"Exam Forge", "course"} <= {label.text() for label in header.findChildren(QLabel)}
+    for part in (window.tabs.switch, window.check_button, window.export_button):
+        assert header.isAncestorOf(part)
+    assert not window.check_button.icon().isNull() and not window.export_button.icon().isNull()
+    assert window.notice.parent().objectName() == "efFooter" and window.notice.text().startswith("Slides checked")
+    sections = texts(window.questions.topic_list)
+    assert "TOPICS" in sections and "REVIEW" in sections
+    unlinked = len(window.questions.unlinked())
+    assert unlinked and row_text(window.questions.topic_list, "unlinked").split(" | ")[-1] == str(unlinked)
+    pick(window.questions.topic_list, topics[0].id)
+    assert window.questions.list_title.text() == "Probability"
+    assert window.questions.list_sub.text() == "2 slides in deck order"
+
+
+def test_the_topic_pencil_is_faint_until_its_row_is_hovered(lab):
+    _, _, _, _, window, _, _, topics = lab
+    listw = window.questions.topic_list
+    row = listw.itemWidget(next(listw.item(i) for i in range(listw.count()) if listw.item(i).data(KEY) == topics[0].id))
+    pencil = row.findChild(QToolButton)
+    assert pencil.accessibleName() == "Edit topic Probability" and pencil.property("faint")
+    QApplication.sendEvent(row, QEvent(QEvent.Type.Enter))
+    assert not pencil.property("faint")
+    QApplication.sendEvent(row, QEvent(QEvent.Type.Leave))
+    assert pencil.property("faint")

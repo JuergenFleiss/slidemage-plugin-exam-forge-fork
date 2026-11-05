@@ -181,6 +181,9 @@ class FakeHost:
     def IconLabel(self, icon, size):
         return _kit().IconLabel(icon, size)
 
+    def IconButton(self, icon, tooltip):
+        return _kit().IconButton(icon, tooltip)
+
     def Window(self, title):
         return _kit().ToolWindow(title)
 
@@ -209,8 +212,8 @@ class FakeHost:
         self.toasts.append(text)
 
     def theme(self):
-        from types import SimpleNamespace
-        return SimpleNamespace(dark=self.dark, font_sans="Roboto")
+        from slidemage.plugins.host import _theme_tokens
+        return _theme_tokens(self.dark)
 
     def on_theme_changed(self, callback):
         self.theme_listeners.append(callback)
