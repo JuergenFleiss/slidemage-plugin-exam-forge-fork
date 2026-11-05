@@ -1,18 +1,75 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""One reachable top-level window per deck; sidebar widgets have shorter lives."""
+"""One reachable top-level window per deck, its private bank folder, and the sidebar box, whose widgets have shorter
+lives."""
 from pathlib import Path
 
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QFileDialog, QLabel
 
 from ..bank import Bank, BankError
-from ..folder import remembered_folder
-from ..sources import link_slide
-from .first_use import change_bank, choose_bank
+from ..folder import _absolute, copy_bank, folder_warnings, open_chosen_folder, remembered_folder
+from ..model import plural
+from ..sources import DeckSnapshot, fresh_deck, link_slide
+from .kit import confirm, deck_language
 from .window import BankWindow
-from .work import DeckSnapshot, fresh_deck
 
 SIDEBAR_KEY = "bank"
+
+
+def accept_risks(host, deck, selected, parent=None):
+    warnings = folder_warnings(host, deck, selected)
+    if not warnings:
+        return True
+    return confirm(parent, "Question bank folder", "\n\n".join(warnings) +
+                   "\n\nThe bank contains exam questions and answers. Use this folder anyway?", warning=True)
+
+
+def choose_bank(host, deck):
+    """Open the remembered bank or ask for a folder. Return None on cancellation.
+
+    A newly chosen risky folder needs explicit confirmation before any bank is written.
+    Errors opening a bank or saving settings are allowed to reach the caller.
+    """
+    folder = remembered_folder(host, deck)
+    selected = folder if folder is not None and (folder / "bank.json").is_file() else QFileDialog.getExistingDirectory(None, "Choose a folder for the question bank")
+    if not selected:
+        return None
+    if not accept_risks(host, deck, selected):
+        return None
+    if folder is not None and selected == folder:
+        return Bank(folder)
+    return open_chosen_folder(host, deck, selected)
+
+
+def change_bank(host, deck, current, parent=None, may_leave=lambda: True):
+    """Ask for another folder for this deck. Return (bank, message), or None if nothing changed.
+
+    A folder with a bank is used as it is; otherwise the current bank is copied there, so that
+    the questions come along. The old folder is never changed: it is the user's to delete.
+    """
+    selected = QFileDialog.getExistingDirectory(parent, "Choose a folder for the question bank", str(current or ""))
+    if not selected or (current is not None and _absolute(selected) == _absolute(current)):
+        return None
+    if not accept_risks(host, deck, selected, parent):
+        return None
+    target = _absolute(selected)
+    has_bank = (target / "bank.json").is_file()
+    if has_bank:
+        count = len(Bank(target).load()[0])
+        if not confirm(parent, "Question bank folder",
+                       f"This folder already has a question bank with {plural(count, 'question')}. "
+                       "Use that bank for this deck? Nothing is merged; the questions in the current folder stay there."):
+            return None
+    if not may_leave():
+        return None
+    copied = not has_bank and current is not None and (current / "bank.json").is_file()
+    if copied:
+        copy_bank(current, target)
+    bank = open_chosen_folder(host, deck, target)
+    if copied:
+        return bank, (f"Questions copied to {target}. The old folder still holds its copy, "
+                      f"including the answers; delete it once you have checked the new one: {current}")
+    return bank, f"This deck now uses the question bank in {target}."
 
 
 class Controller:
@@ -106,9 +163,7 @@ class Controller:
             window.deck = deck
             # Reopening also rechecks the bank without replacing unsaved editor content.
             window.check_sources()
-        window.show()
-        window.raise_()
-        window.activateWindow()
+        window.present()
         return window
 
     def sidebar(self, deck):
@@ -176,7 +231,7 @@ class Controller:
             if error:
                 window.error(error)
                 return
-            language = self.host.deck_language(snapshot)
+            language = deck_language(self.host, snapshot)
 
             def work():
                 refs = self.host.deck_slides(snapshot, "instructor", language)

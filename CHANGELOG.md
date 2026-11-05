@@ -139,3 +139,18 @@ v0.10.2 (2026-11-03, calmer pages): The exported HTML pages have a new look.
 
 NEW: The HTML pages look calmer.
 - Answers get a ✓ or ✗ marker, the heading is shorter, and status and slide appear as labels.
+
+v0.11.0 (2026-11-04, simpler inside): Exam Forge is simpler inside; a few things you see follow from that.
+
+NEW: Changed slides are remembered, and a few things work more consistently.
+- Which slides changed under a question is saved with the question, so the Questions tab shows the right slides after a restart, not every linked slide until the next check.
+- Approve and freeze checks the slides once, while freezing. A changed slide still leads back to Review & swap, and the Questions tab shows it too.
+- Slide numbers and titles come from the instructor view, in the editor's linked slides and banner and in the Exam tab.
+- A slide linked by hand, from the slide grid or with Write question, is linked in the instructor view and the deck's language.
+- A question revised by Update with AI shows AI draft in the editor until it is reviewed, as its card does, and AI-assisted after that.
+- The questions on a slide are listed in the same order as in the exports. Retired ones still come last.
+- A successful AI draft is reported once, as a toast. Problems appear as messages; the line under the tabs shows only the slide check.
+- The exam documents' maths note now reads "Check that it enters correctly in the exam software".
+- Removed: the notice about exam questions without a linked slide, which only old banks could trigger, and "Earlier text not stored" in Review changes.
+
+BREAKING: Every file in the question folder starts again at format version 1, and exam questions are now stored as "exam". Question folders made by development versions of Exam Forge do not open; start a new question folder for each deck.

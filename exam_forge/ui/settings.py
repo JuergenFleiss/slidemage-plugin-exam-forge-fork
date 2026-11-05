@@ -4,14 +4,13 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QPlainTextEdit, QSpinBox, QWidget
 
-from ..ai_support import ai_service
-from ..answer_rules import AnswerRulesStore, exam_rules
-from ..bank import BankError
-from ..drafting import DEFAULT_GUIDANCE
-from ..model import KINDS, MAX_OPTIONS, AnswerRule, AnswerRules
+from ..bank import AnswerRulesStore, BankError
+from ..drafting import DEFAULT_GUIDANCE, ai_enabled, ai_service
+from ..model import KINDS
+from ..rules import MAX_OPTIONS, AnswerRule, AnswerRules
 
 
-def add_folder_section(host, controller, page, folder_changed=lambda: None):
+def add_folder_section(host, controller, page, folder_changed):
     deck = controller.open_deck()
     if deck is None:
         page.body.addWidget(host.Field("Question folder", host.caption("Open a deck to change its question folder.")))
@@ -35,9 +34,9 @@ def add_folder_section(host, controller, page, folder_changed=lambda: None):
     page.body.addWidget(change, 0, Qt.AlignmentFlag.AlignLeft)
 
 
-def add_rules_section(host, controller, page):
-    """The open deck's answer rules, saved in its question folder as soon as they are valid. Returns a callable that
-    reads them again, for when the folder changed."""
+def rules_section(host, controller):
+    """The open deck's answer rules, saved in its question folder as soon as they are valid: (widgets to add, a
+    callable that reads the rules again, for when the folder changed)."""
     def spin(low, high):
         box = QSpinBox()
         box.setRange(low, high)
@@ -54,34 +53,31 @@ def add_rules_section(host, controller, page):
 
     # Revision: answers from, to; correct from, to. Exam: one number of answers; correct from, to.
     rev = [spin(2, MAX_OPTIONS), spin(2, MAX_OPTIONS), spin(1, MAX_OPTIONS - 1), spin(1, MAX_OPTIONS - 1)]
-    elp = [spin(2, MAX_OPTIONS), spin(1, MAX_OPTIONS - 1), spin(1, MAX_OPTIONS - 1)]
+    exam = [spin(2, MAX_OPTIONS), spin(1, MAX_OPTIONS - 1), spin(1, MAX_OPTIONS - 1)]
     revision_field = host.Field("Revision quiz (Moodle)", line("Answers", rev[0], "to", rev[1],
                                                                 "· Correct", rev[2], "to", rev[3]))
     kinds = {kind: QCheckBox(name) for kind, name in KINDS.items()}
     kinds_field = host.Field("Exam question types", line(*kinds.values()))
-    elp_field = host.Field("Exam, multiple choice", line("Answers", elp[0], "· Correct", elp[1], "to", elp[2]))
+    exam_field = host.Field("Exam, multiple choice", line("Answers", exam[0], "· Correct", exam[1], "to", exam[2]))
     notice = host.caption("")
     notice.setWordWrap(True)
     reset = host.Button("Default answer rules", compact=True)
-    widgets = (revision_field, kinds_field, elp_field, reset)
-    page.body.addWidget(host.Field("Answer rules", host.caption(
+    widgets = (revision_field, kinds_field, exam_field, reset)
+    intro = host.Field("Answer rules", host.caption(
         "For this deck: the question types its exam uses, how many answers a multiple-choice question has, and "
         "how many of them are correct. Revision quizzes are multiple choice. Reviewed questions that no longer fit "
-        "are flagged and left out of exports and exams until you fix them.")))
-    for widget in (revision_field, kinds_field, elp_field, notice):
-        page.body.addWidget(widget)
-    page.body.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
+        "are flagged and left out of exports and exams until you fix them."))
     state = {"store": None, "loading": False}
 
     def show(rules):
         state["loading"] = True
-        r, e = rules.revision, rules.elp
-        for box, value in zip((*rev, *elp), (r.min_options, r.max_options, r.min_correct, r.max_correct,
+        r, e = rules.revision, rules.exam
+        for box, value in zip((*rev, *exam), (r.min_options, r.max_options, r.min_correct, r.max_correct,
                                              e.min_options, e.min_correct, e.max_correct)):
             box.setValue(value)
         for kind, box in kinds.items():
             box.setChecked(kind in rules.exam_kinds)
-        elp_field.setEnabled(state["store"] is not None and "choice" in rules.exam_kinds)
+        exam_field.setEnabled(state["store"] is not None and "choice" in rules.exam_kinds)
         state["loading"] = False
 
     def load():
@@ -103,7 +99,6 @@ def add_rules_section(host, controller, page):
 
     def save(rules):
         try:
-            exam_rules(rules)
             state["store"].save(rules)
         except (OSError, ValueError) as exc:
             notice.setText(f"Not saved: {exc}")
@@ -114,9 +109,9 @@ def add_rules_section(host, controller, page):
     def changed(*_):
         if state["loading"] or state["store"] is None:
             return
-        count, low, high = (box.value() for box in elp)
+        count, low, high = (box.value() for box in exam)
         chosen = tuple(kind for kind, box in kinds.items() if box.isChecked())
-        elp_field.setEnabled("choice" in chosen)
+        exam_field.setEnabled("choice" in chosen)
         try:
             rules = AnswerRules(AnswerRule(*(box.value() for box in rev)), AnswerRule(count, count, low, high),
                                 exam_kinds=chosen)
@@ -130,23 +125,26 @@ def add_rules_section(host, controller, page):
         if state["store"] is not None:
             save(AnswerRules())
 
-    for box in (*rev, *elp):
+    for box in (*rev, *exam):
         box.valueChanged.connect(changed)
     for box in kinds.values():
         box.toggled.connect(changed)
     reset.clicked.connect(default)
     load()
-    return load
+    return (intro, revision_field, kinds_field, exam_field, notice, reset), load
 
 
 def build_settings(host, controller):
     on_change = controller.refresh_ai_support
     page = host.Page()
-    reload_rules = []
-    add_folder_section(host, controller, page, lambda: reload_rules[0]())
-    reload_rules.append(add_rules_section(host, controller, page))
+    rules, reload_rules = rules_section(host, controller)
+    add_folder_section(host, controller, page, reload_rules)
+    *fields, reset_rules = rules
+    for widget in fields:
+        page.body.addWidget(widget)
+    page.body.addWidget(reset_rules, 0, Qt.AlignmentFlag.AlignLeft)
     checkbox = page.ai_checkbox = QCheckBox("Enable AI support")
-    checkbox.setChecked(bool(host.settings().get("ai_support", False)))
+    checkbox.setChecked(ai_enabled(host))
     notice = page.ai_notice = host.caption("")
     notice.setWordWrap(True)
     page.body.addWidget(checkbox)

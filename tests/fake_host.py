@@ -1,11 +1,19 @@
 # SPDX-FileCopyrightText: 2026 Stefan Palan, Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""A small fake for the Host services used by Exam Forge. Its widgets are the host's real kit, so tests see what users get."""
-from collections.abc import Callable
-from dataclasses import dataclass
-from pathlib import Path
+"""A small fake for the Host services used by Exam Forge, and helpers that fill it and the window.
 
-from slidemage.plugin_api import Deck, SlideRef, SlideSource
+Its widgets are the host's real kit, so tests see what users get."""
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
+from pathlib import Path
+from threading import get_ident
+from uuid import uuid4
+
+from PySide6.QtCore import Qt
+from slidemage.plugin_api import Deck, Focus, SlideRef, SlideSource
+
+KEY = Qt.ItemDataRole.UserRole
 
 
 @dataclass
@@ -31,11 +39,26 @@ class FakeAiChat:
         raise AssertionError("No AI chat route configured")
 
 
+class FakeSettings:
+    def __init__(self):
+        self.data, self.saves = {}, 0
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key, value):
+        self.data[key] = value
+
+    def save(self):
+        self.saves += 1
+
+
 class FakeHost:
     def __init__(self, root=None):
         self.commands: dict[str, Command] = {}
         self.menus: dict[str, list[str]] = {}
         self.messages: list[tuple[str, bool]] = []
+        self.toasts: list[str] = []
         self.chat = FakeAiChat()
         self._active = True
         self.root = Path(root) if root is not None else Path.cwd()
@@ -43,23 +66,40 @@ class FakeHost:
         self.slides: dict[tuple[Path, str, str], list[SlideRef]] = {}
         self.sources: dict[SlideRef, SlideSource] = {}
         self.opened_slides: list[SlideRef] = []
+        self.settings_tabs, self.boxes = {}, {}
+        self.current_focus = Focus(None, None, "slide")
+        self._settings = FakeSettings()
+        self.dark, self.theme_listeners = False, []
 
     def finish_activation(self):
         self._active = False
 
-    def add_command(self, id, title, run, enabled=lambda deck: True):
+    def _registering(self):
         if not self._active:
             raise RuntimeError("registrations are only allowed in activate()")
+
+    def add_command(self, id, title, run, enabled=lambda deck: True):
+        self._registering()
         if id in self.commands:
             raise ValueError(f"command {id!r} is registered twice")
         self.commands[id] = Command(title, run, enabled)
 
     def add_menu_entry(self, menu, command_id):
-        if not self._active:
-            raise RuntimeError("registrations are only allowed in activate()")
+        self._registering()
         if menu != "deck" or command_id not in self.commands:
             raise ValueError(f"unknown menu {menu!r} or command {command_id!r}")
         self.menus.setdefault(menu, []).append(command_id)
+
+    def add_settings_tab(self, title, build):
+        self._registering()
+        self.settings_tabs[title] = build
+
+    def add_sidebar_box(self, key, title, build, size="compact", when=lambda deck: True):
+        self._registering()
+        self.boxes[key] = (title, build, size, when)
+
+    def refresh_sidebar_box(self, key):
+        pass
 
     def ai_chat(self):
         return self.chat
@@ -93,29 +133,10 @@ class FakeHost:
         self.opened_slides.append(ref)
 
     def settings(self):
-        if not hasattr(self, "_settings"):
-            self._settings = FakeSettings()
         return self._settings
 
-    def add_settings_tab(self, title, build):
-        if not self._active:
-            raise RuntimeError("registrations are only allowed in activate()")
-        self.settings_tabs = getattr(self, "settings_tabs", {})
-        self.settings_tabs[title] = build
-
-    def add_sidebar_box(self, key, title, build, size="compact", when=lambda deck: True):
-        if not self._active:
-            raise RuntimeError("registrations are only allowed in activate()")
-        if not hasattr(self, "boxes"):
-            self.boxes = {}
-        self.boxes[key] = (title, build, size, when)
-
-    def refresh_sidebar_box(self, key):
-        self.refreshed = getattr(self, "refreshed", []) + [key]
-
     def focus(self):
-        from slidemage.plugin_api import Focus
-        return getattr(self, "current_focus", Focus(None, None, "slide"))
+        return self.current_focus
 
     def deck_language(self, deck):
         return "en"
@@ -185,15 +206,21 @@ class FakeHost:
         return _kit().ModalSheet(title, parent)
 
     def toast(self, parent, text):
-        self.toasts = getattr(self, "toasts", []) + [text]
+        self.toasts.append(text)
 
     def theme(self):
         from types import SimpleNamespace
-        return SimpleNamespace(dark=False, font_sans="Roboto")
+        return SimpleNamespace(dark=self.dark, font_sans="Roboto")
 
     def on_theme_changed(self, callback):
-        self.theme_listeners = getattr(self, "theme_listeners", []) + [callback]
-        return lambda: None
+        self.theme_listeners.append(callback)
+        return lambda: self.theme_listeners.remove(callback)
+
+    def set_dark(self, dark):
+        """Switch the theme, as the user does in SlideMage."""
+        self.dark = dark
+        for callback in list(self.theme_listeners):
+            callback(self.theme())
 
 
 def _kit():
@@ -201,15 +228,142 @@ def _kit():
     return widgets
 
 
-class FakeSettings:
-    def __init__(self):
-        self.data = {}
+class GuiHost(FakeHost):
+    """Queues work, runs it on a real worker thread on drain(), and calls done on the UI thread."""
 
-    def get(self, key, default=None):
-        return self.data.get(key, default)
+    def __init__(self, root):
+        super().__init__(root)
+        self.pending, self.ui_thread, self.read_threads = [], get_ident(), []
 
-    def set(self, key, value):
-        self.data[key] = value
+    def run_in_background(self, work, done):
+        assert get_ident() == self.ui_thread
+        self.pending.append((work, done))
 
-    def save(self):
-        pass
+    def drain(self):
+        from PySide6.QtWidgets import QApplication
+        while self.pending:
+            work, done = self.pending.pop(0)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(work)
+                error = future.exception()
+            assert get_ident() == self.ui_thread
+            done(None if error else future.result(), error)
+        QApplication.processEvents()
+
+    def deck_slides(self, deck, view, language):
+        assert get_ident() != self.ui_thread
+        self.read_threads.append(get_ident())
+        self.last_deck_text = deck.text
+        return super().deck_slides(deck, view, language)
+
+    def show_message(self, text, error=False):
+        assert get_ident() == self.ui_thread
+        super().show_message(text, error)
+
+
+class RecordingChat:
+    """An available AI route that records requests; the test answers through `done`."""
+
+    def __init__(self, host):
+        self.host, self.requests, self.cancelled = host, [], 0
+
+    def available(self):
+        return True
+
+    def request(self, request, done):
+        assert get_ident() == self.host.ui_thread
+        self.requests.append(request)
+        self.done = done
+
+        def cancel():
+            self.cancelled += 1
+        return cancel
+
+
+def enable_ai(host):
+    """Give the host an AI route and tick AI support in the settings; returns the chat and the settings page."""
+    host.chat = RecordingChat(host)
+    page = host.settings_tabs["Exam Forge"]()
+    page.ai_checkbox.setChecked(True)
+    return host.chat, page
+
+
+def activate(host):
+    """Activate Exam Forge on the host and return its window controller."""
+    import exam_forge
+    exam_forge.activate(host)
+    host.finish_activation()
+    return host.commands["exam-forge.open"].run.__self__
+
+
+def make_slides(host, deck, ids=("a", "b", "c", "d"), view="instructor"):
+    refs = [SlideRef(id=i, id_slug=f"{i}-EN-Title", path=host.root / f"{i}.tex", language="en", language_read="en",
+                     title=f"Title {i}", version="1-0-0", position=n) for n, i in enumerate(ids, 1)]
+    host.slides[(deck.path, view, "en")] = refs
+    for ref in refs:
+        host.sources[ref] = SlideSource(text=f"Text of {ref.id}")
+    return {ref.id: ref for ref in refs}
+
+
+def source(host, deck):
+    """The deck's only slide: s1, "Addition"."""
+    ref = replace(make_slides(host, deck, ("s1",))["s1"], title="Addition")
+    host.slides[(deck.path, "instructor", "en")] = [ref]
+    host.sources[ref] = SlideSource(text="Two plus two = four")
+    return ref
+
+
+def add(bank, item_id, stem, links=(), status="draft", **fields):
+    from exam_forge.model import Item, Option
+    options = (Option(uuid4().hex, "Right", True), Option(uuid4().hex, "Wrong"))
+    item = bank.create(Item(item_id, 1, stem, options, sources=tuple(links), **fields))
+    for target in ("reviewed", "retired")[:("draft", "reviewed", "retired").index(status)]:
+        item = bank.set_status(item_id, item.revision, target)
+    return item
+
+
+def fill(window, link=True):
+    """Write and save a two-answer question in the open window, linked to slide s1."""
+    from exam_forge.sources import link_slide
+    window.questions.new_question()
+    window.editor.stem.setPlainText("What is two plus two?")
+    first, second = window.editor.rows
+    first.text.setPlainText("4")
+    first.tick.click()
+    first.why.setPlainText("Two pairs.")
+    second.text.setPlainText("3")
+    window.editor.objective.setText("Add two numbers")
+    if link:
+        window.editor.links = (link_slide(window.host, source(window.host, window.deck), "instructor"),)
+    assert window.editor.save()
+    return window.editor.current
+
+
+def revision(bank, item_id, number):
+    """An earlier revision of a question, as its file holds it."""
+    return bank._revisions(item_id)[number - 1]
+
+
+def keys(listw):
+    return [listw.item(i).data(KEY) for i in range(listw.count()) if listw.item(i).data(KEY) is not None]
+
+
+def entry(listw, key):
+    return next(listw.item(i) for i in range(listw.count()) if listw.item(i).data(KEY) == key)
+
+
+def texts(widget):
+    from PySide6.QtWidgets import QLabel
+    return " | ".join(label.text() for label in widget.findChildren(QLabel))
+
+
+def row_text(listw, key):
+    return texts(listw.itemWidget(entry(listw, key)))
+
+
+def pick(listw, key):
+    listw.setCurrentItem(entry(listw, key))
+
+
+def current_key(listw):
+    return listw.currentItem().data(KEY) if listw.currentItem() else None

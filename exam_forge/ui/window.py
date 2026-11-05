@@ -1,58 +1,52 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Non-modal window shell; worker completions alone update phase 2 widgets."""
+"""Non-modal window: the deck's data and the services its parts share, the top bar, the Questions and Exam tabs, and
+the footer."""
+from datetime import datetime
+
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QSizePolicy,
-    QStackedWidget,
-    QVBoxLayout,
-    QWidget,
-)
-from ..answer_rules import AnswerRulesStore, exam_rules
-from ..bank import BankError
-from ..model import AnswerRules
-from ..topics import TopicStore, migrate, topic_name
-from .editor import ItemEditor
+from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+
+from ..bank import AnswerRulesStore, BankError, TopicStore
+from ..model import plural, slide_label
+from ..rules import AnswerRules
+from ..sources import check_bank, fresh_deck
 from .exam_tab import ExamTab
 from .export_menu import ExportMenu
-from .questions_tab import QuestionsTab
+from .kit import deck_language, slide_title, tone_sheet
+from .questions_tab import QuestionsTab, changed_on
 
 
 class Tabs(QStackedWidget):
-    """Pages behind the host's segmented switch."""
+    """Pages behind the host's segmented switch: the switch shows a page, and select() shows one and moves the
+    switch."""
 
     def __init__(self, host, pages):
         super().__init__()
-        self.names = [name for name, _ in pages]
-        for _, page in pages:
+        self.pages = dict(pages)
+        for page in self.pages.values():
             self.addWidget(page)
-        self.switch = host.SegmentedControl([(name, name) for name in self.names])
-        self.switch.changed.connect(lambda name: super(Tabs, self).setCurrentIndex(self.names.index(name)))
+        self.switch = host.SegmentedControl([(name, name) for name in self.pages])
+        self.switch.changed.connect(lambda name: self.setCurrentWidget(self.pages[name]))
 
-    def setCurrentIndex(self, index):
-        super().setCurrentIndex(index)
-        self.switch.set_current(self.names[index])
-
-    def setCurrentWidget(self, page):
-        self.setCurrentIndex(self.indexOf(page))
-
-    def tabText(self, index):
-        return self.names[index]
+    def select(self, name):
+        self.setCurrentWidget(self.pages[name])
+        self.switch.set_current(name)
 
 
-class BankWindow(QuestionsTab, ItemEditor, QWidget):
-    """The content of a host window, which the host closes with SlideMage; show and close go to that window."""
+class BankWindow(QWidget):
+    """The content of a host window, which the host closes with SlideMage. It holds the deck's bank, questions,
+    topics, answer rules and slides, and runs the work of its parts one operation at a time."""
 
     def __init__(self, host, deck, bank, changed):
         super().__init__()
         self.host, self.deck, self.bank, self.changed = host, deck, bank, changed
-        self.current = self.baseline = None
-        self.new_item = False
         self.items = []
         self.topics = ()
         self.answer_rules = AnswerRules()
-        self.links = self.attachments = ()
+        self.slides = None
+        self.slide_gen = 0
+        self.checked_at = None
         self.busy = False
         self.idle_callbacks = []
         self.shell = host.Window(f"Exam Forge · {deck.name}")
@@ -63,16 +57,17 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 8)
         layout.setSpacing(8)
-        self.notice = host.caption("")
+        self.notice = host.caption("")  # The source check's status.
         self.notice.setWordWrap(True)
         self.check_button = host.Button("Check slides")
         self.check_button.clicked.connect(self.check_sources)
         self.export_button = host.Button("Export")
         self.export_menu = ExportMenu(self)
         self.export_button.clicked.connect(self.show_export_menu)
-        questions = self.build_questions_tab()
+        self.questions = QuestionsTab(self)
+        self.editor = self.questions.editor
         self.exam_tab = ExamTab(self)
-        self.tabs = Tabs(host, (("Questions", questions), ("Exam", self.exam_tab)))
+        self.tabs = Tabs(host, (("Questions", self.questions), ("Exam", self.exam_tab)))
         top = QHBoxLayout()
         top.addWidget(self.tabs.switch)
         top.addStretch()
@@ -92,33 +87,20 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         foot.addWidget(self.folder_label, 1)
         foot.addWidget(self.checked_label)
         layout.addLayout(foot)
+        self.retheme()
         self.load_topics()
         self.load_answer_rules()
         self.reload()
         self.load_slides()
         self.check_sources()
-        host.on_theme_changed(lambda _tokens: self.retheme())
+        host.on_theme_changed(lambda tokens: self.retheme())
 
-    # The host window is what opens and closes.
-
-    def show(self):
+    def present(self):
+        """Show the host window in front."""
         self.shell.show()
-        self.topic_list.setFocus()  # Not the switch: its focus ring is for the keyboard.
-
-    def close(self):
-        return self.shell.close()
-
-    def raise_(self):
         self.shell.raise_()
-
-    def activateWindow(self):
         self.shell.activateWindow()
-
-    def resize(self, *size):
-        self.shell.resize(*size)
-
-    def windowTitle(self):
-        return self.shell.windowTitle()
+        self.questions.topic_list.setFocus()  # Not the switch: its focus ring is for the keyboard.
 
     def eventFilter(self, obj, event):
         if obj is self.shell and event.type() == QEvent.Type.Close and not self.may_leave():
@@ -126,22 +108,37 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
             return True
         return super().eventFilter(obj, event)
 
-    def toast(self, text):
-        self.notice.setText(text)
-        self.host.toast(self.shell, text)
+    def may_leave(self):
+        return self.editor.may_leave()
+
+    def retheme(self):
+        """Every tone's colour in the host's theme, in one stylesheet that the tagged widgets and the dialogs share."""
+        self.setStyleSheet(tone_sheet(self.host.theme().dark))
 
     def show_export_menu(self):
         self.export_menu.popup(self.export_button.mapToGlobal(QPoint(0, self.export_button.height())))
+
+    # -- the parts' entry points ---------------------------------------------------------------------------------
+
+    def refresh_ai_support(self):
+        self.questions.refresh_ai_support()
+
+    def open_question(self, item_id):
+        return self.questions.open_question(item_id)
+
+    def start_question(self, link):
+        self.questions.start_question(link)
+
+    # -- data ----------------------------------------------------------------------------------------------------
 
     def switch_bank(self, bank):
         # Replace the window's bank only when there is no worker using it.
         self.bank = bank
         self.folder_label.setText(str(bank.folder))
-        self.drop_editor()
-        self.stack.setCurrentWidget(self.placeholder)
-        self.view, self.sel_slide, self.slides = "all", None, None
-        self.changed_links, self.checked_at = {}, None
-        self.elp_told, self.elp_text = False, ""
+        self.editor.drop()
+        self.questions.reset()
+        self.questions.stack.setCurrentWidget(self.questions.placeholder)
+        self.slides, self.checked_at = None, None
         self.exam_tab.reset()
         self.load_topics()
         self.load_answer_rules()
@@ -149,21 +146,9 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.load_slides()
 
     def load_topics(self):
-        """Read topics.json; on a bank's first open, create it from legacy question topics."""
-        store = TopicStore(self.bank.folder)
+        """Read topics.json; a bank without one has no topics yet."""
         try:
-            if store.exists():
-                self.topics = store.load()
-                return
-            items, errors = self.bank.load()
-            # An unreadable question could hold a topic, so migrate only from a complete bank.
-            if errors:
-                self.topics = ()
-                return
-            self.topics, notes = migrate(items)
-            store.save(self.topics)
-            if notes:
-                self.notice.setText(" ".join(notes))
+            self.topics = TopicStore(self.bank.folder).load()
         except (OSError, BankError, ValueError) as exc:
             self.topics = ()
             self.error(exc)
@@ -175,16 +160,14 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         except (OSError, BankError, ValueError) as exc:
             self.answer_rules = AnswerRules()
             self.error(f"{exc} The default answer rules apply.")
-        self.exam_tab.rules = exam_rules(self.answer_rules)
+        self.exam_tab.rules = self.answer_rules.exam_rules()
 
     def answer_rules_changed(self):
         """Settings saved new rules: a proposed exam was screened with the old ones, so it is dropped."""
         self.load_answer_rules()
         self.exam_tab.invalidate()
-        self.render()
-        if self.current is not None:
-            self.refresh_answers()
-            self.refresh_footer()
+        self.questions.render()
+        self.editor.refresh()
 
     def save_topics(self, topics):
         """Persist topics. A proposed exam was resolved with the old ones, so it is dropped."""
@@ -197,11 +180,90 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
         self.exam_tab.invalidate()
         return True
 
-    def topic_name_of(self, item):
-        return topic_name(item, self.topics)
+    def reload(self):
+        try:
+            self.items, errors = self.bank.load()
+            if errors:
+                self.error("\n".join(map(str, errors)))
+            self.questions.render()
+            self.update_footer()
+            self.changed(self.items)
+            self.exam_tab.refresh()
+        except (OSError, BankError, ValueError) as exc:
+            self.error(exc)
+
+    def load_slides(self):
+        self.slide_gen += 1
+        generation, host, deck = self.slide_gen, self.host, self.deck
+        language = deck_language(host, deck)
+
+        def done(refs, error):
+            if generation != self.slide_gen:
+                return
+            if error:
+                self.error(error)
+                return
+            self.slides = list({ref.id: ref for ref in reversed(refs)}.values())[::-1]
+            self.questions.render()
+            self.update_footer()
+            self.editor.refresh()  # Its slide labels and banner come from these slides.
+
+        host.run_in_background(lambda: host.deck_slides(fresh_deck(deck), "instructor", language), done)
+
+    def check_sources(self, *_, then=None, item_ids=None):
+        if self.busy:
+            return
+        self.set_busy(True)
+        self.notice.setText("Checking sources…")
+        host, deck, bank = self.host, self.deck, self.bank
+
+        def checked(report, error):
+            self.set_busy(False)
+            if error is None:
+                self.checked_at = datetime.now()
+            self.reload()      # A failed check may have recorded some questions before it stopped.
+            self.load_slides()
+            if error is not None:
+                self.notice.setText("The source check did not finish.")
+                self.error(error)
+                return
+            self.notice.setText(f"Source check complete · {plural(len(self.changed_slides()), 'changed slide')}.")
+            if report.errors:
+                self.error("\n".join(map(str, report.errors)))
+                return
+            for item in self.items:
+                self.editor.take_check(item)
+            if then:
+                then(report)
+
+        host.run_in_background(lambda: check_bank(host, fresh_deck(deck), bank, item_ids), checked)
+
+    def changed_slides(self):
+        return {slide for item in self.items for slide in changed_on(item)}
+
+    def slide_ref(self, slide_id):
+        return next((ref for ref in self.slides or () if ref.id == slide_id), None)
+
+    def slide_name(self, slide_id):
+        ref = self.slide_ref(slide_id)
+        return slide_label(slide_id, ref.position, slide_title(ref)) if ref else slide_label(slide_id)
+
+    def owner(self, slide_id):
+        """The topic a slide belongs to, or None."""
+        return next((t for t in self.topics if slide_id in t.slides), None)
+
+    def update_footer(self):
+        self.checked_label.setText("Slides not checked yet" if self.checked_at is None else
+                                   f"Slides checked {self.checked_at:%H:%M} · {len(self.changed_slides())} changed")
+
+    # -- services --------------------------------------------------------------------------------------------------
+
+    def toast(self, text):
+        """Something went well."""
+        self.host.toast(self.shell, text)
 
     def error(self, error):
-        self.notice.setText(str(error))
+        """Something failed or was refused."""
         self.host.show_message(str(error), error=True)
 
     def when_idle(self, callback):
@@ -212,9 +274,7 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
 
     def set_busy(self, busy):
         self.busy = busy
-        self.draft_button.setEnabled(not busy)
-        self.write_button.setEnabled(not busy)
-        self.editor.setEnabled(not busy and self.current is not None)
+        self.questions.set_busy(busy)
         for widget in (self.check_button, self.export_button, self.exam_tab):
             widget.setEnabled(not busy)
         if busy:
@@ -236,15 +296,3 @@ class BankWindow(QuestionsTab, ItemEditor, QWidget):
             else:
                 done(result)
         self.host.run_in_background(work, completed)
-
-    def retheme(self):
-        if hasattr(self, "topic_list"):
-            self.tint(self.changed_label)
-            self.tint(self.draft_button, True)
-            self.restyle_editor()
-            self.render()
-
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.PaletteChange:
-            self.retheme()

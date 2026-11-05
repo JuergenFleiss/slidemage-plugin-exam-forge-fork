@@ -2,15 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 r"""Offline entry copies for the teaching assistant, generated only from a Manifest.
 
-Math decision (G6 / gate J4): preserve plain text exactly, including visible
-\( ... \) and \[ ... \] source. The assistant must read and copy it into the
-exam software, whose math input has not been verified. Escaped, selectable source
-is more honest than a partial TeX conversion. There is no TeX compilation, math
-parser, JavaScript, network access, or vendored renderer (zero added library
-bytes or third-party licence obligations). Both documents explain this choice.
-Needs a decision at J4: is source readable and transferable in the actual exam
-software? If typesetting is required, choose a renderer only after reviewing its
-bundled size, licence and copy/paste behaviour; none is silently included here.
+Maths stays plain text, exactly as written, including visible \( ... \) and
+\[ ... \] source. The assistant reads and copies it into the exam software.
+Escaped, selectable source is more honest than a partial TeX conversion. There is
+no TeX compilation, math parser, JavaScript, network access, or vendored renderer
+(zero added library bytes or third-party licence obligations). Both documents
+explain this choice.
 
 Item, option and media order is preserved; the exam software handles shuffling.
 Author-written assistant notes mark shared stems, exclusions and fixed option
@@ -26,15 +23,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from decimal import Decimal
 from html import escape
 from typing import TYPE_CHECKING
 
-from .model import number_word
+from .model import IMAGE_NAMES, image_type
+from .rules import exam_totals, number_word
 
 if TYPE_CHECKING:
-    # manifest imports host-facing source checks; rendering needs no host or Qt.
-    from .manifest import Manifest
+    # exam imports host-facing source checks; rendering needs no host or Qt.
+    from .exam import Manifest
 
 
 _STYLE = """body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;max-width:46rem;margin:2.5rem auto;padding:0 1.25rem;color:#1c1b19}
@@ -66,33 +63,33 @@ table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #
 @media print{body{max-width:none;margin:0}.private{break-inside:avoid}}
 """
 _MATH_NOTE = (r'Math is shown as copyable source, including \( ... \) and \[ ... \] '
-              'delimiters. It is not typeset. Check entry in the exam software at gate J4.')
+              'delimiters. It is not typeset. Check that it enters correctly in the exam software.')
 
 
-def _text(value: str) -> str:
+def text(value: str) -> str:
     return escape(value, quote=True)
 
 
-def _page(title: str, body: list[str], language: str = "en") -> str:
+def page(title: str, body: list[str], language: str = "en") -> str:
     return '\n'.join([
-        '<!doctype html>', f'<html lang="{_text(language)}">', '<head>', '<meta charset="utf-8">',
+        '<!doctype html>', f'<html lang="{text(language)}">', '<head>', '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         ('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
          'img-src data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'">'),
-        f'<title>{_text(title)}</title>', f'<style>{_STYLE}</style>', '</head>', '<body>',
-        f'<h1>{_text(title)}</h1>', f'<p class="lead">{_text(_MATH_NOTE)}</p>', *body, '</body>', '</html>', '',
+        f'<title>{text(title)}</title>', f'<style>{_STYLE}</style>', '</head>', '<body>',
+        f'<h1>{text(title)}</h1>', f'<p class="lead">{text(_MATH_NOTE)}</p>', *body, '</body>', '</html>', '',
     ])
 
 
 def heading(number: int, item_id: str, revision: int) -> str:
     """"Question N" with the short id and revision as small monospace text; the full id stays in the title."""
-    return (f'<h2>Question {number} <span class="id" title="{_text(item_id)}">'
-            f'{_text(item_id[:8])} · r{revision}</span></h2>')
+    return (f'<h2>Question {number} <span class="id" title="{text(item_id)}">'
+            f'{text(item_id[:8])} · r{revision}</span></h2>')
 
 
 def chips(labels: list[str], reviewed: bool = False) -> str:
     """Small pills; the first is the status, green when reviewed."""
-    cells = [f'<span class="chip{" reviewed" if reviewed and not n else ""}">{_text(label)}</span>'
+    cells = [f'<span class="chip{" reviewed" if reviewed and not n else ""}">{text(label)}</span>'
              for n, label in enumerate(labels) if label]
     return f'<div class="chips">{"".join(cells)}</div>'
 
@@ -102,17 +99,32 @@ def marker(correct: bool) -> str:
     return f'<span class="mk" aria-label="{label}">{glyph}</span>'
 
 
-def image_mime(raw: bytes) -> str | None:
-    """The media type of a supported image, judged by its content."""
-    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
-        return 'image/png'
-    if raw.startswith(b'\xff\xd8\xff'):
-        return 'image/jpeg'
-    if raw.startswith((b'GIF87a', b'GIF89a')):
-        return 'image/gif'
-    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
-        return 'image/webp'
-    return None
+def figure(raw: bytes, mime: str, alt: str) -> str:
+    """An embedded image with its description as alt text and caption."""
+    encoded = base64.b64encode(raw).decode('ascii')
+    alt = text(alt)
+    return (f'<figure><img src="data:{mime};base64,{encoded}" alt="{alt}">'
+            f'<figcaption>{alt}</figcaption></figure>')
+
+
+def assistant_note(note: str) -> str:
+    return ('<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
+            + text(note) + '</aside>')
+
+
+def model_answer(answer: str, grading_notes: str) -> list[str]:
+    parts = ['<h3>Model answer</h3>', f'<div class="text model-answer">{text(answer)}</div>']
+    if grading_notes:
+        parts += ['<h3>Grading notes</h3>', f'<div class="text grading-notes">{text(grading_notes)}</div>']
+    return parts
+
+
+def key_option(answer: str, correct: bool, rationale: str, title: str = '') -> str:
+    """One answer as the key shows it: its marker, text and rationale."""
+    rationale = f'<div class="text rationale">{text(rationale)}</div>' if rationale else ''
+    title = f' title="{text(title)}"' if title else ''
+    return (f'<li class="{"ok" if correct else "no"}"{title}>{marker(correct)}'
+            f'<div><div class="text option">{text(answer)}</div>{rationale}</div></li>')
 
 
 def _image(media: dict, attachments: dict) -> str:
@@ -123,13 +135,10 @@ def _image(media: dict, attachments: dict) -> str:
         raise ValueError(f'Missing or invalid snapshot image: {name}') from exc
     if hashlib.sha256(raw).hexdigest() != media['sha256']:
         raise ValueError(f'Snapshot image hash mismatch: {name}')
-    mime = image_mime(raw)
+    mime = image_type(raw)
     if mime is None:
-        raise ValueError(f'Unsupported image {name}: use PNG, JPEG, GIF or WebP')
-    encoded = base64.b64encode(raw).decode('ascii')
-    alt = _text(media['alt'])
-    return (f'<figure><img src="data:{mime};base64,{encoded}" alt="{alt}">'
-            f'<figcaption>{alt}</figcaption></figure>')
+        raise ValueError(f'Unsupported image {name}: use {IMAGE_NAMES}')
+    return figure(raw, mime, media['alt'])
 
 
 def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bool) -> str:
@@ -137,49 +146,34 @@ def _question(item: dict, number: int, rule: dict, images: list[str], *, key: bo
         '<section class="question">',
         heading(number, item["id"], item["revision"]),
         chips([f'{rule["points"]} points', f'{rule["minutes"]} planned minutes', item["difficulty"]]),
-        f'<div class="text stem">{_text(item["stem"])}</div>', *images, '<ol>',
+        f'<div class="text stem">{text(item["stem"])}</div>', *images,
     ]
-    if item.get('assistant_note'):
-        parts.insert(-1, '<aside class="text assistant-note"><strong>Teaching assistant note</strong><br>'
-                     + _text(item['assistant_note']) + '</aside>')
-    if item.get('kind') == 'open':
-        parts.pop()     # no answers to list: room to write, or the model answer in the key
-        if key:
-            parts.append('<h3>Model answer</h3>')
-            parts.append(f'<div class="text model-answer">{_text(item["model_answer"])}</div>')
-            if item.get('grading_notes'):
-                parts.append('<h3>Grading notes</h3>')
-                parts.append(f'<div class="text grading-notes">{_text(item["grading_notes"])}</div>')
-        else:
-            parts.append('<div class="answer-space"></div>')
-        parts.append('</section>')
-        return '\n'.join(parts)
-    for option in item['options']:
-        text = f'<div class="text option">{_text(option["text"])}</div>'
-        if not key:
-            parts.append(f'<li class="pl"><div>{text}</div></li>')
-            continue
-        rationale = (f'<div class="text rationale">{_text(option["rationale"])}</div>'
-                     if option['rationale'] else '')
-        parts.append(f'<li class="{"ok" if option["correct"] else "no"}" title="option {_text(option["id"])}">'
-                     f'{marker(option["correct"])}<div>{text}{rationale}</div></li>')
-    parts.extend(['</ol>', '</section>'])
+    if item['assistant_note']:
+        parts.append(assistant_note(item['assistant_note']))
+    if item['kind'] == 'open':     # no answers to list: the model answer in the key, room to write in the exam
+        parts += model_answer(item['model_answer'], item['grading_notes']) if key else ['<div class="answer-space"></div>']
+    elif key:
+        parts += ['<ol>', *(key_option(o['text'], o['correct'], o['rationale'], f'option {o["id"]}')
+                            for o in item['options']), '</ol>']
+    else:
+        parts += ['<ol>', *(f'<li class="pl"><div><div class="text option">{text(o["text"])}</div></div></li>'
+                            for o in item['options']), '</ol>']
+    parts.append('</section>')
     return '\n'.join(parts)
 
 
-def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str, str]:
-    """Return (exam_html, key_html), to write as UTF-8; no I/O or live bank reads.
+def export_exam_documents(manifest: Manifest, language: str = "en") -> dict[str, str]:
+    """Return {"exam": the entry copy, "key": the key and scoring sheet}, as HTML to write as UTF-8; no I/O or live
+    bank reads.
 
-    Expects a G5 schema-1 or schema-2 snapshot; unknown item keys are ignored. Unknown difficulty classes, missing frozen
-    scoring rows and unavailable/unsupported media fail rather than being omitted.
+    Unknown difficulty classes, missing frozen scoring rows and unavailable/unsupported media fail rather than being
+    omitted.
     Neither the blueprint nor private provenance is copied into the documents.
     """
     data = manifest.data()
     scoring = data['scoring']
-    # Exams issued before answer rules could change have no `answers`: five per question.
-    total = scoring['rules'].get('answers', {}).get('max_options', 5)
+    total = scoring['rules']['answers']['max_options']
     exam, key, sheet = [], [], []
-    points, minutes = 0, Decimal(0)
     for number, item in enumerate(data['items'], 1):
         difficulty = item['difficulty']
         if difficulty not in ('easy', 'hard'):
@@ -188,9 +182,9 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
         images = [_image(media, data['media_base64']) for media in item['media']]
         exam.append(_question(item, number, rule, images, key=False))
         key.append(_question(item, number, rule, images, key=True))
-        name = f'<td>{number} — {_text(item["id"])} r{item["revision"]}</td>'
-        if item.get('kind') == 'open':
-            if not item.get('model_answer', '').strip():
+        name = f'<td>{number} — {text(item["id"])} r{item["revision"]}</td>'
+        if item['kind'] == 'open':
+            if not item['model_answer'].strip():
                 raise ValueError(f'{item["id"]}: an open-answer question needs a model answer')
             sheet.append(f'<tr>{name}<td>Open answer: graded by hand</td><td>{rule["points"]}</td>'
                          '<td>—</td><td>—</td></tr>')
@@ -206,22 +200,24 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                 raise ValueError(f'{item["id"]}: missing frozen scoring row')
             answers = ', '.join(f'{chr(65 + i)} ({option["id"]})'
                                 for i, option in enumerate(options) if option['correct'])
-            sheet.append(f'<tr>{name}<td>{_text(answers)}</td><td>{rule["points"]}</td>'
+            sheet.append(f'<tr>{name}<td>{text(answers)}</td><td>{rule["points"]}</td>'
                          f'<td>{row["correct_tick"]:+d}</td><td>{row["wrong_tick"]:+d}</td></tr>')
-        points += rule['points']
-        minutes += Decimal(str(rule['minutes']))
-    summary = f'<p class="lead">{len(exam)} questions; {points} points; {minutes} planned minutes.</p>'
+    rules = scoring['rules']
+    points, minutes = exam_totals((item['difficulty'] for item in data['items']),
+                                  {d: rules[d]['points'] for d in ('easy', 'hard')},
+                                  {d: rules[d]['minutes'] for d in ('easy', 'hard')})
+    summary = f'<p class="lead">{len(exam)} questions; {points} points; {minutes:g} planned minutes.</p>'
     exam.insert(0, summary)
     exam.insert(1, '<p>Entry copy: item and option order follows the manifest. '
                 'The exam software handles shuffling.</p>')
     tables = []
     for p, rows in scoring['tables'].items():
         for row in rows:
-            tables.append(f'<tr><td>{_text(p)}</td><td>{row["correct_options"]}</td>'
+            tables.append(f'<tr><td>{text(p)}</td><td>{row["correct_options"]}</td>'
                           f'<td>{row["correct_tick"]:+d}</td><td>{row["wrong_tick"]:+d}</td></tr>')
     head = [summary, '<h2>Scoring sheet</h2>',
             ('<p>Add the frozen per-option values for ticked choices; unticked choices contribute 0. '
-             f'Floor per question: {_text(str(scoring["floor"]))} points. '
+             f'Floor per question: {text(str(scoring["floor"]))} points. '
              'This is a reference sheet; Exam Forge does not score students.</p>'),
             ('<table><thead><tr><th>Question / revision</th><th>Correct choices / option IDs</th>'
              '<th>Maximum points</th><th>Correct tick</th><th>Wrong tick</th></tr></thead><tbody>'),
@@ -235,4 +231,4 @@ def export_elp_documents(manifest: Manifest, language: str = "en") -> tuple[str,
                  '</tr></thead><tbody>'), *tables, '</tbody></table>']
     key[:0] = head
     # `language` is the deck's: the questions are written in it, so a screen reader reads the page in it.
-    return _page('Exam — entry copy', exam, language), _page('Exam key and scoring sheet', key, language)
+    return {'exam': page('Exam — entry copy', exam, language), 'key': page('Exam key and scoring sheet', key, language)}

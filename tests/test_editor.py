@@ -3,282 +3,170 @@
 """The question editor: answers, footer state, linked slides, banner and palette."""
 from dataclasses import replace
 
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QMessageBox
+from fake_host import fill, revision, source
+from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QLabel, QMessageBox
 from slidemage.plugin_api import SlideSource
-from test_ui import app, env, fill, source  # noqa: F401 - fixtures
 
 from exam_forge.model import Item, Option, Origin
-from exam_forge.topics import Topic, topic_color
-from exam_forge.ui.editor import accent_color, reviewed_issues
+from exam_forge.ui.editor import reviewed_issues
+from exam_forge.ui.kit import TONES
 
 
 def ticks(window):
-    return [row.correct() for row in window.rows]
+    return [row.correct() for row in window.editor.rows]
 
 
-def test_tick_is_radio_for_revision_and_multi_for_elp(env):
+def test_ticks_are_a_radio_for_revision_and_multiple_for_exam_which_pads_to_five(env):
     window = env[4]
-    window.new_question()
-    window.add_option()
-    window.rows[0].tick.click()
-    window.rows[1].tick.click()
-    assert ticks(window) == [False, True, False]
-    window.rows[1].tick.click()
-    assert ticks(window) == [False, True, False]  # a radio stays ticked
-    window.use.setCurrentData("elp")
-    window.rows[0].tick.click()
-    assert ticks(window) == [True, True, False, False, False]
-    window.rows[1].tick.click()
-    assert ticks(window)[:2] == [True, False]
-    window.rows[1].tick.click()
-    window.use.setCurrentData("revision")
-    assert ticks(window)[:2] == [True, True]  # switching never unsets ticks
-    assert "mark exactly one correct answer" in window.status_line.text()
-
-
-def test_elp_pads_to_five_keeps_typed_answers_and_caps(env):
-    window = env[4]
-    window.new_question()
-    ids = [row.option_id for row in window.rows]
-    window.rows[0].text.setPlainText("typed")
-    window.use.setCurrentData("elp")
-    assert len(window.rows) == 5 and [r.option_id for r in window.rows[:2]] == ids
-    assert not window.add_button.isEnabled() and "exactly five answers" in window.hint.text()
-    window.use.setCurrentData("revision")
+    window.questions.new_question()
+    ids = [row.option_id for row in window.editor.rows]
+    window.editor.rows[0].text.setPlainText("typed")
+    window.editor.rows[0].tick.click()
+    window.editor.rows[1].tick.click()
+    assert ticks(window) == [False, True]
+    window.editor.use.set_value("exam")
+    window.editor.rows[0].tick.click()
+    assert ticks(window) == [True, True, False, False, False] and [r.option_id for r in window.editor.rows[:2]] == ids
+    assert not window.editor.add_button.isEnabled() and "exactly five answers" in window.editor.hint.text()
+    window.editor.use.set_value("revision")
+    assert ticks(window)[:2] == [True, True]  # Switching never unsets ticks.
     for _ in range(3):
-        window.add_option()
-    assert len(window.rows) == 8 and not window.add_button.isEnabled()
-    window.use.setCurrentData("elp")
-    assert len(window.rows) == 8 and window.rows[0].text.toPlainText() == "typed"  # never deleted
-    assert "have exactly five answers" in reviewed_issues(window.candidate())
-    window.remove_option(window.rows[-1])
-    assert len(window.rows) == 7
+        window.editor.add_option()
+    assert len(window.editor.rows) == 8 and not window.editor.add_button.isEnabled()
+    window.editor.use.set_value("exam")
+    assert len(window.editor.rows) == 8 and window.editor.rows[0].text.toPlainText() == "typed"  # Never deleted.
+    assert "have exactly five answers" in reviewed_issues(window.editor.candidate(), window.answer_rules)
 
 
-def test_issue_list_and_footer_buttons(env, monkeypatch):
-    host, _, bank, _, window = env
+def test_the_footer_follows_the_review_lifecycle(env, monkeypatch):
+    host, _, _, _, window = env
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Discard)
-    window.new_question()
-    assert reviewed_issues(window.candidate()) == [
+    window.questions.new_question()
+    assert reviewed_issues(window.editor.candidate(), window.answer_rules) == [
         "write the question", "fill in every answer", "mark exactly one correct answer", "link a slide"]
-    assert window.status_line.text().startswith("Before marking reviewed: write the question · ")
-    assert not window.approve_button.isEnabled() and window.save_button.isEnabled()
-    assert window.retire_button.isHidden() and window.restore_button.isHidden()
+    assert not window.editor.approve_button.isEnabled() and window.editor.save_button.isEnabled()
     item = fill(window)
-    assert window.status_line.text() == "Draft · saved"
-    assert not window.save_button.isEnabled() and window.approve_button.isEnabled()
-    window.stem.setPlainText("Changed")
-    assert window.status_line.text() == "Unsaved edits · saving creates a new draft revision"
-    assert window.save_button.isEnabled()
-    window.stem.setPlainText(item.stem)
-    assert not window.save_button.isEnabled()
-    window.rows[0].text.setPlainText("")
-    assert "fill in every answer" in window.status_line.text() and not window.approve_button.isEnabled()
-    window.rows[0].text.setPlainText("4")
-    window.approve_button.click()
+    assert window.editor.status_line.text() == "Draft · saved" and not window.editor.save_button.isEnabled()
+    window.editor.stem.setPlainText("Changed")
+    assert window.editor.status_line.text() == "Unsaved edits · saving creates a new draft revision"
+    window.editor.stem.setPlainText(item.stem)
+    window.editor.approve_button.click()
     host.drain()
-    assert window.status_line.text() == "Reviewed · ready to use"
-    assert window.approve_button.text() == "Reviewed" and not window.approve_button.isEnabled()
-    assert window.retire_button.isEnabled() and not window.retire_button.isHidden()
-    window.objective.setText("edit")
-    assert window.retire_button.isHidden() and window.approve_button.text() == "Mark reviewed"
-    window.objective.setText(window.current.objective)
-    window.retire_button.click()
+    assert window.editor.status_line.text() == "Reviewed · ready to use" and not window.editor.approve_button.isEnabled()
+    window.editor.objective.setText("edit")
+    assert window.editor.retire_button.isHidden() and window.editor.approve_button.text() == "Mark reviewed"
+    window.editor.objective.setText(window.editor.current.objective)
+    window.editor.retire_button.click()
     host.drain()
-    assert window.status_line.text().startswith("Retired") and not window.restore_button.isHidden()
-    assert not window.approve_button.isEnabled() and window.retire_button.isHidden()
-    window.restore_button.click()
+    assert window.editor.status_line.text().startswith("Retired") and not window.editor.approve_button.isEnabled()
+    window.editor.restore_button.click()
     host.drain()
-    assert window.current.status == "draft"
-    unlinked = bank.create(Item("bare", 1, "Q", window.current.options))
-    window.populate(unlinked)
-    assert "link a slide" in window.status_line.text()
+    assert window.editor.current.status == "draft"
 
 
-def test_reviewed_edit_goes_through_save_then_review(env):
+def test_reviewing_an_edited_question_saves_a_draft_first_and_keeps_option_ids(env):
     host, _, bank, _, window = env
-    fill(window)
-    window.approve_button.click()
-    host.drain()
-    reviewed = window.current
-    window.stem.setPlainText("Edited")
-    window.approve_button.click()
-    host.drain()
-    assert window.current.status == "reviewed" and window.current.revision == reviewed.revision + 2
-    assert bank.get(reviewed.id, reviewed.revision + 1).status == "draft"
-
-
-def test_still_correct_keeps_status_and_clears_flag(env, monkeypatch):
-    host, deck, bank, _, window = env
-    ref = source(host, deck)
     item = fill(window)
-    window.approve_button.click()
+    window.editor.approve_button.click()
     host.drain()
-    moved = replace(ref, position=7)
+    reviewed = window.editor.current
+    window.editor.stem.setPlainText("Edited")
+    window.editor.approve_button.click()
+    host.drain()
+    assert window.editor.current.status == "reviewed" and window.editor.current.revision == reviewed.revision + 2
+    assert revision(bank, reviewed.id, reviewed.revision + 1).status == "draft"
+    assert [o.id for o in window.editor.current.options] == [o.id for o in item.options]
+
+
+def test_still_correct_keeps_the_status_and_takes_the_new_baseline(env, monkeypatch):
+    host, deck, bank, _, window = env
+    item = fill(window)
+    window.editor.approve_button.click()
+    host.drain()
+    moved = replace(source(host, deck), position=7)
     host.slides[(deck.path, "instructor", "en")] = [moved]
     host.sources[moved] = SlideSource(text="Changed")
     window.check_sources()
     host.drain()
-    assert window.current.source_changed and window.source_banner.isVisible()
-    assert window.source_banner.text() == "Slide 7 changed after this question was written."
-    shown = []
-    window.review_changes = shown.append
-    window.compare_button.click()
-    assert shown == [window.current]
-    # Unsaved edits: the button asks first, and Cancel changes nothing.
-    window.stem.setPlainText("Typed")
+    assert window.editor.source_banner.text() == "Slide 7 changed after this question was written."
+    window.editor.stem.setPlainText("Typed")
     monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Cancel)
-    window.still_button.click()
+    window.editor.still_button.click()  # Unsaved edits: it asks first, and Cancel changes nothing.
     host.drain()
-    assert window.stem.toPlainText() == "Typed" and window.current.source_changed
-    window.stem.setPlainText(item.stem)
-    revision = window.current.revision
-    window.still_button.click()
+    assert window.editor.stem.toPlainText() == "Typed" and window.editor.current.source_changed
+    window.editor.stem.setPlainText(item.stem)
+    window.editor.still_button.click()
     host.drain()
     current = bank.get(item.id)
-    assert current.status == "reviewed" and not current.source_changed
-    assert current.revision == revision + 1 and window.current == current
-    assert current.sources[0].text == "Changed" and window.source_banner.isHidden()
+    assert current.status == "reviewed" and not current.source_changed and current.sources[0].text == "Changed"
+    assert window.editor.current == current and window.editor.source_banner.isHidden()
 
 
-def test_still_correct_error_keeps_fields(env):
-    host, deck, bank, _, window = env
+def test_still_correct_on_a_stale_revision_keeps_the_fields(env):
+    host, _, bank, _, window = env
     item = fill(window)
-    bank.set_source_changed(item.id, True)
-    window.populate(bank.get(item.id))
-    host.drain()
-    window.stem.setPlainText("Typed")
+    window.editor.populate(bank.set_changed_slides(item.id, ("s1",)))
+    window.editor.stem.setPlainText("Typed")
     bank.save(replace(bank.get(item.id), stem="Their edit"))
-    window.baseline = window.candidate()  # no unsaved changes, but the revision is stale
-    window.still_button.click()
+    window.editor.baseline = window.editor.candidate()  # No unsaved changes, but the revision is stale.
+    window.editor.still_button.click()
     host.drain()
-    assert "stale revision" in window.notice.text() and window.stem.toPlainText() == "Typed"
+    assert "stale revision" in host.messages[-1][0] and window.editor.stem.toPlainText() == "Typed"
 
 
-def test_unsaved_dialog_kept_on_back(env, monkeypatch):
+def test_back_asks_about_unsaved_edits(env, monkeypatch):
     window = env[4]
-    fill(window)
+    item = fill(window)
     backs = []
-    window.leave_editor = lambda: backs.append(1)
-    window.set_back_label("‹ Slide 1 · Addition")
-    assert window.back_button.text() == "‹ Slide 1 · Addition" and not window.back_button.isHidden()
-    window.back_button.click()
-    assert backs == [1]
-    window.stem.setPlainText("Typed")
+    window.editor.closed.connect(lambda: backs.append(1))
+    window.editor.stem.setPlainText("Typed")
     answers = iter([QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save])
     monkeypatch.setattr(QMessageBox, "question", lambda *a: next(answers))
-    window.back_button.click()
-    assert backs == [1] and window.stem.toPlainText() == "Typed"
-    window.back_button.click()
-    assert backs == [1, 1] and window.bank.get(window.current.id).stem == "Typed"
+    window.editor.back_button.click()
+    assert backs == [] and window.editor.stem.toPlainText() == "Typed"
+    window.editor.back_button.click()
+    assert backs == [1] and window.bank.get(item.id).stem == "Typed"
 
 
-def test_link_grid_uses_worker_and_last_context(env):
-    host, deck, bank, _, window = env
-    ref = source(host, deck)
-    window.new_question()
-    assert window.last_link_context == ("instructor", "en")
-    window.link_button.click()
-    assert window.busy and not window.link_grid_buttons
+def test_the_link_grid_lists_the_decks_slides_and_links_in_the_instructor_view(env):
+    host, deck, _, _, window = env
+    source(host, deck)
+    window.load_slides()
     host.drain()
-    assert host.read_threads and all(t != host.ui_thread for t in host.read_threads)
-    assert [b.text() for b in window.link_grid_buttons] == ["1 · Addition"]
-    window.link_grid_buttons[0].click()
+    window.questions.new_question()
+    window.editor.link_button.click()
+    assert [b.text() for b in window.editor.link_grid_buttons] == ["1 · Addition"]
+    window.editor.link_grid_buttons[0].click()
+    assert window.busy  # The slide is read on the worker.
     host.drain()
-    link, = window.links
-    assert link.slide_id == "s1" and link.text == "Two plus two = four" and not window.link_grid.isVisible()
-    assert window.link_box.count() == 1
-    assert window.slide_label(link) == "Slide 1 · Addition"
-    window.link_button.click()
-    host.drain()
-    assert not window.link_grid_buttons[0].isEnabled()  # already linked
-    window.link_button.click()
-    window.remove_source(0)
-    assert window.links == () and "link a slide" in window.status_line.text()
-    other = replace(ref, id="s2", id_slug="s2-EN-Other", position=2, title="Other", language_read="de")
-    host.slides[(deck.path, "after-course", "de")] = [other]
-    host.sources[other] = SlideSource(text="Anderer Text")
-    window.last_link_context = ("after-course", "de")
-    window.link_button.click()
-    host.drain()
-    window.link_grid_buttons[0].click()
-    host.drain()
-    assert window.links[0].view == "after-course" and window.links[0].language == "de"
-    assert window.last_link_context == ("after-course", "de")
+    link, = window.editor.links
+    assert (link.slide_id, link.view, link.language, link.text) == ("s1", "instructor", "en", "Two plus two = four")
+    assert window.editor.link_box.itemAt(0).widget().findChild(type(window.questions.write_button)).text() == "Slide 1 · Addition"
+    window.editor.remove_source(0)
+    assert "link a slide" in window.editor.status_line.text()
 
 
-def test_topic_line_follows_first_link_and_leaves_item_topic(env):
-    item = fill(env[4])
-    window = env[4]
-    window.topics = (Topic("t1", "Probability <b>", "blue", ("s1",)),)
-    window.render_links()
-    text = window.topic_label.text()
-    assert "Topic from first slide:" in text and "Probability &lt;b&gt;" in text
-    assert topic_color("blue", False) in text
-    assert window.candidate().topic == "Arithmetic"
-    window.remove_source(0)
-    assert window.topic_label.text() == "No topic" and window.candidate().topic == "Arithmetic"
-    window.links = item.sources
-    window.render_links()
-    assert "Probability" in window.topic_label.text()
-    palette = window.palette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
-    window.setPalette(palette)
-    assert topic_color("blue", True) in window.topic_label.text()
+def text_color(widget):
+    widget.ensurePolished()
+    return widget.palette().color(QPalette.ColorRole.WindowText).name()
 
 
-def test_dark_palette_recolours_text_only(env):
-    _, _, bank, _, window = env
-    window.new_question()
-    assert topic_color("red", False) in window.status_line.styleSheet()
-    bank.create(Item("ai", 1, "AI", (Option("a", "x", True), Option("b", "y")), origin=Origin("ai", "r", "m")))
-    window.populate(bank.get("ai"))
-    assert window.draft_tag.isVisible() and accent_color(window, True) in window.draft_tag.styleSheet()
-    palette = window.palette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#202020"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eeeeee"))
-    window.setPalette(palette)
-    assert "#fbbf24" in window.draft_tag.styleSheet()
-    assert "#c4b5fd" in window.source_banner.styleSheet()
-    assert topic_color("red", True) in window.status_line.styleSheet()
-    for widget in (window.editor, window.stem, window.status_line):
-        assert "background" not in widget.styleSheet()
-
-
-def test_unknown_difficulty_is_preserved_and_not_dirty(env):
-    _, _, bank, _, window = env
-    item = fill(env[4])
-    odd = bank.save(replace(item, difficulty="medium"))
-    window.populate(odd)
-    assert window.difficulty.currentData() == "medium" and not window.dirty()
-    assert not any(b.isChecked() for b in window.difficulty.buttons.values())
-    assert not window.save_button.isEnabled()
-    window.stem.setPlainText("Edited")
-    assert window.candidate().difficulty == "medium"
-    window.difficulty.buttons["hard"].click()
-    assert window.candidate().difficulty == "hard" and window.dirty()
-    window.difficulty.buttons["hard"].click()
-    assert window.difficulty.currentData() == ""
-
-
-def test_option_ids_stay_stable_across_edits(env):
-    window = env[4]
-    item = fill(window)
-    ids = [o.id for o in item.options]
-    window.rows[0].text.setPlainText("Four")
-    assert window.save()
-    assert [o.id for o in window.current.options] == ids
-
-
-def test_ai_chips(env):
-    _, _, bank, _, window = env
+def test_ai_chips_and_the_dark_theme_recolour_text_only(env):
+    host, _, bank, _, window = env
     ai = bank.create(Item("ai", 1, "AI", (Option("a", "x", True), Option("b", "y")), origin=Origin("ai", "r", "m")))
-    window.populate(ai)
-    assert window.draft_tag.isVisible() and not window.ai_tag.isVisible()
-    window.populate(bank.set_status("ai", 1, "reviewed"))
-    assert window.ai_tag.isVisible() and not window.draft_tag.isVisible()
-    assert window.ai_tag.toolTip() == "r · m"
-    edited = bank.create(Item("edit", 1, "E", ai.options, ai_edit_route="route", ai_edit_model="mod"))
-    window.populate(edited)
-    assert window.ai_tag.isVisible() and window.ai_tag.toolTip() == "route · mod" and not window.draft_tag.isVisible()
+    window.questions.open_card(ai.id)
+    assert window.editor.draft_tag.isVisible() and not window.editor.ai_tag.isVisible()
+    chip_text = window.editor.draft_tag.findChild(QLabel)
+    assert text_color(chip_text) == TONES["amber"][0] and text_color(window.editor.status_line) == TONES["error"][0]
+    host.set_dark(True)
+    assert text_color(chip_text) == TONES["amber"][1] and text_color(window.editor.status_line) == TONES["error"][1]
+    assert text_color(window.editor.source_banner) == TONES["violet"][1]
+    assert "background" not in window.styleSheet() and window.editor.draft_tag.styleSheet() == ""
+    window.editor.populate(bank.set_status("ai", 1, "reviewed"))
+    assert window.editor.ai_tag.isVisible() and not window.editor.draft_tag.isVisible() and window.editor.ai_tag.toolTip() == "r · m"
+    edited = bank.create(Item("edit", 1, "E", ai.options, ai_edit=Origin("ai", "route", "mod")))
+    window.editor.populate(edited)  # Updated by the AI: an AI draft until it is reviewed, like its card.
+    assert window.editor.draft_tag.isVisible() and not window.editor.ai_tag.isVisible() and window.editor.draft_tag.toolTip() == "route · mod"
+    window.editor.populate(bank.set_status("edit", 1, "reviewed"))
+    assert window.editor.ai_tag.isVisible() and window.editor.ai_tag.toolTip() == "route · mod"

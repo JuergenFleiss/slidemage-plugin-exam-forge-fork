@@ -8,7 +8,7 @@ A [SlideMage](https://slidemage.org) plugin for writing exam questions for a dec
 
 <table width="100%">
 <tr>
-<td width="55%" valign="top"><img src="docs/screenshots/questions.png" alt="Questions tab" width="100%"></td>
+<td width="55%" valign="top"><img src="website/screenshots/questions.png" alt="Questions tab" width="100%"></td>
 <td width="45%" valign="top">
 
 **The bank holds answer keys and rationales: keep its folder private.** Choose the folder on first use; **Change folder…** in Settings moves it.
@@ -34,7 +34,7 @@ A [SlideMage](https://slidemage.org) plugin for writing exam questions for a dec
 
 <table width="100%">
 <tr>
-<td width="40%" valign="top"><img src="docs/screenshots/export-html.png" alt="Question page export" width="100%"></td>
+<td width="40%" valign="top"><img src="website/screenshots/export-html.png" alt="Question page export" width="100%"></td>
 <td width="60%" valign="top">
 
 The **Export** menu holds the answers: keep the files private.
@@ -51,7 +51,7 @@ The **Export** menu holds the answers: keep the files private.
 
 <table width="100%">
 <tr>
-<td width="55%" valign="top"><img src="docs/screenshots/exam.png" alt="Exam tab" width="100%"></td>
+<td width="55%" valign="top"><img src="website/screenshots/exam.png" alt="Exam tab" width="100%"></td>
 <td width="45%" valign="top">
 
 The **Exam** tab: set easy and hard counts per topic, review and swap the proposal, then **Approve and freeze**. This issues a manifest in the bank folder and saves an exam copy and a private key (HTML). **Record a correction…** logs later changes.

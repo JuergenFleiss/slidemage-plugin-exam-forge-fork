@@ -5,8 +5,8 @@
       <text>sample-math-image r1</text>
     </name>
     <questiontext format="html">
-      <file name="sample.png" path="/" encoding="base64">iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAgklEQVR4nO3QQQ3AIAAEQbz0jSGEVUmt8ccBP+gFJlkBmylPezWp/H4QHiBAgAABCg4QIECAAAUHCFAsUP/qtgABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBA9wCdESBAgAABCg4QIECAAAUHCBCgpQ2gH6TkFkvOjgAAAABJRU5ErkJggg==</file>
-      <text>In the image, what is \( 2^3 \)?&lt;br /&gt;&lt;img src="@@PLUGINFILE@@/sample.png" alt="A gold square on a blue background" /&gt;</text>
+      <file name="1d00af64229d0948f9ba94cc6b84113937d4ef482cdd7613584c771d5a795e61.png" path="/" encoding="base64">iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAgklEQVR4nO3QQQ3AIAAEQbz0jSGEVUmt8ccBP+gFJlkBmylPezWp/H4QHiBAgAABCg4QIECAAAUHCFAsUP/qtgABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBA9wCdESBAgAABCg4QIECAAAUHCBCgpQ2gH6TkFkvOjgAAAABJRU5ErkJggg==</file>
+      <text>In the image, what is \( 2^3 \)?&lt;br /&gt;&lt;img src="@@PLUGINFILE@@/1d00af64229d0948f9ba94cc6b84113937d4ef482cdd7613584c771d5a795e61.png" alt="A gold square on a blue background" /&gt;</text>
     </questiontext>
     <defaultgrade>1.0000000</defaultgrade>
     <single>true</single>

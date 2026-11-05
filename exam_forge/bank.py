@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Revision-preserving JSON bank."""
+"""The bank folder's files: a revision-preserving JSON bank, its images, topics and answer rules. Issued exams keep
+their manifests and correction journals beside them."""
 from __future__ import annotations
 
 import hashlib
@@ -8,18 +9,16 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from dataclasses import asdict, fields, replace
 from pathlib import Path
-from uuid import uuid4
 from typing import Literal, get_type_hints
+from uuid import uuid4
 
-from .model import Item, Media, Option, Origin, SourceLink
+from .model import KINDS, NEXT_STATUS, Item, Media, Option, Origin, SourceLink, Topic, validate_topics
+from .rules import AnswerRule, AnswerRules
 
-SCHEMA_VERSION = 3
-_READABLE = (1, 2, 3)
-# A question file is version 3 only when it holds an open-answer question; other files and the index stay version 2,
-# so an older Exam Forge keeps reading a bank that does not use open answers.
-_OPEN_FIELDS = {"kind": "choice", "model_answer": "", "grading_notes": ""}
+FORMAT_VERSION = 1
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 
@@ -39,15 +38,13 @@ class CorruptFileError(BankError):
     pass
 
 
-def _atomic_write(path: Path, data: dict) -> None:
-    """Replace only after the entire JSON document has been flushed to disk."""
+def atomic_write_bytes(path: Path, data: bytes, prefix: str) -> None:
+    """Replace only after the entire file has been flushed to disk."""
     name = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         prefix="." + path.name + ".", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=prefix, delete=False) as stream:
             name = stream.name
-            json.dump(data, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+            stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(name, path)
@@ -56,18 +53,25 @@ def _atomic_write(path: Path, data: dict) -> None:
             os.unlink(name)
 
 
-def _read(path: Path) -> dict:
+def _write_json(path: Path, data: dict) -> None:
+    """Replace only after the entire JSON document has been flushed to disk."""
+    encoded = (json.dumps({"schema_version": FORMAT_VERSION, **data}, ensure_ascii=False, indent=2) + "\n")
+    atomic_write_bytes(path, encoded.encode("utf-8"), "." + path.name + ".")
+
+
+def _read_json(path: Path, read: Callable[[dict], object]):
+    """read(data) of a file in this format; a newer format is a SchemaError, any other failure a CorruptFileError."""
     try:
         with path.open(encoding="utf-8") as stream:
             data = json.load(stream)
         if not isinstance(data, dict) or type(data.get("schema_version")) is not int:
             raise ValueError("missing schema version")
-        if data["schema_version"] > SCHEMA_VERSION:
+        if data["schema_version"] > FORMAT_VERSION:
             raise SchemaError(f"{path}: newer schema {data['schema_version']}")
-        if data["schema_version"] not in _READABLE:
+        if data["schema_version"] != FORMAT_VERSION:
             raise ValueError("unsupported schema version")
-        return data
-    except (OSError, ValueError, TypeError) as exc:
+        return read(data)
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as exc:
         raise CorruptFileError(f"{path}: {exc}") from exc
 
 
@@ -84,25 +88,23 @@ def _typed(cls, data):
     return cls(**data)
 
 
-def _item(data: dict) -> Item:
+def _item(data: dict, changed: tuple[str, ...]) -> Item:
     data = dict(data)
     for name in ("options", "sources", "media"):
-        if name in data and type(data[name]) is not list:
+        if type(data[name]) is not list:
             raise ValueError(f"invalid {name} type")
     data["options"] = tuple(_typed(Option, option) for option in data["options"])
     data["sources"] = tuple(_typed(SourceLink, source) for source in data["sources"])
+    data["media"] = tuple(_typed(Media, entry) for entry in data["media"])
     data["origin"] = _typed(Origin, data["origin"])
-    data["media"] = tuple(_typed(Media, entry) for entry in data.get("media", ()))
-    return _typed(Item, data)
+    data["ai_edit"] = _typed(Origin, data["ai_edit"])
+    return _typed(Item, {**data, "changed_slides": changed})
 
 
 def _revision_data(item: Item) -> dict:
-    """Serialize revision content without the item-level source check flag."""
+    """Serialize revision content without the item-level source check."""
     data = asdict(item)
-    del data["source_changed"]
-    for name, default in _OPEN_FIELDS.items():
-        if data[name] == default:
-            del data[name]
+    del data["changed_slides"]
     return data
 
 
@@ -116,8 +118,7 @@ class Bank:
         if create and not self._index_path.exists():
             if any(p.name != "bank.json" for p in self.folder.glob("*.json")):
                 raise BankError("bank.json is missing but question files exist in this folder")
-            _atomic_write(self._index_path, {"schema_version": 2,
-                                            "id": str(uuid4()), "items": []})
+            _write_json(self._index_path, {"id": str(uuid4()), "items": []})
         self._index()
 
     @property
@@ -125,14 +126,13 @@ class Bank:
         return self.folder / "bank.json"
 
     def _index(self) -> dict:
-        data = _read(self._index_path)
-        if not isinstance(data.get("id"), str) or not data["id"]:
-            raise CorruptFileError(f"{self._index_path}: invalid bank index")
-        items = data.get("items")
-        if not isinstance(items, list) or any(not isinstance(k, str) or not _ID.fullmatch(k) for k in items):
-            raise CorruptFileError(f"{self._index_path}: invalid bank index")
-        data["items"] = items
-        return data
+        def read(data):
+            items = data["items"]
+            if (not isinstance(data["id"], str) or not data["id"] or not isinstance(items, list)
+                    or any(not isinstance(k, str) or not _ID.fullmatch(k) for k in items)):
+                raise ValueError("invalid bank index")
+            return {"id": data["id"], "items": items}
+        return _read_json(self._index_path, read)
 
     @property
     def id(self) -> str:
@@ -143,42 +143,44 @@ class Bank:
             raise ValueError("invalid item ID")
         return self.folder / f"{item_id}.json"
 
-    def _document(self, item_id: str) -> tuple[dict, list[Item]]:
-        path = self._path(item_id)
-        data = _read(path)
-        try:
-            rows = data["revisions"]
-            changed = data["source_changed"]
-            if type(changed) is not bool:
-                raise ValueError("invalid source_changed flag")
-            revisions = [_item({**row, "source_changed": changed}) for row in rows]
-            if (not revisions or any(item.id != item_id or item.revision != i
-                                     for i, item in enumerate(revisions, 1))
+    def _revisions(self, item_id: str) -> list[Item]:
+        """Every revision, oldest first, each with the item's changed slides."""
+        def read(data):
+            changed = data["changed_slides"]
+            if type(changed) is not list:
+                raise ValueError("invalid changed slides")
+            revisions = [_item(row, tuple(changed)) for row in data["revisions"]]
+            if (not revisions or any(item.id != item_id or item.revision != i for i, item in enumerate(revisions, 1))
                     or any(item.origin != revisions[0].origin for item in revisions)):
                 raise ValueError("invalid revision history")
-            return data, revisions
-        except (KeyError, IndexError, TypeError, ValueError, AttributeError) as exc:
-            raise CorruptFileError(f"{path}: {exc}") from exc
+            return revisions
+        return _read_json(self._path(item_id), read)
 
-    def _revisions(self, item_id: str) -> list[Item]:
-        return self._document(item_id)[1]
+    def _write_item(self, item_id: str, revisions: list[Item], changed: tuple[str, ...]) -> None:
+        _write_json(self._path(item_id), {"changed_slides": list(changed),
+                                          "revisions": [_revision_data(row) for row in revisions]})
 
-    def _write_item(self, item_id: str, data: dict, revisions: list[Item], changed: bool) -> None:
-        data["schema_version"] = 3 if any(row.kind == "open" for row in revisions) else 2
-        data["source_changed"] = changed
-        data["revisions"] = [_revision_data(row) for row in revisions]
-        _atomic_write(self._path(item_id), data)
+    def _known(self, item_id: str) -> None:
+        if item_id not in self._index()["items"]:
+            raise ConflictError(f"item is missing: {item_id}")
 
-    def get(self, item_id: str, revision: int | None = None) -> Item:
-        """Read a revision with the current source flag."""
+    def _revise(self, item_id: str, revision: int, change: Callable[[Item], Item]) -> Item:
+        """Append change(current) as the next revision of a current one; change raises to refuse."""
+        self._known(item_id)
+        revisions = self._revisions(item_id)
+        current = revisions[-1]
+        if type(revision) is not int or current.revision != revision:
+            raise ConflictError(f"stale revision for {item_id}")
+        updated = replace(change(current), revision=current.revision + 1)
+        revisions.append(updated)
+        self._write_item(item_id, revisions, updated.changed_slides)
+        return updated
+
+    def get(self, item_id: str) -> Item:
+        """Read the current revision with the current source check."""
         if item_id not in self._index()["items"]:
             raise KeyError(item_id)
-        revisions = self._revisions(item_id)
-        if revision is None:
-            return revisions[-1]
-        if type(revision) is not int or not 1 <= revision <= len(revisions):
-            raise KeyError((item_id, revision))
-        return revisions[revision - 1]
+        return self._revisions(item_id)[-1]
 
     def load(self) -> tuple[list[Item], list[CorruptFileError]]:
         """Return current items and per-file errors; refuse newer schemas."""
@@ -200,81 +202,53 @@ class Bank:
             raise ConflictError(f"item ID already used: {item.id}")
         # A failed item write leaves a reported missing file and reserves the ID.
         index["items"].append(item.id)
-        _atomic_write(self._index_path, index)
-        self._write_item(item.id, {"schema_version": SCHEMA_VERSION}, [item], item.source_changed)
+        _write_json(self._index_path, index)
+        self._write_item(item.id, [item], item.changed_slides)
         return item
 
     def save(self, item: Item) -> Item:
         """Save an edit based on item.revision, returning the new revision."""
         if item.status != "draft":
             raise ValueError("edits must have draft status")
-        index = self._index()
-        if item.id not in index["items"]:
-            raise ConflictError(f"item is missing: {item.id}")
-        data, revisions = self._document(item.id)
-        current = revisions[-1]
-        if item.revision != current.revision:
-            raise ConflictError(f"stale revision for {item.id}")
-        if item.origin != current.origin:
-            raise ValueError("origin is permanent")
-        if current.ai_edit_route and not item.ai_edit_route:
-            raise ValueError("an AI-assisted item stays AI-assisted")
-        item = replace(item, revision=current.revision + 1, status="draft",
-                       source_changed=current.source_changed)
-        revisions.append(item)
-        self._write_item(item.id, data, revisions, current.source_changed)
-        return item
+
+        def change(current):
+            if item.origin != current.origin:
+                raise ValueError("origin is permanent")
+            if current.ai_edit.kind == "ai" and item.ai_edit.kind != "ai":
+                raise ValueError("an AI-assisted item stays AI-assisted")
+            return replace(item, changed_slides=current.changed_slides)
+        return self._revise(item.id, item.revision, change)
 
     def set_status(self, item_id: str, revision: int, status: str) -> Item:
         """Move through the review lifecycle, preserving the previous revision."""
-        transitions = {"draft": "reviewed", "reviewed": "retired", "retired": "draft"}
-        index = self._index()
-        if item_id not in index["items"]:
-            raise ConflictError(f"item is missing: {item_id}")
-        data, revisions = self._document(item_id)
-        current = revisions[-1]
-        if type(revision) is not int or current.revision != revision:
-            raise ConflictError(f"stale revision for {item_id}")
-        if status != transitions[current.status]:
-            raise ValueError(f"invalid status transition: {current.status} to {status}")
-        updated = replace(current, revision=current.revision + 1, status=status)
-        revisions.append(updated)
-        self._write_item(item_id, data, revisions, current.source_changed)
-        return updated
+        def change(current):
+            if status != NEXT_STATUS[current.status]:
+                raise ValueError(f"invalid status transition: {current.status} to {status}")
+            return replace(current, status=status)
+        return self._revise(item_id, revision, change)
 
     def rebaseline(self, item_id: str, revision: int, sources: tuple[SourceLink, ...]) -> Item:
         """Accept new source baselines ("Still correct"); status is kept, only sources change."""
-        index = self._index()
-        if item_id not in index["items"]:
-            raise ConflictError(f"item is missing: {item_id}")
-        data, revisions = self._document(item_id)
-        current = revisions[-1]
-        if type(revision) is not int or current.revision != revision:
-            raise ConflictError(f"stale revision for {item_id}")
         sources = tuple(sources)
-        if [s.slide_id for s in sources] != [s.slide_id for s in current.sources]:
-            raise ValueError("a new baseline must keep the same slides in the same order")
-        updated = replace(current, revision=current.revision + 1, sources=sources, source_changed=False)
-        revisions.append(updated)
-        self._write_item(item_id, data, revisions, False)
-        return updated
 
-    def set_source_changed(self, item_id: str, changed: bool, *,
+        def change(current):
+            if [s.slide_id for s in sources] != [s.slide_id for s in current.sources]:
+                raise ValueError("a new baseline must keep the same slides in the same order")
+            return replace(current, sources=sources, changed_slides=())
+        return self._revise(item_id, revision, change)
+
+    def set_changed_slides(self, item_id: str, slides, *,
                            expected_sources: tuple[SourceLink, ...] | None = None) -> Item:
         """Record a source check; optionally reject results for links edited during a check."""
-        if type(changed) is not bool:
-            raise ValueError("source_changed must be a boolean")
-        index = self._index()
-        if item_id not in index["items"]:
-            raise ConflictError(f"item is missing: {item_id}")
-        data, revisions = self._document(item_id)
+        slides = tuple(slides)
+        self._known(item_id)
+        revisions = self._revisions(item_id)
         current = revisions[-1]
         if expected_sources is not None and current.sources != expected_sources:
             raise ConflictError(f"source links changed during check for {item_id}")
-        if current.source_changed == changed:
-            return current
-        updated = replace(current, source_changed=changed)
-        self._write_item(item_id, data, revisions, changed)
+        updated = replace(current, changed_slides=slides)  # Validates the slides.
+        if current.changed_slides != slides:
+            self._write_item(item_id, revisions, slides)
         return updated
 
     def files(self) -> list[Path]:
@@ -286,31 +260,21 @@ class Bank:
         paths += [p for p in (folder / "media").glob("*") if not p.name.startswith(".")]
         return [p for p in paths if p.is_file()] + [self._index_path]
 
-    def store_media(self, name: str, data: bytes, alt: str = "") -> Media:
+    def store_media(self, name: str, data: bytes) -> Media:
         """Atomically store content by hash; replacing an image never changes old revisions."""
         if not isinstance(data, bytes) or not data:
             raise ValueError("media data must be nonempty bytes")
         digest = hashlib.sha256(data).hexdigest()
         # Validate the supplied filename before using its suffix.
-        Media(name, digest, alt)
-        media = Media(digest + Path(name).suffix.lower(), digest, alt)
+        Media(name, digest)
+        media = Media(digest + Path(name).suffix.lower(), digest)
         folder = self.folder / "media"
         folder.mkdir(exist_ok=True)
         path = folder / media.name
         if path.exists():
             self.read_media(media)
             return media
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=folder, prefix=".media-", delete=False) as stream:
-                temporary = stream.name
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, path)
-        finally:
-            if temporary is not None and os.path.exists(temporary):
-                os.unlink(temporary)
+        atomic_write_bytes(path, data, ".media-")
         return media
 
     def read_media(self, media: Media) -> bytes:
@@ -324,3 +288,55 @@ class Bank:
             raise BankError(f"Media hash mismatch: {media.name}")
         return data
 
+
+class TopicStore:
+    """topics.json; a bank without one has no topics yet."""
+
+    def __init__(self, folder):
+        self.path = Path(folder) / "topics.json"
+
+    def load(self) -> tuple[Topic, ...]:
+        if not self.path.exists():
+            return ()
+
+        def read(data):
+            if type(data["topics"]) is not list:
+                raise ValueError("invalid topics")
+            topics = []
+            for row in data["topics"]:
+                if type(row) is not dict or type(row.get("slides")) is not list:
+                    raise ValueError("invalid topic")
+                topics.append(Topic(row["id"], row["name"], row["color"], tuple(row["slides"])))
+            validate_topics(topics)
+            return tuple(topics)
+        return _read_json(self.path, read)
+
+    def save(self, topics) -> None:
+        topics = tuple(topics)
+        validate_topics(topics)
+        _write_json(self.path, {"topics": [asdict(t) for t in topics]})
+
+
+class AnswerRulesStore:
+    """answer-rules.json; without the file, the defaults apply."""
+
+    def __init__(self, folder):
+        self.path = Path(folder) / "answer-rules.json"
+
+    def load(self) -> AnswerRules:
+        if not self.path.exists():
+            return AnswerRules()
+
+        def read(data):
+            kinds = data["exam_kinds"]
+            if type(kinds) is not list or not set(kinds) <= set(KINDS):
+                raise ValueError("invalid exam question types")
+            rules = AnswerRules(**{use: AnswerRule(**data[use]) for use in ("revision", "exam")},
+                                exam_kinds=tuple(kinds))
+            rules.exam_rules()
+            return rules
+        return _read_json(self.path, read)
+
+    def save(self, rules: AnswerRules) -> None:
+        rules.exam_rules()
+        _write_json(self.path, asdict(rules))

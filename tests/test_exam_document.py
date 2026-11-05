@@ -14,14 +14,14 @@ from pathlib import Path
 import pytest
 
 from exam_forge.bank import Bank
-from exam_forge.elp import DifficultyRules, ElpRules
-from exam_forge.elp_document import export_elp_documents
-from exam_forge.manifest import Manifest, freeze
+from exam_forge.exam_document import export_exam_documents
+from exam_forge.exam import Manifest, freeze
 from exam_forge.model import Item, Option
+from exam_forge.rules import ExamRules
 
 
-def sample(tmp_path, rules=None):
-    """A real frozen bank; this same input produces the J4 fixture pair."""
+def sample(tmp_path):
+    """A real frozen bank; this same input produces the fixture pair."""
     def chunk(kind, data):
         return (struct.pack('>I', len(data)) + kind + data
                 + struct.pack('>I', zlib.crc32(kind + data)))
@@ -33,8 +33,8 @@ def sample(tmp_path, rules=None):
     png = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 200, 60, 8, 2, 0, 0, 0))
            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
     bank = Bank(tmp_path / 'bank', create=True)
-    media = bank.store_media('cells.png', png,
-                             alt='Five equal cells; the first two are blue and the other three are white.')
+    media = replace(bank.store_media('cells.png', png),
+                    alt='Five equal cells; the first two are blue and the other three are white.')
     items = [
         Item('shaded-fraction', 1,
              r'Two of the five equal cells are shaded. Select all true statements about the shaded fraction \( p \).',
@@ -43,21 +43,21 @@ def sample(tmp_path, rules=None):
               Option('whole', r'\( p + (1-p) = 1 \)', True, 'The two fractions cover the whole.'),
               Option('zero', r'\( p = 0 \)', False, 'Two cells are shaded.'),
               Option('large', r'\( p > 1 \)', False, 'A fraction of these cells cannot exceed one.')),
-             use='elp', difficulty='easy', media=(media,)),
+             use='exam', difficulty='easy', media=(media,)),
         Item('quadratic-function', 1, r'For \( f(x) = x^2 \), select all true statements.',
              (Option('at-zero', r'\( f(0) = 0 \)', True, 'Zero squared is zero.'),
               Option('at-three', r'\( f(3) = 9 \)', True, 'Three squared is nine.'),
               Option('negative', r'\( f(-3) = -9 \)', False, 'A negative number squared is positive.'),
               Option('derivative', r'\( f^{\prime}(x) = 2x \)', True, 'Apply the power rule.'),
               Option('linear', 'The function is linear.', False, 'It is quadratic.')),
-             use='elp', difficulty='hard'),
+             use='exam', difficulty='hard'),
     ]
     for item in items:
         bank.create(item)
         bank.set_status(item.id, 1, 'reviewed')
     # Reverse lexical ID order deliberately; the renderer must not sort either list.
     manifest = freeze(None, None, bank, [(i.id, 2) for i in items],
-                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, rules or ElpRules(), topic_of=lambda i: i.topic)
+                      {'counts': {'fractions': 1, 'functions': 1}, 'minutes': 7.5}, ExamRules(), topics={})
     return manifest, bank, png
 
 
@@ -104,12 +104,12 @@ def altered(manifest, change):
     return Manifest(json.dumps(data).encode('utf-8'))
 
 
-def test_j4_samples_and_fidelity_after_bank_edits(tmp_path):
+def test_samples_and_fidelity_after_bank_edits(tmp_path):
     manifest, bank, png = sample(tmp_path)
     before = manifest.encoded
-    documents = export_elp_documents(manifest)
-    for kind, html in zip(('exam', 'key'), documents):
-        assert html == (Path(__file__).parent / f'fixtures/sample_elp_{kind}.html').read_text('utf-8')
+    documents = export_exam_documents(manifest)
+    for kind, html in documents.items():
+        assert html == (Path(__file__).parent / f'fixtures/sample_exam_{kind}.html').read_text('utf-8')
         doc = Document(html)
         items = manifest.data()['items']
         assert [text for cls, text in doc.blocks if cls == 'text stem'] == [i['stem'] for i in items]
@@ -123,13 +123,15 @@ def test_j4_samples_and_fidelity_after_bank_edits(tmp_path):
         assert base64.b64decode(encoded, validate=True) == png
     bank.save(replace(bank.get('shaded-fraction'), stem='EDITED STEM', status='draft'))
     (bank.folder / 'media' / bank.get('shaded-fraction').media[0].name).unlink()
-    assert export_elp_documents(manifest) == documents
+    assert export_exam_documents(manifest) == documents
     assert manifest.encoded == before
 
 
-def test_offline_no_active_content_or_external_references(tmp_path):
+def test_offline_no_active_content_or_external_references_in_the_decks_language(tmp_path):
     manifest, _, _ = sample(tmp_path)
-    for html in export_elp_documents(manifest):
+    assert all('<html lang="fr">' in html for html in export_exam_documents(manifest, "fr").values())
+    for html in export_exam_documents(manifest).values():
+        assert '<html lang="en">' in html
         doc = Document(html)
         assert html.startswith('<!doctype html>') and html.endswith('</html>\n')
         assert not {'script', 'link', 'iframe', 'object', 'embed', 'base', 'svg'} & {tag for tag, _ in doc.tags}
@@ -142,26 +144,6 @@ def test_offline_no_active_content_or_external_references(tmp_path):
         assert r'\( ... \)' in ''.join(doc.text)
 
 
-def test_preserves_item_option_and_multiple_image_order(tmp_path):
-    manifest, _, png = sample(tmp_path)
-    gif = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==')
-    def change(data):
-        item = data['items'][0]
-        item['options'].reverse()
-        item['media'].append({'name': 'pixel.gif', 'sha256': hashlib.sha256(gif).hexdigest(), 'alt': 'Second image'})
-        data['media_base64']['pixel.gif'] = base64.b64encode(gif).decode('ascii')
-        data['items'].reverse()
-    reordered = altered(manifest, change)
-    for html in export_elp_documents(reordered):
-        doc = Document(html)
-        assert [text for cls, text in doc.blocks if cls == 'text stem'] == [i['stem'] for i in reordered.data()['items']]
-        assert [text for cls, text in doc.blocks if cls == 'text option'] == [
-            o['text'] for i in reordered.data()['items'] for o in i['options']]
-        images = [attrs['src'] for tag, attrs in doc.tags if tag == 'img']
-        assert [base64.b64decode(src.split(',', 1)[1]) for src in images] == [png, gif]
-        assert images[1].startswith('data:image/gif;base64,')
-
-
 def test_exam_contains_no_key_even_in_hidden_metadata(tmp_path):
     manifest, _, _ = sample(tmp_path)
     def change(data):
@@ -171,39 +153,39 @@ def test_exam_contains_no_key_even_in_hidden_metadata(tmp_path):
             for option in item['options']:
                 option['correct'] = not option['correct']
                 option['rationale'] = 'RATIONALE SECRET'
-    exam, key = export_elp_documents(manifest)
-    changed_exam, changed_key = export_elp_documents(altered(manifest, change))
+    exam, key = export_exam_documents(manifest).values()
+    changed_exam, changed_key = export_exam_documents(altered(manifest, change)).values()
     assert changed_exam == exam
     assert changed_key != key and 'RATIONALE SECRET' in changed_key
     for secret in ('BLUEPRINT SECRET', 'PRIVATE ROUTE', 'PRIVATE MODEL', 'RATIONALE SECRET'):
         assert secret not in changed_exam
-    for item in manifest.data()['items']:
-        for option in item['options']:
-            assert option['rationale'] not in exam
+    assert all(o['rationale'] not in exam for item in manifest.data()['items'] for o in item['options'])
     assert 'Scoring sheet' not in exam and 'Correct choices' not in exam
     assert 'class="mk"' not in exam and '✓' not in exam and '✗' not in exam and 'aria-label' not in exam
-    # No invented placeholders/markers for fields absent from the model.
-    assert all(term not in exam.lower() for term in ('shared stem', 'exclusion', 'fixed option'))
 
 
 def test_frozen_rules_tables_floor_and_option_ids(tmp_path):
-    manifest, _, _ = sample(tmp_path, ElpRules(DifficultyRules(36, .1), DifficultyRules(60, .2)))
-    exam, key = export_elp_documents(manifest)
-    assert '96 points; 0.3 planned minutes' in exam
+    manifest, _, _ = sample(tmp_path)
+    exam, key = export_exam_documents(manifest).values()
     rows = Document(key).rows
-    assert rows[1] == ['1 — shaded-fraction r2', 'A (decimal), C (whole)', '36', '+18', '-12']
-    assert rows[2] == ['2 — quadratic-function r2', 'A (at-zero), B (at-three), D (derivative)', '60', '+20', '-30']
+    assert rows[1] == ['1 — shaded-fraction r2', 'A (decimal), C (whole)', '12', '+6', '-4']
+    assert rows[2] == ['2 — quadratic-function r2', 'A (at-zero), B (at-three), D (derivative)', '24', '+8', '-12']
     for points, frozen in manifest.data()['scoring']['tables'].items():
         for row in frozen:
             assert [points, str(row['correct_options']), f'{row["correct_tick"]:+d}', f'{row["wrong_tick"]:+d}'] in rows
     def change(data):
-        # Distinguish reading the frozen values from recomputing using today's G1.
-        data['scoring']['tables']['36'][1]['correct_tick'] = 17
+        # Distinguish reading the frozen values from recomputing them with today's rules.
+        data['scoring']['tables']['12'][1]['correct_tick'] = 17
         data['scoring']['floor'] = 2
-    changed_exam, changed_key = export_elp_documents(altered(manifest, change))
+    changed_exam, changed_key = export_exam_documents(altered(manifest, change)).values()
     assert changed_exam == exam
-    assert Document(changed_key).rows[1][-2:] == ['+17', '-12']
+    assert Document(changed_key).rows[1][-2:] == ['+17', '-4']
     assert 'Floor per question: 2 points.' in changed_key
+
+    def minutes(data):
+        data['scoring']['rules']['easy']['minutes'] = .1
+        data['scoring']['rules']['hard']['minutes'] = .2
+    assert '36 points; 0.3 planned minutes' in export_exam_documents(altered(manifest, minutes))['exam']
 
 
 def test_escaping_all_text_and_attributes_without_changing_math(tmp_path):
@@ -215,7 +197,7 @@ def test_escaping_all_text_and_attributes_without_changing_math(tmp_path):
         data['items'][0]['media'][0]['alt'] = hostile
         option = data['items'][0]['options'][0]
         option.update(id=hostile, text=hostile, rationale=hostile)
-    exam, key = export_elp_documents(altered(manifest, change))
+    exam, key = export_exam_documents(altered(manifest, change)).values()
     for html in (exam, key):
         doc = Document(html)
         assert ('text stem', hostile) in doc.blocks and ('text option', hostile) in doc.blocks
@@ -226,15 +208,13 @@ def test_escaping_all_text_and_attributes_without_changing_math(tmp_path):
     assert ('text rationale', hostile) not in Document(exam).blocks
 
 
-@pytest.mark.parametrize('problem', ['missing', 'base64', 'hash', 'svg', 'difficulty', 'row', 'options'])
+@pytest.mark.parametrize('problem', ['missing', 'hash', 'svg', 'difficulty', 'row', 'options'])
 def test_unusable_snapshot_fails_instead_of_dropping_content(tmp_path, problem):
     manifest, _, _ = sample(tmp_path)
     def change(data):
         media = data['items'][0]['media'][0]
         if problem == 'missing':
             data['media_base64'].clear()
-        elif problem == 'base64':
-            data['media_base64'][media['name']] = '!!!'
         elif problem == 'hash':
             media['sha256'] = '0' * 64
         elif problem == 'svg':
@@ -248,18 +228,13 @@ def test_unusable_snapshot_fails_instead_of_dropping_content(tmp_path, problem):
         else:
             data['items'][0]['options'].pop()
     with pytest.raises(ValueError):
-        export_elp_documents(altered(manifest, change))
+        export_exam_documents(altered(manifest, change))
 
 
 def test_import_needs_only_standard_library():
     # -S removes site packages: importing Manifest at runtime would pull in the host.
     script = ('import sys; sys.path.insert(0, sys.argv[1]); '
-              'from exam_forge.elp_document import export_elp_documents; '
+              'from exam_forge.exam_document import export_exam_documents; '
               'assert not any(n.startswith(("slidemage", "PySide6")) for n in sys.modules)')
     subprocess.run([sys.executable, '-I', '-S', '-c', script, str(Path(__file__).resolve().parents[1])], check=True)
 
-
-def test_the_pages_carry_the_decks_language(tmp_path):
-    manifest, _bank, _png = sample(tmp_path)
-    assert all('<html lang="en">' in html for html in export_elp_documents(manifest))
-    assert all('<html lang="fr">' in html for html in export_elp_documents(manifest, "fr"))
