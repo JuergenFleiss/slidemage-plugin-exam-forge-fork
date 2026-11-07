@@ -164,3 +164,10 @@ NEW: The window looks like the design: header, framed fields, answer cards.
 - The topics column has TOPICS and REVIEW labels, a mark for each row, and a count for unlinked questions; a topic's pencil stays faint until its row is pointed at, and a selected row is grey, not blue.
 - The middle column names the topic or view with one line about its order. Slides show their number in a small box, and questions are framed cards whose labels wrap instead of being cut off.
 - The editor's back link and its labels share one row; the labels are smaller, and an AI draft's label has a sparkle.
+
+v0.13.0 (2026-11-07, shared theme): Exam Forge follows SlideMage's theme and standard controls.
+
+NEW: Requires SlideMage 0.14.36 or newer.
+- Colours, type, spacing, icons and corners come from the host theme; fields, captions and selected rows use the standard kit treatments.
+- Correct answers use the theme's green background and border. Revision chips use the host's monospace option, and topic pencils use its faint state.
+- New topics choose blue, green, teal, pink or slate. Existing red topics keep their saved colour name and display pink, reserving red for errors.

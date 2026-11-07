@@ -46,7 +46,6 @@ from .kit import (
     confirm,
     dot,
     field,
-    glyph_icon,
     mix,
     named,
     restyle,
@@ -163,6 +162,7 @@ class Tick(QAbstractButton):
 
     def paintEvent(self, event):
         t = self.host.theme()
+        t = self.host.theme()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         circle = QRectF(3, 2, 30, 30)
@@ -201,9 +201,10 @@ class AnswerRow(QFrame):
         self.setObjectName("efAnswer")
         self.option_id = option.id
         grid = QGridLayout(self)
-        grid.setContentsMargins(8, 8, 8, 8)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(2)
+        grid.setContentsMargins(
+            host.theme().space_md, host.theme().space_md, host.theme().space_md, host.theme().space_md)
+        grid.setHorizontalSpacing(host.theme().space_md)
+        grid.setVerticalSpacing(host.theme().space_2xs)
         grid.setColumnStretch(1, 1)
         # Made in the order Tab visits them: tick, answer, rationale, remove.
         self.tick = Tick(host)
@@ -273,19 +274,19 @@ class ItemEditor(QWidget):
         content = host.Page()
         outer.addWidget(scroll_area(content), 1)
         body = content.body
-        body.setContentsMargins(20, 12, 20, 16)
-        body.setSpacing(20)
+        t = self.host.theme()
+        body.setContentsMargins(2 * t.space_lg, t.space_xl, 2 * t.space_lg, t.space_2xl)
+        body.setSpacing(2 * t.space_lg)
         # One row: the back link on the left, the question's chips on the right.
         self.back_button = host.Button("", "ghost", compact=True)
         self.back_button.clicked.connect(self.back)
         self.back_button.hide()
         tags = QHBoxLayout()
-        tags.setSpacing(6)
+        tags.setSpacing(t.space_sm)
         tags.addWidget(self.back_button)
         tags.addStretch()
         self.status_chip = host.Chip("Draft")
-        self.rev_chip = host.Chip("rev 1", "muted")
-        self.rev_chip.setProperty("mono", True)
+        self.rev_chip = host.Chip("rev 1", "muted", mono=True)
         self.ai_tag = host.Chip("AI-assisted", "muted")
         self.draft_tag = tone(host.Chip("AI draft", icon="auto_awesome"), "amber")
         for chip in (self.draft_tag, self.ai_tag, self.status_chip, self.rev_chip):
@@ -309,7 +310,7 @@ class ItemEditor(QWidget):
         self.stem.file_dropped.connect(self.add_image_file)
         self.stem.setPlaceholderText(r"\( … \)")
         question = QVBoxLayout()
-        question.setSpacing(10)
+        question.setSpacing(t.space_lg)
         body.addLayout(question)
         question.addWidget(host.Field("Question", self.stem))
         self.media_box = QVBoxLayout()
@@ -330,16 +331,16 @@ class ItemEditor(QWidget):
         self.choice_box = Box()
         choice = QVBoxLayout(self.choice_box)
         choice.setContentsMargins(0, 0, 0, 0)
-        choice.setSpacing(8)
+        choice.setSpacing(t.space_md)
         head = QHBoxLayout()
-        head.addWidget(named(QLabel("Answers"), "efLabel"), 0, Qt.AlignmentFlag.AlignBottom)
+        head.addWidget(host.Label("Answers", "body"), 0, Qt.AlignmentFlag.AlignBottom)
         self.hint = host.caption("")
         self.hint.setWordWrap(True)
         self.hint.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         head.addWidget(self.hint, 1)
         choice.addLayout(head)
         self.answers = QVBoxLayout()
-        self.answers.setSpacing(8)
+        self.answers.setSpacing(t.space_md)
         choice.addLayout(self.answers)
         self.add_button = host.Button("Add answer", "ghost", compact=True)
         self.add_button.clicked.connect(lambda: self.add_option())
@@ -348,7 +349,7 @@ class ItemEditor(QWidget):
         self.open_box = Box()
         open_answer = QVBoxLayout(self.open_box)
         open_answer.setContentsMargins(0, 0, 0, 0)
-        open_answer.setSpacing(14)
+        open_answer.setSpacing(t.space_xl)
         self.model_answer = field(GrowingEdit(lines=4, most=10))
         self.model_answer.setPlaceholderText("What a full answer contains · " + PRIVATE.lower().rstrip("."))
         self.grading_notes = field(GrowingEdit(lines=3, most=8))
@@ -360,7 +361,7 @@ class ItemEditor(QWidget):
         self.kind = Switch(host, tuple((name, kind) for kind, name in KINDS.items()))
         self.difficulty = Switch(host, (("Easy", "easy"), ("Hard", "hard")), clearable=True)
         row = QHBoxLayout()
-        row.setSpacing(24)
+        row.setSpacing(2 * t.space_xl)
         row.addWidget(host.Field("Used for", self.use))
         self.kind_field = host.Field("Type", self.kind)
         row.addWidget(self.kind_field)
@@ -369,8 +370,8 @@ class ItemEditor(QWidget):
         self.objective = field(QLineEdit())
         body.addWidget(host.Field("Learning objective", self.objective))
         head = QHBoxLayout()
-        head.setSpacing(4)
-        head.addWidget(named(QLabel("Linked slides"), "efLabel"))
+        head.setSpacing(t.space_xs)
+        head.addWidget(host.Label("Linked slides", "body"))
         head.addStretch()
         self.topic_label, self.topic_dot, self.topic_name = host.caption(""), dot(), host.caption("")
         for part in (self.topic_label, self.topic_dot, self.topic_name):
@@ -397,7 +398,7 @@ class ItemEditor(QWidget):
         body.addStretch()
         bar = named(QFrame(), "efFooter")   # a hairline above it
         footer = QHBoxLayout(bar)
-        footer.setContentsMargins(20, 10, 20, 12)
+        footer.setContentsMargins(2 * t.space_lg, t.space_lg, 2 * t.space_lg, t.space_xl)
         self.status_line = host.Label("", "secondary")
         self.status_line.setWordWrap(True)
         footer.addWidget(self.status_line, 1)
@@ -423,9 +424,9 @@ class ItemEditor(QWidget):
 
     def retheme(self, t):
         """Draw the icons in the theme's colours, and the ticks again."""
-        self.back_button.setIcon(glyph_icon("chevron_left", t.text, 18))
-        self.add_button.setIcon(glyph_icon("add", t.text_2))
-        self.approve_button.setIcon(glyph_icon("check", t.on_inverse))
+        self.back_button.setIcon(self.host.icon("chevron_left", t.text, 18))
+        self.add_button.setIcon(self.host.icon("add", t.text_2))
+        self.approve_button.setIcon(self.host.icon("check", t.on_inverse))
         for row in self.rows:
             row.tick.update()
 

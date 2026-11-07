@@ -5,7 +5,7 @@ the shared wording of confirmations and check results."""
 from math import ceil
 
 from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -20,27 +20,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# Text colours, (light, dark). Violet: a slide changed. Amber: an AI draft. Error: a problem. Then one per topic colour
-# (model.PALETTE), kept clear of both accents. Only text colour is explicit; surfaces inherit the theme.
-TONES = {"violet": ("#7040ac", "#c4b5fd"), "amber": ("#8a5000", "#fbbf24"), "error": ("#a8231a", "#fca5a5"),
-         "blue": ("#1d4ed8", "#60a5fa"), "green": ("#15803d", "#4ade80"), "red": ("#b91c1c", "#f87171"),
-         "teal": ("#0f766e", "#2dd4bf"), "pink": ("#be185d", "#f472b6"), "slate": ("#475569", "#94a3b8")}
+
+def tone_colors(t):
+    """Categorical accents plus the plugin's semantic tone names; red is load-only."""
+    return {**t.accents, "red": t.accents["pink"], "amber": t.warning, "error": t.error}
 
 
 def color(host, name):
-    """A tone's colour in the host's current theme, for HTML that cannot carry a property."""
-    return TONES[name][host.theme().dark]
+    """A tone's current colour, for HTML that cannot carry a property."""
+    return tone_colors(host.theme())[name]
 
 
-def tone_sheet(dark):
-    """The window's stylesheet: each tone colours a tagged widget's text and the text inside it, such as a chip's.
-    It outranks the host theme's application stylesheet, and the window's dialogs inherit it."""
-    return "\n".join(f'*[accent="{name}"], *[accent="{name}"] QLabel {{ color: {colors[dark]}; }}'
-                     for name, colors in TONES.items())
+def tone_sheet(t):
+    """Colour tagged widgets and their text using the current host theme."""
+    return "\n".join(f'*[accent="{name}"], *[accent="{name}"] QLabel {{ color: {value}; }}'
+                     for name, value in tone_colors(t).items())
 
 
 def mix(first, second, share):
-    """`share` of colour `first` over `second`, as #rrggbb."""
+    """`share` of colour `first` over `second`, for the painted tick's hover mark only."""
     a, b = QColor(first), QColor(second)
     return QColor(*(round(x * share + y * (1 - share)) for x, y in zip(a.getRgb()[:3], b.getRgb()[:3]))).name()
 
@@ -48,59 +46,23 @@ def mix(first, second, share):
 def window_sheet(t):
     """The window's stylesheet from the host's theme tokens `t`: the tones, then the window's own surfaces. Only text
     and line colours are picked here; every surface is the theme's."""
-    selected = "rgba(255,255,255,0.10)" if t.dark else "rgba(0,0,0,0.07)"
-    tint, border = mix(t.ok_bg, t.surface, 0.4), mix(t.ok, t.surface, 0.45)  # a correct answer, lighter than ok_bg
-    return tone_sheet(t.dark) + f"""
+    return tone_sheet(t) + f"""
 QFrame#efHeader {{ background: {t.surface}; border: none; border-bottom: 1px solid {t.line}; }}
 QFrame#efFooter {{ border: none; border-top: 1px solid {t.line}; }}
-QLabel#efName {{ font-size: 14px; font-weight: 600; color: {t.text}; }}
-QLabel#efDeck {{ font-size: 12px; color: {t.text_3}; }}
-QLabel#efSection {{ font-size: 11px; font-weight: 600; letter-spacing: 1px; color: {t.text_3}; padding: 4px 10px; }}
-QLabel#kitFieldLabel, QLabel#efLabel {{ font-size: 13px; font-weight: 600; color: {t.text}; }}
-QLabel#efListTitle {{ font-size: 15px; font-weight: 600; color: {t.text}; }}
-QPlainTextEdit#efField, QLineEdit#efField {{
-    font-size: 14px; background: {t.surface}; color: {t.text}; border: 1px solid {t.line}; border-radius: 9px;
-    padding: 6px 8px; }}
-QPlainTextEdit#efField:focus, QLineEdit#efField:focus {{ border-color: {t.focus}; }}
-QPlainTextEdit#efField:disabled, QLineEdit#efField:disabled {{ background: {t.bg}; color: {t.text_3}; }}
 QFrame#efAnswer {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: {t.radius_md}px; }}
-QFrame#efAnswer[correct="true"] {{ background: {tint}; border-color: {border}; }}
+QFrame#efAnswer[correct="true"] {{ background: {t.ok_bg}; border-color: {t.ok}; }}
 QFrame#efAnswer QPlainTextEdit {{
-    font-size: 14px; background: transparent; color: {t.text}; border: 1px solid transparent; border-radius: 7px;
-    padding: 1px 4px; }}
-QFrame#efAnswer QPlainTextEdit#efWhy {{ font-size: 13px; color: {t.text_2}; }}
+    font-size: {t.font_control}px; background: transparent; color: {t.text}; border: 1px solid transparent;
+    border-radius: {t.radius_sm}px; padding: 1px {t.space_xs}px; }}
+QFrame#efAnswer QPlainTextEdit#efWhy {{ font-size: {t.font_body}px; color: {t.text_2}; }}
 QFrame#efAnswer QPlainTextEdit:hover {{ border-color: {t.line}; }}
 QFrame#efAnswer QPlainTextEdit:focus {{ background: {t.surface}; border-color: {t.focus}; }}
 QFrame#efAnswer QPlainTextEdit:disabled {{ border-color: transparent; }}
-QFrame#kitChip QLabel {{ font-size: 12px; }}
-QFrame#kitChip QLabel#kitIcon {{ font-size: 13px; }}
-QFrame#kitChip[mono="true"] QLabel {{ font-family: "{t.font_mono}"; font-size: 11px; }}
-QListWidget[column="topics"] QFrame#kitRowButton[selected="true"] {{ background: {selected}; }}
-QFrame#kitCard[column="middle"] {{ background: {mix(t.surface, t.bg, 0.55)}; }}
-QListWidget[column="middle"] QFrame#kitRowButton {{ border: 1px solid transparent; }}
-QListWidget[column="middle"] QFrame#kitRowButton[selected="true"] {{ background: {t.surface}; border-color: {t.line}; }}
-QFrame#efCard {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: 10px; }}
+QFrame#efCard {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: {t.radius_md}px; }}
 QFrame#efCard[selected="true"] {{ border-color: {t.text_3}; }}
-QFrame#efThumb {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: 6px; }}
-QLabel#efThumbNumber {{ font-family: "{t.font_mono}"; font-size: 11px; color: {t.text_2}; }}
-QToolButton#kitIconButton[faint="true"] {{ color: {mix(t.text_4, t.surface, 0.55)}; }}
+QFrame#efThumb {{ background: {t.surface}; border: 1px solid {t.line}; border-radius: {t.radius_sm + 1}px; }}
+QLabel#efThumbNumber {{ font-family: "{t.font_mono}"; font-size: {t.font_micro}px; color: {t.text_2}; }}
 """
-
-
-def glyph_icon(name, color, px=16):
-    """A Material icon from the host's icon font as a QIcon, for a text button."""
-    scale = 2
-    pixmap = QPixmap(px * scale, px * scale)
-    pixmap.setDevicePixelRatio(scale)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    font = QFont("Material Icons")
-    font.setPixelSize(px)
-    painter.setFont(font)
-    painter.setPen(QColor(color))
-    painter.drawText(QRect(0, 0, px, px), Qt.AlignmentFlag.AlignCenter, name)
-    painter.end()
-    return QIcon(pixmap)
 
 
 def restyle(widget, name, value):
@@ -113,7 +75,7 @@ def restyle(widget, name, value):
 
 
 def tone(widget, name=""):
-    """Tag a widget with a tone (see TONES), or clear it with ""; a topic colour is a tone too."""
+    """Tag a widget with a named theme tone, or clear it with ""; a topic colour is a tone too."""
     return restyle(widget, "accent", name)
 
 
@@ -223,9 +185,9 @@ def field(widget):
     return named(widget, "efField")
 
 
-def section(text):
-    """A small uppercase label over a group of rows ("TOPICS", "REVIEW")."""
-    return passive(named(QLabel(text.upper()), "efSection"))
+def section(host, text):
+    """The host caption treatment over a group of rows."""
+    return passive(host.Label(text, "caption"))
 
 
 class Faint(QObject):
@@ -236,13 +198,13 @@ class Faint(QObject):
         self.row, self.button = row, button
         for widget in (row, button):
             widget.installEventFilter(self)
-        restyle(button, "faint", True)
+        button.set_faint(True)
 
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.Type.Enter, QEvent.Type.FocusIn):
-            restyle(self.button, "faint", False)
+            self.button.set_faint(False)
         elif event.type() in (QEvent.Type.Leave, QEvent.Type.FocusOut):
-            restyle(self.button, "faint", not (self.row.underMouse() or self.button.hasFocus()))
+            self.button.set_faint(not (self.row.underMouse() or self.button.hasFocus()))
         return False
 
 
@@ -260,9 +222,9 @@ def label(host, text="", *, role="body", wrap=False, clip=False):
     return widget
 
 
-def line(*parts):
+def line(host, *parts):
     box = QHBoxLayout()
-    box.setSpacing(6)
+    box.setSpacing(host.theme().space_sm)
     for part in parts:
         box.addWidget(part)
     box.addStretch()
@@ -272,7 +234,7 @@ def line(*parts):
 class Flow(QLayout):
     """Widgets in a line that wraps when it runs out of width, each at its full size: chips are never squeezed."""
 
-    def __init__(self, spacing=6):
+    def __init__(self, spacing):
         super().__init__()
         self.items = []
         self.setSpacing(spacing)
@@ -329,8 +291,8 @@ class Flow(QLayout):
         return y + line - rect.y()
 
 
-def flow(*parts):
-    box = Flow()
+def flow(host, *parts):
+    box = Flow(host.theme().space_sm)
     for part in parts:
         box.addWidget(part)
     return box
@@ -340,15 +302,16 @@ class Box(QWidget):
     """A container that shows what is behind it: the stylesheet paints the page colour on a plain QWidget only."""
 
 
-def row(lead=(), body=()):
+def row(host, lead=(), body=()):
     """A list row: leading widgets, then a column of lines."""
     widget = Box()
     outer = QHBoxLayout(widget)
-    outer.setContentsMargins(6, 4, 6, 4)
+    t = host.theme()
+    outer.setContentsMargins(t.space_sm, t.space_xs, t.space_sm, t.space_xs)
     for part in lead:
         outer.addWidget(part)
     column = QVBoxLayout()
-    column.setSpacing(2)
+    column.setSpacing(t.space_2xs)
     for part in body:
         column.addLayout(part) if isinstance(part, QHBoxLayout) else column.addWidget(part)
     outer.addLayout(column, 1)

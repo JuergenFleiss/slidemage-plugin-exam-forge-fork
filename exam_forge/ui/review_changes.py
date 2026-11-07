@@ -24,7 +24,8 @@ class _Row(QWidget):
         super().__init__()
         self.item, self.resolved = item, False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setContentsMargins(
+            host.theme().space_sm, host.theme().space_xs, host.theme().space_sm, host.theme().space_xs)
         top = QHBoxLayout()
         self.stem = host.Label(item.stem or "(no question text)")
         self.stem.setWordWrap(True)

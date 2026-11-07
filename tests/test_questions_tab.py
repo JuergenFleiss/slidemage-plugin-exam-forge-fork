@@ -270,7 +270,7 @@ def test_header_footer_and_columns_follow_the_design(lab):
     assert not window.check_button.icon().isNull() and not window.export_button.icon().isNull()
     assert window.notice.parent().objectName() == "efFooter" and window.notice.text().startswith("Slides checked")
     sections = texts(window.questions.topic_list)
-    assert "TOPICS" in sections and "REVIEW" in sections
+    assert "Topics" in sections and "Review" in sections
     unlinked = len(window.questions.unlinked())
     assert unlinked and row_text(window.questions.topic_list, "unlinked").split(" | ")[-1] == str(unlinked)
     pick(window.questions.topic_list, topics[0].id)

@@ -169,8 +169,8 @@ class FakeHost:
         from PySide6.QtWidgets import QPushButton
         return QPushButton(text)
 
-    def Chip(self, text, tone="neutral", *, icon=None, elide=False, pressable=False):
-        return _kit().Chip(text, tone, icon, pressable=pressable, elide=elide)
+    def Chip(self, text, tone="neutral", *, icon=None, elide=False, pressable=False, mono=False):
+        return _kit().Chip(text, tone, icon, pressable=pressable, elide=elide, mono=mono)
 
     def caption(self, text, tone=""):
         return _kit().caption(text, tone)
@@ -181,8 +181,11 @@ class FakeHost:
     def IconLabel(self, icon, size):
         return _kit().IconLabel(icon, size)
 
-    def IconButton(self, icon, tooltip):
-        return _kit().IconButton(icon, tooltip)
+    def IconButton(self, icon, tooltip, *, faint=False):
+        return _kit().IconButton(icon, tooltip, faint=faint)
+
+    def icon(self, name, color, px=16):
+        return _kit().glyph_icon(name, color, px)
 
     def Window(self, title):
         return _kit().ToolWindow(title)

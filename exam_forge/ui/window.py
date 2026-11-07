@@ -5,7 +5,7 @@ the footer."""
 from datetime import datetime
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 
 from ..bank import AnswerRulesStore, BankError, TopicStore
 from ..model import slide_label
@@ -13,7 +13,7 @@ from ..rules import AnswerRules
 from ..sources import check_bank, fresh_deck
 from .exam_tab import ExamTab
 from .export_menu import ExportMenu
-from .kit import Logo, deck_language, glyph_icon, named, slide_title, window_sheet
+from .kit import Logo, deck_language, named, slide_title, window_sheet
 from .questions_tab import QuestionsTab, changed_on
 
 
@@ -69,12 +69,13 @@ class BankWindow(QWidget):
         self.tabs = Tabs(host, (("Questions", self.questions), ("Exam", self.exam_tab)))
         layout.addWidget(self.header(deck))
         body = QVBoxLayout()
-        body.setContentsMargins(14, 12, 14, 10)
+        t = self.host.theme()
+        body.setContentsMargins(t.space_xl, t.space_xl, t.space_xl, t.space_lg)
         body.addWidget(self.tabs)
         layout.addLayout(body, 1)
         footer = named(QFrame(), "efFooter")
         foot = QHBoxLayout(footer)
-        foot.setContentsMargins(16, 6, 16, 6)
+        foot.setContentsMargins(t.space_2xl, t.space_sm, t.space_2xl, t.space_sm)
         self.folder_label = host.caption(str(bank.folder))
         self.folder_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -113,15 +114,16 @@ class BankWindow(QWidget):
         """The top bar: the mark, the name and deck, the tabs' switch, Check slides and Export."""
         bar = named(QFrame(), "efHeader")
         row = QHBoxLayout(bar)
-        row.setContentsMargins(16, 10, 16, 10)
-        row.setSpacing(10)
+        t = self.host.theme()
+        row.setContentsMargins(t.space_2xl, t.space_lg, t.space_2xl, t.space_lg)
+        row.setSpacing(t.space_lg)
         names = QVBoxLayout()
         names.setSpacing(0)
-        for text, name in (("Exam Forge", "efName"), (deck.name, "efDeck")):
-            names.addWidget(named(QLabel(text), name))
+        for text, role in (("Exam Forge", "title"), (deck.name, "caption")):
+            names.addWidget(self.host.Label(text, role))
         row.addWidget(Logo(self.host))
         row.addLayout(names)
-        row.addSpacing(14)
+        row.addSpacing(t.space_xl)
         row.addWidget(self.tabs.switch)
         row.addStretch()
         row.addWidget(self.check_button)
@@ -134,7 +136,7 @@ class BankWindow(QWidget):
         t = self.host.theme()
         self.setStyleSheet(window_sheet(t))
         for button, icon in ((self.check_button, "refresh"), (self.export_button, "download")):
-            button.setIcon(glyph_icon(icon, t.text))
+            button.setIcon(self.host.icon(icon, t.text))
         self.questions.retheme(t)
 
     def show_export_menu(self):

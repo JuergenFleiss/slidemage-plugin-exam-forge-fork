@@ -161,7 +161,8 @@ def slide_label(slide_id: str, position: int | None = None, title: str = "") -> 
 
 # -- topics: named, coloured groups of slides; a question's topic comes from its first linked slide -----------------
 
-PALETTE = ("blue", "green", "red", "teal", "pink", "slate")  # Kept clear of the reserved violet and amber accents.
+PALETTE = ("blue", "green", "teal", "pink", "slate")
+LEGACY_COLORS = ("red",)  # Preserve saved names; the UI renders these topics in pink.
 
 
 @dataclass(frozen=True)
@@ -176,7 +177,7 @@ class Topic:
             raise ValueError("topic needs an id")
         if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("topic needs a name")
-        if self.color not in PALETTE:
+        if self.color not in PALETTE + LEGACY_COLORS:
             raise ValueError("unknown topic colour")
         if any(not isinstance(slide, str) or not slide for slide in self.slides):
             raise ValueError("invalid slide id in topic")

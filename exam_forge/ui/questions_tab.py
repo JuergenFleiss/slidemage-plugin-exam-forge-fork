@@ -25,13 +25,11 @@ from ..sources import link_slide
 from .drafting import DraftDialog
 from .editor import ItemEditor
 from .kit import (
-    TONES,
     Box,
     Faint,
     Fit,
     dot,
     flow,
-    glyph_icon,
     label,
     named,
     passive,
@@ -74,12 +72,12 @@ class Card(QFrame):
         restyle(self, "selected", on)
 
 
-def thumb(number, topic):
+def thumb(host, number, topic):
     """A slide's small box: its number at the bottom left, its topic's dot at the top right."""
     box = named(QFrame(), "efThumb")
     box.setFixedSize(48, 34)
     column = QVBoxLayout(box)
-    column.setContentsMargins(5, 1, 1, 3)
+    column.setContentsMargins(host.theme().space_xs, 1, 1, host.theme().space_2xs)
     column.setSpacing(0)
     column.addWidget(dot(topic), 0, Qt.AlignmentFlag.AlignRight)
     column.addStretch()
@@ -110,39 +108,39 @@ class QuestionsTab(QWidget):
             listw.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
             listw.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             listw.fit = Fit(listw)
-        self.cards.setSpacing(4)
+        t = self.host.theme()
+        self.cards.setSpacing(t.space_xs)
         self.slide_list.setSpacing(1)
         split.setChildrenCollapsible(False)
-        split.setHandleWidth(8)
+        split.setHandleWidth(t.space_md)
         self.focus_switch = host.SegmentedControl(list(FOCUS))
         self.focus_switch.set_current(self.focus)
         self.focus_switch.changed.connect(self.focus_changed)
-        self.list_title = named(QLabel(), "efListTitle")
+        self.list_title = host.Label("", "heading")
         self.list_sub = host.caption("")
-        for listw, name in ((self.topic_list, "topics"), (self.slide_list, "middle")):
-            listw.setProperty("column", name)
+        for listw in (self.topic_list, self.slide_list):
             column = host.Card()
-            column.setProperty("column", name)
-            column.layout().setContentsMargins(6, 12 if listw is self.slide_list else 10, 6, 6)
+            column.layout(
+                ).setContentsMargins(t.space_sm, t.space_xl if listw is self.slide_list else t.space_lg, t.space_sm, t.space_sm)
             if listw is self.slide_list:
-                column.layout().setSpacing(2)
+                column.layout().setSpacing(t.space_2xs)
                 column.layout().addWidget(self.focus_switch, 0, Qt.AlignmentFlag.AlignLeft)
-                column.layout().addSpacing(6)
+                column.layout().addSpacing(t.space_sm)
                 for part in (self.list_title, self.list_sub):
-                    part.setContentsMargins(8, 0, 8, 0)
+                    part.setContentsMargins(t.space_md, 0, t.space_md, 0)
                     column.layout().addWidget(part)
-                column.layout().addSpacing(4)
+                column.layout().addSpacing(t.space_xs)
             column.layout().addWidget(listw)
             split.addWidget(column)
         split.addWidget(self.stack)
         self.slide_page = Box()
         body = QVBoxLayout(self.slide_page)
-        body.setContentsMargins(10, 4, 4, 0)
+        body.setContentsMargins(t.space_lg, t.space_xs, t.space_xs, 0)
         head = QHBoxLayout()
         titles = QVBoxLayout()
         self.crumb_dot, self.crumb = dot(), host.caption("")
         crumb = QHBoxLayout()
-        crumb.setSpacing(4)
+        crumb.setSpacing(t.space_xs)
         crumb.addWidget(self.crumb_dot)
         crumb.addWidget(self.crumb, 1)
         self.slide_title = label(host, role="title", clip=True)
@@ -211,9 +209,9 @@ class QuestionsTab(QWidget):
     def retheme(self, t):
         """Draw the buttons' icons in the theme's colours; the sparkle is amber, like an AI draft's chip."""
         self.theme = t
-        self.draft_button.setIcon(glyph_icon("auto_awesome", TONES["amber"][t.dark]))
-        self.write_button.setIcon(glyph_icon("add", t.on_inverse))
-        self.open_button.setIcon(glyph_icon("open_in_new", t.text))
+        self.draft_button.setIcon(self.host.icon("auto_awesome", t.warning))
+        self.write_button.setIcon(self.host.icon("add", t.on_inverse))
+        self.open_button.setIcon(self.host.icon("open_in_new", t.text))
         self.editor.retheme(t)
         self.render()
 
@@ -329,10 +327,11 @@ class QuestionsTab(QWidget):
         bare = [r for r in self.window.slides or () if r.id not in owned]
         topic_ids = {item.id: topic_of(item, self.window.topics) for item in items}
 
+        t = self.host.theme()
         def entry(title, subtitle, topic=None, badge=0, edit=None, shape="", icon="", accent=""):
             widget = host.RowButton(title, subtitle)
-            widget.layout().setContentsMargins(8, 7, 4, 7)
-            widget.layout().setSpacing(10)
+            widget.layout().setContentsMargins(t.space_md, t.space_md, t.space_xs, t.space_md)
+            widget.layout().setSpacing(t.space_lg)
             mark = tone(passive(host.IconLabel(icon, 16)), accent) if icon else dot(topic, shape=shape)
             widget.layout().insertWidget(0, mark)
             if badge:
@@ -346,7 +345,7 @@ class QuestionsTab(QWidget):
 
         def build(add):
             slides = f"{plural(len(self.window.slides), 'slide')} · " if self.window.slides is not None else ""
-            add(None, row([], [section("Topics")]), False)
+            add(None, row(self.host, [], [section(host, "Topics")]), False)
             add("all", entry("All slides", f"{slides}{plural(len(items), 'question')}", shape="square"))
             for topic in self.window.topics:
                 mine = [i for i in items if topic_ids[i.id] is not None and topic_ids[i.id].id == topic.id]
@@ -357,11 +356,11 @@ class QuestionsTab(QWidget):
                 add("none", entry("No topic", f"{plural(len(bare), 'slide')} · {plural(len(loose), 'question')}",
                                   None, sum(needs_attention(i, rules) for i in loose), shape="ring"))
             new = host.Button("New topic", "ghost", compact=True)
-            new.setIcon(glyph_icon("add", self.theme.text_2))
+            new.setIcon(self.host.icon("add", self.theme.text_2))
             new.clicked.connect(lambda: self.edit_topic())
-            add(None, row([new], []), False)
-            gap = row([], [section("Review")])
-            gap.layout().setContentsMargins(6, 14, 6, 2)
+            add(None, row(self.host, [new], []), False)
+            gap = row(self.host, [], [section(host, "Review")])
+            gap.layout().setContentsMargins(t.space_sm, t.space_xl, t.space_sm, t.space_2xs)
             add(None, gap, False)
             changed, drafts = len(self.window.changed_slides()), sum(ai_draft(i) for i in items)
             broken = sum(off_rules(i, rules) for i in items)
@@ -390,12 +389,13 @@ class QuestionsTab(QWidget):
             self.view, "In the order of their slides, retired last" if self.listing() else
             f"{plural(len(self.view_slides()), 'slide')} in deck order"))
 
+        t = self.host.theme()
         def build(add):
             if self.listing():
                 for item in self.view_items():
                     add(item.id, self.card(item, compact=True), dim=item.status == "retired")
                 if self.view not in REVIEW and not self.view_items():
-                    add(None, row([], [passive(label(self.host, "No questions yet.", role="secondary"))]), False)
+                    add(None, row(self.host, [], [passive(label(self.host, "No questions yet.", role="secondary"))]), False)
                 return
             for ref in self.view_slides():
                 mine = by_slide.get(ref.id, [])
@@ -405,14 +405,14 @@ class QuestionsTab(QWidget):
                     chips.append(self.chip(plural(drafts, "AI draft"), accent="amber"))
                 text = plural(len(mine), "question") if mine else "No questions yet"
                 widget = self.host.RowButton(slide_title(ref), text)
-                widget.layout().setContentsMargins(8, 7, 8, 7)
-                widget.layout().setSpacing(12)
-                widget.layout().insertWidget(0, thumb(ref.position or "·", self.window.owner(ref.id)))
+                widget.layout().setContentsMargins(t.space_md, t.space_md, t.space_md, t.space_md)
+                widget.layout().setSpacing(t.space_xl)
+                widget.layout().insertWidget(0, thumb(self.host, ref.position or "·", self.window.owner(ref.id)))
                 for chip in chips:
                     widget.layout().addWidget(chip)
                 add(ref.id, widget)
             if not self.window.slides:
-                add(None, row([], [passive(label(self.host, "Loading slides…" if self.window.slides is None else "No slides.",
+                add(None, row(self.host, [], [passive(label(self.host, "Loading slides…" if self.window.slides is None else "No slides.",
                                                  role="secondary"))]), False)
 
         self.fill(self.slide_list, build, self.listed_key())
@@ -452,21 +452,22 @@ class QuestionsTab(QWidget):
             summary = "Model answer" if item.model_answer.strip() else "No model answer yet"
         elif item.use == "exam":
             summary += f" · {sum(o.correct for o in item.options)} correct"
+        t = self.host.theme()
         if compact:
             card = Card()
             column = QVBoxLayout(card)
-            column.setContentsMargins(12, 10, 12, 10)
-            column.setSpacing(8)
+            column.setContentsMargins(t.space_xl, t.space_lg, t.space_xl, t.space_lg)
+            column.setSpacing(t.space_md)
             column.addWidget(text)
-            column.addLayout(flow(*chips))
+            column.addLayout(flow(self.host, *chips))
             return passive(card)
         card = Card()
-        QVBoxLayout(card).setContentsMargins(16, 13, 16, 13)
+        QVBoxLayout(card).setContentsMargins(t.space_2xl, t.space_xl, t.space_2xl, t.space_xl)
         top = QHBoxLayout()
         column = QVBoxLayout()
-        column.setSpacing(6)
+        column.setSpacing(t.space_sm)
         column.addWidget(text)
-        column.addLayout(flow(*chips))
+        column.addLayout(flow(self.host, *chips))
         top.addLayout(column, 1)
         top.addWidget(passive(label(host, summary, role="caption")), 0, Qt.AlignmentFlag.AlignTop)
         card.layout().addLayout(top)

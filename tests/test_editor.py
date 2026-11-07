@@ -11,7 +11,7 @@ from slidemage.plugin_api import SlideSource
 
 from exam_forge.model import Item, Option, Origin
 from exam_forge.ui.editor import reviewed_issues
-from exam_forge.ui.kit import TONES, window_sheet
+from exam_forge.ui.kit import window_sheet
 
 
 def ticks(window):
@@ -159,13 +159,13 @@ def test_ai_chips_and_the_dark_theme_take_the_hosts_colours(env):
     window.questions.open_card(ai.id)
     assert window.editor.draft_tag.isVisible() and not window.editor.ai_tag.isVisible()
     chip_text = window.editor.draft_tag.findChild(QLabel)
-    assert text_color(chip_text) == TONES["amber"][0] and text_color(window.editor.status_line) == TONES["error"][0]
+    assert text_color(chip_text) == host.theme().warning and text_color(window.editor.status_line) == host.theme().error
     host.set_dark(True)
-    assert text_color(chip_text) == TONES["amber"][1] and text_color(window.editor.status_line) == TONES["error"][1]
-    assert text_color(window.editor.source_banner) == TONES["violet"][1]
+    assert text_color(chip_text) == host.theme().warning and text_color(window.editor.status_line) == host.theme().error
+    assert text_color(window.editor.source_banner) == host.theme().accents["violet"]
     # Surfaces come from the host's theme tokens: the sheet is rebuilt from the dark ones, with no light surface left.
     assert window.styleSheet() == window_sheet(host.theme()) and window_sheet(host.theme()) != window_sheet(
-        replace(host.theme(), dark=False))
+        replace(host.theme(), surface="#123456"))
     assert host.theme().surface in window.styleSheet() and "#ffffff" not in window.styleSheet()
     assert window.editor.draft_tag.styleSheet() == ""
     window.editor.populate(bank.set_status("ai", 1, "reviewed"))

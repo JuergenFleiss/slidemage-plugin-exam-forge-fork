@@ -31,7 +31,7 @@ class ExportMenu(QMenu):
         self.addSeparator()
         hint = QWidgetAction(self)
         label = window.host.Label("Exams: use the Exam tab", "caption")
-        label.setContentsMargins(12, 6, 12, 6)
+        label.setContentsMargins(window.host.theme().space_xl, window.host.theme().space_sm, window.host.theme().space_xl, window.host.theme().space_sm)
         label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         hint.setDefaultWidget(label)
         hint.setEnabled(False)

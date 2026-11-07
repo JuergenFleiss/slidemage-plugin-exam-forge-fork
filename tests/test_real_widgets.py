@@ -22,8 +22,8 @@ def real(request, monkeypatch):
     monkeypatch.setattr(FakeHost, "Field", lambda self, label, widget: plugin_ui.Field(label, widget))
     monkeypatch.setattr(FakeHost, "Button", lambda self, text, kind="secondary", *, compact=False:
                         kit.Button(text, kind, compact=compact))
-    monkeypatch.setattr(FakeHost, "Chip", lambda self, text, tone="neutral", *, icon=None, elide=False, pressable=False:
-                        kit.Chip(text, tone, icon, pressable=pressable, elide=elide))
+    monkeypatch.setattr(FakeHost, "Chip", lambda self, text, tone="neutral", *, icon=None, elide=False, pressable=False, mono=False:
+                        kit.Chip(text, tone, icon, pressable=pressable, elide=elide, mono=mono))
     return request.getfixturevalue("env")
 
 

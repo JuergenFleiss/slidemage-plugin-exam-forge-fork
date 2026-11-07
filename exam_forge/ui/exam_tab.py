@@ -73,7 +73,8 @@ class ExamTab(QWidget):
 
     def page(self):
         page = self.host.Page()
-        page.body.setContentsMargins(4, 8, 4, 8)
+        t = self.host.theme()
+        page.body.setContentsMargins(t.space_xs, t.space_md, t.space_xs, t.space_md)
         return page
 
     # Step 1

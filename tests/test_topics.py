@@ -7,17 +7,37 @@ import pytest
 from exam_forge.bank import CorruptFileError, SchemaError, TopicStore
 from exam_forge.model import (PALETTE, Item, SourceLink, Topic, add_topic, assign_slide, delete_topic, next_color,
                               rename_topic, topic_of)
-from exam_forge.ui.kit import TONES
+from exam_forge.ui.kit import color
+from fake_host import FakeHost
 
 
 def item(*slides):
     return Item("q", 1, sources=tuple(SourceLink(s) for s in slides))
 
 
-def test_topic_colours_never_use_the_violet_or_amber_accents():
-    for key in PALETTE:
-        light, dark = TONES[key]
-        assert light != dark and not {light, dark} & {*TONES["violet"], *TONES["amber"], *TONES["error"]}
+def test_topic_colours_follow_the_host_and_reserve_status_hues():
+    host = FakeHost()
+    for dark in (False, True):
+        host.set_dark(dark)
+        t = host.theme()
+        for key in PALETTE:
+            assert color(host, key) == t.accents[key]
+            assert color(host, key) not in (t.warning, t.error, t.accents["violet"])
+        assert color(host, "red") == t.accents["pink"]
+        assert color(host, "error") == t.error
+
+
+def test_legacy_red_round_trip_and_new_topics(tmp_path):
+    store = TopicStore(tmp_path)
+    store.save((Topic("old", "Legacy", "red"),))
+    original = store.path.read_bytes()
+    topics = store.load()
+    assert topics[0].color == "red"
+    store.save(topics)
+    assert store.path.read_bytes() == original
+    for n in range(30):
+        assert next_color(topics) in PALETTE and next_color(topics) != "red"
+        topics = add_topic(topics, f"Topic {n}")
 
 
 def test_topic_validation():
@@ -57,7 +77,7 @@ def test_helpers():
     assert topics[0].name == "Cells" and topics[0].color == PALETTE[0] and len(topics[0].id) == 32
     for n in range(7):
         topics = add_topic(topics, f"T{n}")
-    assert topics[6].color == PALETTE[0] and len({t.id for t in topics}) == 8
+    assert topics[len(PALETTE)].color == PALETTE[0] and len({t.id for t in topics}) == 8
     assert next_color(topics[:2]) == PALETTE[2] and next_color(()) == PALETTE[0]
     a, b = topics[:2]
     renamed = rename_topic(topics, a.id, "Renamed")
@@ -77,3 +97,20 @@ def test_topic_of_first_slide_only():
     assert topic_of(item(), topics) is None
     assert topic_of(item("s2"), topics).name == "A"
 
+
+
+def test_saved_red_topic_dot_draws_pink(lab):
+    from dataclasses import replace
+    from PySide6.QtGui import QPalette
+    from exam_forge.ui.kit import Mark
+    from fake_host import entry
+
+    host, _, _, _, window, _, _, topics = lab
+    assert window.save_topics((replace(topics[0], color="red"), *topics[1:]))
+    for dark in (False, True):
+        host.set_dark(dark)
+        listw = window.questions.topic_list
+        widget = listw.itemWidget(entry(listw, topics[0].id))
+        mark = widget.findChild(Mark)
+        mark.ensurePolished()
+        assert mark.palette().color(QPalette.ColorRole.WindowText).name() == host.theme().accents["pink"]
