@@ -19,8 +19,9 @@ def slide_references(host, ids: frozenset[str]) -> list[str]:
     for deck, folder in (dict(choices) if isinstance(choices, dict) else {}).items():
         if not _inside(_absolute(deck), project):
             continue
+        folder = _absolute(folder)
         try:
-            if not Path(folder).is_dir():
+            if not folder.is_dir():
                 raise BankError("the folder is missing")
             items, corrupt = Bank(folder).load()
             if corrupt:

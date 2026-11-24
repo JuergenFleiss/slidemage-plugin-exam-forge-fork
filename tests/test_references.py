@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Jürgen Fleiß
 # SPDX-License-Identifier: GPL-3.0-or-later
 """SlideMage asks Exam Forge whether a question still links a slide before it retires the slide's ID."""
+import re
+
 import pytest
 from fake_host import FakeDeck, FakeHost, add
 from slidemage.plugin_api import ReferenceCheckUnavailable
@@ -39,7 +41,7 @@ def test_a_missing_bank_folder_or_unreadable_question_stops_the_check(setup):
         slide_references(host, frozenset({"abc"}))
     (folder / "q1.json").unlink()
     folder.rename(folder.with_name("moved"))
-    with pytest.raises(ReferenceCheckUnavailable, match=str(folder)):
+    with pytest.raises(ReferenceCheckUnavailable, match=re.escape(str(folder))):
         slide_references(host, frozenset({"abc"}))
 
 
