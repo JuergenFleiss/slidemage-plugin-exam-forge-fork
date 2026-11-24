@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 
 def activate(host: Host) -> None:
+    from .references import slide_references
     from .ui.controller import SIDEBAR_KEY, Controller
     from .ui.settings import build_settings
 
@@ -18,3 +19,4 @@ def activate(host: Host) -> None:
     host.add_menu_entry("deck", "exam-forge.open")
     host.add_sidebar_box(SIDEBAR_KEY, "Exam Forge", controller.sidebar, size="compact")
     host.add_settings_tab("Exam Forge", lambda: build_settings(host, controller))
+    host.add_slide_reference_check(lambda ids: slide_references(host, ids))

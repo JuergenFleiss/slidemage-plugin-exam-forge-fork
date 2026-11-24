@@ -171,3 +171,9 @@ NEW: Requires SlideMage 0.14.36 or newer.
 - Colours, type, spacing, icons and corners come from the host theme; fields, captions and selected rows use the standard kit treatments.
 - Correct answers use the theme's green background and border. Revision chips use the host's monospace option, and topic pencils use its faint state.
 - New topics choose blue, green, teal, pink or slate. Existing red topics keep their saved colour name and display pink, reserving red for errors.
+
+v0.14.0 (2026-11-24, slide references): Exam Forge tells SlideMage when a question still uses a slide.
+
+NEW: Requires SlideMage 0.17.44 or newer.
+- Replacing a duplicate slide by its original is refused while a question in a bank of this project links to it. The message names the bank and the question.
+- If a remembered bank folder is missing or a question file is unreadable, SlideMage refuses too and names the folder.

@@ -14,7 +14,7 @@ import exam_forge
 def host():
     fake = FakeHost()
     api_host = create_autospec(Host, instance=True, spec_set=True)
-    for method in ("add_command", "add_menu_entry", "add_sidebar_box", "show_message"):
+    for method in ("add_command", "add_menu_entry", "add_sidebar_box", "add_slide_reference_check", "show_message"):
         getattr(api_host, method).side_effect = getattr(fake, method)
     exam_forge.activate(api_host)
     fake.finish_activation()
@@ -26,6 +26,7 @@ def test_registers_command_deck_menu_and_compact_sidebar(host):
     assert host.menus == {"deck": ["exam-forge.open"]}
     assert host.boxes["bank"][0] == "Exam Forge"
     assert host.boxes["bank"][2] == "compact"
+    assert len(host.reference_checks) == 1
     assert host.messages == []
 
 

@@ -2,7 +2,7 @@
 
 A [SlideMage](https://slidemage.org) plugin for writing exam questions for a deck and assembling exams.
 
-**Open:** Deck menu → **Exam Forge…** · **Requires:** SlideMage 0.13.18 or later
+**Open:** Deck menu → **Exam Forge…** · **Requires:** SlideMage 0.17.44 or later
 
 ## Questions
 

@@ -66,7 +66,7 @@ class FakeHost:
         self.slides: dict[tuple[Path, str, str], list[SlideRef]] = {}
         self.sources: dict[SlideRef, SlideSource] = {}
         self.opened_slides: list[SlideRef] = []
-        self.settings_tabs, self.boxes = {}, {}
+        self.settings_tabs, self.boxes, self.reference_checks = {}, {}, []
         self.current_focus = Focus(None, None, "slide")
         self._settings = FakeSettings()
         self.dark, self.theme_listeners = False, []
@@ -97,6 +97,10 @@ class FakeHost:
     def add_sidebar_box(self, key, title, build, size="compact", when=lambda deck: True):
         self._registering()
         self.boxes[key] = (title, build, size, when)
+
+    def add_slide_reference_check(self, check):
+        self._registering()
+        self.reference_checks.append(check)
 
     def refresh_sidebar_box(self, key):
         pass
